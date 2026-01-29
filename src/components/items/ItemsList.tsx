@@ -563,9 +563,7 @@ const ItemsList: React.FC = () => {
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
-              {catalogTab !== 'pending_qc' && (
-                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ACTIVE</th>
-              )}
+<td colSpan={catalogTab === 'pending_qc' ? 5 : 6} className="px-4 py-8 text-center text-xs text-gray-500">No products found.</td>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">EDIT ITEM</th>
             </tr>
           </thead>
