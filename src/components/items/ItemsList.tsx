@@ -563,7 +563,9 @@ const ItemsList: React.FC = () => {
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ACTIVE</th>
+              {catalogTab !== 'pending_qc' && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ACTIVE</th>
+              )}
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">EDIT ITEM</th>
             </tr>
           </thead>
@@ -619,22 +621,24 @@ const ItemsList: React.FC = () => {
                   {/* Stock */}
                   <td className="px-4 py-3 text-gray-700">{item.inStock}</td>
                   {/* Active Toggle */}
-                  <td className="px-4 py-3">
-                    <label className={`inline-flex items-center select-none ${isDeleted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                      <input
-                        type="checkbox"
-                        className="sr-only peer"
-                        checked={isActive}
-                        onChange={(e) => !isDeleted && handleToggleActive(item.id, e.target.checked)}
-                        disabled={isDeleted}
-                      />
-                      <div
-                        className={`relative w-11 h-6 rounded-full ${isDeleted ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted ? 'peer-checked:bg-teal-600' : ''}
-                                     after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow
-                                     after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted ? 'peer-checked:after:translate-x-5' : ''}`}
-                      />
-                    </label>
-                  </td>
+                  {catalogTab !== 'pending_qc' && (
+                    <td className="px-4 py-3">
+                      <label className={`inline-flex items-center select-none ${isDeleted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={isActive}
+                          onChange={(e) => !isDeleted && handleToggleActive(item.id, e.target.checked)}
+                          disabled={isDeleted}
+                        />
+                        <div
+                          className={`relative w-11 h-6 rounded-full ${isDeleted ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted ? 'peer-checked:bg-teal-600' : ''}
+                                       after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow
+                                       after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted ? 'peer-checked:after:translate-x-5' : ''}`}
+                        />
+                      </label>
+                    </td>
+                  )}
                   {/* Edit Item Button */}
                   <td className="px-4 py-3" onClick={e => { e.stopPropagation(); handleEditItem(item); }}>
                     <button
