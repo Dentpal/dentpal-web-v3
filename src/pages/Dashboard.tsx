@@ -1,27 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getDoc, doc } from 'firebase/firestore';
 
-// Direct per-row fetch for employee name in Receipt Transactions table
-const EmployeeName = ({ handledBy }: { handledBy: string }) => {
-  const [name, setName] = useState<string>('Loading...');
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchName() {
-      try {
-        const docSnap = await getDoc(doc(db, 'Seller', handledBy));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (isMounted) setName(data.name || data.shopName || data.storeName || handledBy);
-        } else {
-          if (isMounted) setName(handledBy);
-        }
-      } catch {
-        if (isMounted) setName(handledBy);
-      }
-    }
-    fetchName();
-    return () => { isMounted = false; };
-  }, [handledBy]);
+// EmployeeName now uses a provided sellerUidToName map for lookup, no per-row Firestore fetch
+interface EmployeeNameProps {
+  handledBy: string;
+  sellerUidToName: Record<string, string>;
+}
+const EmployeeName = ({ handledBy, sellerUidToName }: EmployeeNameProps) => {
+  // Synchronous lookup from map, fallback to handledBy
+  const name = sellerUidToName[handledBy] || handledBy;
   return <span>{name}</span>;
 };
 import Sidebar from "@/components/dashboard/Sidebar";
@@ -130,8 +117,9 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [phCities, setPhCities] = useState<Array<{ code: string; name: string; provinceCode: string }>>([]);
   // Admin sellers list for filtering & export table
   const [adminSellers, setAdminSellers] = useState<Array<{ uid: string; name?: string; shopName?: string; storeName?: string; province?: string; city?: string; zipCode?: string; address?: any }>>([]);
-    // Fetch all Seller documents for Employee name mapping
+    // Admin-only: Fetch all Seller documents for Employee name mapping
     useEffect(() => {
+      if (!isAdmin) return;
       async function fetchSellers() {
         try {
           const snapshot = await getDocs(collection(db, 'Seller'));
@@ -142,15 +130,26 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         }
       }
       fetchSellers();
-    }, []);
-  // Map of Seller UID to name for quick lookup (for employee display)
-  const sellerUidToName = useMemo(() => {
-    const map: Record<string, string> = {};
-    adminSellers.forEach(s => {
-      map[s.uid] = s.name || s.shopName || s.storeName || s.uid;
-    });
-    return map;
-  }, [adminSellers]);
+    }, [isAdmin]);
+
+    // Dedicated sellerNameMap state for employee name lookup (for all roles)
+    const [sellerNameMap, setSellerNameMap] = useState<Record<string, string>>({});
+    useEffect(() => {
+      if (isAdmin) {
+        // Build from adminSellers
+        const map: Record<string, string> = {};
+        adminSellers.forEach(s => {
+          map[s.uid] = s.name || s.shopName || s.storeName || s.uid;
+        });
+        setSellerNameMap(map);
+      } else {
+        // For non-admins, optionally fetch or set as needed (could be left empty if not needed)
+        setSellerNameMap({});
+      }
+    }, [isAdmin, adminSellers]);
+
+    // Use sellerNameMap for all lookups
+    const sellerUidToName = sellerNameMap;
   // Admin metrics from Firebase (orders)
   const [adminMetrics, setAdminMetrics] = useState<{ totalOrders: number; deliveredOrders: number; shippedOrders: number }>({ totalOrders: 0, deliveredOrders: 0, shippedOrders: 0 });
   // Admin city selection: allow multi-select via checkboxes when a province is chosen
@@ -2617,7 +2616,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                     handledById = handledBy.id;
                                   }
                                   if (handledById) {
-                                    employeeCell = <EmployeeName handledBy={handledById} />;
+                                    employeeCell = <EmployeeName handledBy={handledById} sellerUidToName={sellerUidToName} />;
                                   }
                                 }
                               }
@@ -2916,7 +2915,10 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               <div className="flex items-center justify-between">
                                 <span className="text-base font-bold text-gray-900">Total</span>
                                 <span className="text-xl font-bold text-teal-600">
-                                  {currency.format(Number(selectedReceipt.summary?.subtotal) || 0)}
+                                  {currency.format(
+                                    (Number(selectedReceipt.summary?.subtotal) || 0) +
+                                    (Number(selectedReceipt.sellerFeeBreakdowns?.buyerShippingCharge) || 0)
+                                  )}
                                 </span>
                               </div>
                             </div>
