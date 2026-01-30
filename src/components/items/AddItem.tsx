@@ -248,8 +248,8 @@ const AddItem: React.FC = () => {
             return {
               name: variation.name,
               sku: variation.SKU,
-              price: variation.price,
-              stock: variation.stock,
+              price: variation.price !== undefined ? Number(parseFloat(variation.price)) : 0,
+              stock: variation.stock !== undefined ? Number(parseInt(variation.stock, 10)) : 0,
               imageURL: varImageURL,
               weight: weightInGrams,
               weightUnit: 'g',
