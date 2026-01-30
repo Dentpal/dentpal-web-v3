@@ -249,7 +249,9 @@ const AddItem: React.FC = () => {
               name: variation.name,
               sku: variation.SKU,
               price: variation.price !== undefined ? Number(parseFloat(variation.price)) : 0,
-              stock: variation.stock !== undefined ? Number(parseInt(variation.stock, 10)) : 0,
+              stock: variation.stock !== undefined
+                ? Number.parseFloat(String(variation.stock)) || 0
+                : 0,
               imageURL: varImageURL,
               weight: weightInGrams,
               weightUnit: 'g',
