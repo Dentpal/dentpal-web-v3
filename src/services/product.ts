@@ -21,6 +21,7 @@ export type CreateProductInput = {
   dangerousGoods?: 'none' | 'dangerous';
   warrantyType?: string | null;
   warrantyDuration?: string | null;
+  warrantyPolicy?: string;
   // New: inquiry flag
   allowInquiry?: boolean;
 };
@@ -155,6 +156,7 @@ export const ProductService = {
       dangerousGoods: input.dangerousGoods ?? 'none',
       warrantyType: input.warrantyType ?? null,
       warrantyDuration: input.warrantyDuration ?? null,
+      warrantyPolicy: input.warrantyPolicy ?? '',
       // Persist inquiry flag
       allowInquiry: input.allowInquiry ?? false,
       createdAt: serverTimestamp(),

@@ -102,10 +102,11 @@ function normalizeTimestamp(value: any): number | null {
       'access': 'Access',
       'images': 'Images',
       'users': 'Users',
-      'inventory': 'Inventory Control',
+      'inventory': 'Inventory',
       'seller-orders': 'Orders',
       'add-product': 'Items',
-      'policies': 'Policies'
+      'policies': 'Policies',
+      'chat': 'Chat'
     };
     return labelMap[key] || key.replace('-', ' ');
   };
@@ -1429,9 +1430,11 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
               {/* Permissions grid (for custom tweak) */}
               <div className="grid grid-cols-2 gap-2">
-                {Object.keys(subPerms).filter(k => {
-                  // Filter out bookings and notifications from display
-                  if (k === 'bookings' || k === 'notifications') return false;
+                {Object.keys({ ...subPerms, chat: (subPerms as any).chat ?? false }).filter(k => {
+                  // Hide bookings, notifications, confirmation, access, users, images, profile
+                  if ([
+                    'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile'
+                  ].includes(k)) return false;
                   return true;
                 }).map((k) => (
                   <label key={k} className="flex items-center gap-2 text-xs">

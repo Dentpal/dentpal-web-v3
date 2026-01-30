@@ -37,7 +37,6 @@ const AddItem: React.FC = () => {
     price: 0,
     specialPrice: '' as number | '',
     inStock: 0,
-    suggestedThreshold: 5,
     lowestPrice: '' as number | '',
     imageURL: '',
     imageFile: null as File | null,
@@ -45,6 +44,7 @@ const AddItem: React.FC = () => {
     dangerousGoods: 'none' as 'none' | 'battery' | 'flammable' | 'liquid',
     warrantyType: '',
     warrantyDuration: '',
+    warrantyPolicy: '',
     variations: [] as Array<{
       name: string;
       SKU: string;
@@ -82,6 +82,59 @@ const AddItem: React.FC = () => {
   }, [form.categoryID]);
 
   const handleSave = async () => {
+                    // Require warranty duration and policy if dangerous goods is not 'none'
+                    if (form.dangerousGoods !== 'none') {
+                      if (!form.warrantyDuration || isNaN(Number(form.warrantyDuration.split(' ')[0])) || Number(form.warrantyDuration.split(' ')[0]) <= 0) {
+                        toast({ title: 'Error', description: 'Warranty duration is required for dangerous goods', variant: 'destructive' });
+                        return;
+                      }
+                      if (!form.warrantyPolicy || !form.warrantyPolicy.trim()) {
+                        toast({ title: 'Error', description: 'Warranty policy is required for dangerous goods', variant: 'destructive' });
+                        return;
+                      }
+                    }
+                // Require variation image if variations exist
+                if (form.variations.length > 0) {
+                  for (let i = 0; i < form.variations.length; i++) {
+                    const variation = form.variations[i];
+                    if (!variation.imageFile && !variation.imageURL) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} image is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.price || isNaN(Number(variation.price)) || Number(variation.price) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} price is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.stock || isNaN(Number(variation.stock)) || Number(variation.stock) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} stock is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.weight || isNaN(Number(variation.weight)) || Number(variation.weight) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} weight is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.dimensions.length || isNaN(Number(variation.dimensions.length)) || Number(variation.dimensions.length) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} length is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.dimensions.width || isNaN(Number(variation.dimensions.width)) || Number(variation.dimensions.width) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} width is required`, variant: 'destructive' });
+                      return;
+                    }
+                    if (!variation.dimensions.height || isNaN(Number(variation.dimensions.height)) || Number(variation.dimensions.height) <= 0) {
+                      toast({ title: 'Error', description: `Variation ${i + 1} height is required`, variant: 'destructive' });
+                      return;
+                    }
+                  }
+                }
+            if (!form.inStock || isNaN(Number(form.inStock)) || Number(form.inStock) <= 0) {
+              toast({ title: 'Error', description: 'Stock is required', variant: 'destructive' });
+              return;
+            }
+        if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) {
+          toast({ title: 'Error', description: 'Price is required', variant: 'destructive' });
+          return;
+        }
     if (!effectiveSellerId) {
       toast({ title: 'Error', description: 'No seller ID found', variant: 'destructive' });
       return;
@@ -92,12 +145,54 @@ const AddItem: React.FC = () => {
       return;
     }
 
+
+    if (!form.description.trim()) {
+      toast({ title: 'Error', description: 'Description is required', variant: 'destructive' });
+      return;
+    }
+
+    if (!form.imageFile && !form.imageURL) {
+      toast({ title: 'Error', description: 'Product image is required', variant: 'destructive' });
+      return;
+    }
+
+
     if (!form.categoryID) {
       toast({ title: 'Error', description: 'Category is required', variant: 'destructive' });
       return;
     }
 
+    if (!form.subCategoryID) {
+      toast({ title: 'Error', description: 'Subcategory is required', variant: 'destructive' });
+      return;
+    }
+
     setSubmitting(true);
+
+    // Helper: convert weight to grams
+    const toGrams = (weight: any, unit: string) => {
+      let num = parseFloat(weight);
+      if (isNaN(num)) return null;
+      switch (unit) {
+        case 'kg': return num * 1000;
+        case 'g': return num;
+        case 'lb': return num * 453.59237;
+        case 'oz': return num * 28.3495231;
+        default: return num;
+      }
+    };
+    // Helper: convert dimension to cm
+    const toCm = (val: any, unit: string) => {
+      let num = parseFloat(val);
+      if (isNaN(num)) return null;
+      switch (unit) {
+        case 'cm': return num;
+        case 'm': return num * 100;
+        case 'in': return num * 2.54;
+        case 'ft': return num * 30.48;
+        default: return num;
+      }
+    };
 
     try {
       // Upload main product image if exists
@@ -117,15 +212,15 @@ const AddItem: React.FC = () => {
         subCategoryID: form.subCategoryID || '',
         imageURL: imageURL,
         status: 'pending_qc' as const, // Always pending QC first
-        suggestedThreshold: form.suggestedThreshold,
         price: form.price || 0,
         specialPrice: form.specialPrice || null,
         inStock: form.inStock || 0,
         lowestPrice: form.lowestPrice || form.price || null,
-        // Map specific dangerous goods types to 'dangerous' for Firebase
-        dangerousGoods: (form.dangerousGoods === 'none' ? 'none' : 'dangerous') as 'none' | 'dangerous',
+        // Save dangerousGoods as string
+        dangerousGoods: form.dangerousGoods || 'none',
         warrantyType: form.warrantyType || null,
-        warrantyDuration: form.warrantyDuration || null,
+        // Save warrantyDuration as number only
+        warrantyDuration: form.warrantyDuration ? Number(form.warrantyDuration.split(' ')[0]) : null,
       };
 
       const result = await ProductService.createProduct(productData);
@@ -144,20 +239,26 @@ const AddItem: React.FC = () => {
               varImageURL = await getDownloadURL(varImgRef);
             }
 
+            // Convert weight and dimensions to base units
+            const weightInGrams = toGrams(variation.weight, variation.weightUnit);
+            const lengthInCm = toCm(variation.dimensions.length, variation.dimensionsUnit);
+            const widthInCm = toCm(variation.dimensions.width, variation.dimensionsUnit);
+            const heightInCm = toCm(variation.dimensions.height, variation.dimensionsUnit);
+
             return {
               name: variation.name,
               sku: variation.SKU,
               price: variation.price,
               stock: variation.stock,
               imageURL: varImageURL,
-              weight: variation.weight || null,
-              weightUnit: variation.weightUnit,
+              weight: weightInGrams,
+              weightUnit: 'g',
               dimensions: {
-                length: variation.dimensions.length || null,
-                width: variation.dimensions.width || null,
-                height: variation.dimensions.height || null,
+                length: lengthInCm,
+                width: widthInCm,
+                height: heightInCm,
               },
-              dimensionsUnit: variation.dimensionsUnit,
+              dimensionsUnit: 'cm',
               isFragile: variation.isFragile || false,
             };
           })
@@ -183,7 +284,7 @@ const AddItem: React.FC = () => {
         price: 0,
         specialPrice: '',
         inStock: 0,
-        suggestedThreshold: 5,
+        // suggestedThreshold removed
         lowestPrice: '',
         imageURL: '',
         imageFile: null,
@@ -203,10 +304,6 @@ const AddItem: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4 rounded-xl">
-        <h2 className="text-2xl font-bold text-white">Add New Product</h2>
-      </div>
 
         <input
           ref={productImageInputRef}
@@ -236,7 +333,7 @@ const AddItem: React.FC = () => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={form.name}
@@ -246,17 +343,18 @@ const AddItem: React.FC = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description <span className="text-red-500">*</span></label>
                 <textarea
                   value={form.description}
                   onChange={(e) => setForm({...form, description: e.target.value})}
                   rows={3}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   placeholder="Enter product description"
+                  required
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Image</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Image <span className="text-red-500">*</span></label>
                 <div className="flex items-center gap-4">
                   {(form.imagePreview || form.imageURL) && (
                     <img
@@ -285,7 +383,7 @@ const AddItem: React.FC = () => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category <span className="text-red-500">*</span></label>
                 <select
                   value={form.categoryID}
                   onChange={(e) => {
@@ -300,7 +398,7 @@ const AddItem: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Subcategory</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Subcategory <span className="text-red-500">*</span></label>
                 <select
                   value={form.subCategoryID}
                   onChange={(e) => setForm({...form, subCategoryID: e.target.value})}
@@ -321,47 +419,59 @@ const AddItem: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={form.price}
-                  onChange={(e) => setForm({...form, price: parseFloat(e.target.value) || 0})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                  placeholder="0.00"
-                />
+                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Price (₱) <span className="text-red-500">*</span>
+                          <span className="ml-2 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold align-middle">include VAT</span>
+                        </label>                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9.]*"
+                    value={form.price}
+                    onChange={(e) => {
+                      let val = e.target.value.replace(/[^0-9.]/g, '');
+                      // Only allow one decimal point
+                      const parts = val.split('.');
+                      if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+                      setForm({...form, price: val});
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="0.00"
+                  />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Special Price (₱)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={form.specialPrice}
-                  onChange={(e) => setForm({...form, specialPrice: e.target.value === '' ? '' : parseFloat(e.target.value)})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                  placeholder="0.00"
-                />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9.]*"
+                    value={form.specialPrice}
+                    onChange={(e) => {
+                      let val = e.target.value.replace(/[^0-9.]/g, '');
+                      // Only allow one decimal point
+                      const parts = val.split('.');
+                      if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+                      setForm({...form, specialPrice: val});
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="0.00"
+                  />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Stock</label>
-                <input
-                  type="number"
-                  value={form.inStock}
-                  onChange={(e) => setForm({...form, inStock: parseInt(e.target.value) || 0})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                  placeholder="0"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">Stock <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={form.inStock}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setForm({...form, inStock: val === '' ? 0 : parseInt(val)});
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="0"
+                  />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Threshold</label>
-                <input
-                  type="number"
-                  value={form.suggestedThreshold}
-                  onChange={(e) => setForm({...form, suggestedThreshold: parseInt(e.target.value) || 5})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                  placeholder="5"
-                />
-              </div>
+              {/* Threshold field removed from UI */}
             </div>
           </div>
 
@@ -391,7 +501,7 @@ const AddItem: React.FC = () => {
                         imageFile: null,
                         imagePreview: null,
                         weight: '',
-                        weightUnit: 'kg',
+                        weightUnit: 'g',
                         dimensions: { length: '', width: '', height: '' },
                         dimensionsUnit: 'cm',
                         isFragile: false,
@@ -439,7 +549,7 @@ const AddItem: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Variation Image */}
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Variation Image</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Variation Image <span className="text-red-500">*</span></label>
                         <div className="flex items-center gap-4">
                           {(variation.imagePreview || variation.imageURL) && (
                             <div className="relative group">
@@ -484,7 +594,7 @@ const AddItem: React.FC = () => {
 
                       {/* Variation Name */}
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Variation Name *</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Variation Name <span className="text-red-500">*</span></label>
                         <input
                           type="text"
                           value={variation.name}
@@ -500,7 +610,7 @@ const AddItem: React.FC = () => {
 
                       {/* SKU */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">SKU *</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">SKU <span className="text-red-500">*</span></label>
                         <input
                           type="text"
                           value={variation.SKU}
@@ -516,14 +626,21 @@ const AddItem: React.FC = () => {
 
                       {/* Price */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Price (₱) <span className="text-red-500">*</span>
+                          <span className="ml-2 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold align-middle">include VAT</span>
+                        </label>
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
+                          pattern="[0-9.]*"
                           value={variation.price}
                           onChange={(e) => {
+                            let val = e.target.value.replace(/[^0-9.]/g, '');
+                            const parts = val.split('.');
+                            if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                             const updatedVariations = [...form.variations];
-                            updatedVariations[index] = { ...variation, price: parseFloat(e.target.value) || 0 };
+                            updatedVariations[index] = { ...variation, price: val };
                             setForm({ ...form, variations: updatedVariations });
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -533,13 +650,18 @@ const AddItem: React.FC = () => {
 
                       {/* Stock */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stock Quantity *</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Stock <span className="text-red-500">*</span></label>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
+                          pattern="[0-9.]*"
                           value={variation.stock}
                           onChange={(e) => {
+                            let val = e.target.value.replace(/[^0-9.]/g, '');
+                            const parts = val.split('.');
+                            if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                             const updatedVariations = [...form.variations];
-                            updatedVariations[index] = { ...variation, stock: parseInt(e.target.value) || 0 };
+                            updatedVariations[index] = { ...variation, stock: val };
                             setForm({ ...form, variations: updatedVariations });
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -549,15 +671,19 @@ const AddItem: React.FC = () => {
 
                       {/* Weight */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Weight</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Weight <span className="text-red-500">*</span></label>
                         <div className="flex gap-2">
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9.]*"
                             value={variation.weight}
                             onChange={(e) => {
+                              let val = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = val.split('.');
+                              if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, weight: e.target.value === '' ? '' : parseFloat(e.target.value) };
+                              updatedVariations[index] = { ...variation, weight: val };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -566,8 +692,32 @@ const AddItem: React.FC = () => {
                           <select
                             value={variation.weightUnit}
                             onChange={(e) => {
+                              const prevUnit = variation.weightUnit;
+                              const newUnit = e.target.value;
+                              let weight = parseFloat(variation.weight as any);
+                              if (!isNaN(weight)) {
+                                // Convert current value to grams first
+                                let weightInGrams = weight;
+                                switch (prevUnit) {
+                                  case 'kg': weightInGrams = weight * 1000; break;
+                                  case 'g': weightInGrams = weight; break;
+                                  case 'lb': weightInGrams = weight * 453.59237; break;
+                                  case 'oz': weightInGrams = weight * 28.3495231; break;
+                                }
+                                // Convert grams to new unit
+                                switch (newUnit) {
+                                  case 'kg': weight = (weightInGrams / 1000); break;
+                                  case 'g': weight = weightInGrams; break;
+                                  case 'lb': weight = (weightInGrams / 453.59237); break;
+                                  case 'oz': weight = (weightInGrams / 28.3495231); break;
+                                }
+                                // Round to 3 decimals for display
+                                weight = Math.round(weight * 1000) / 1000;
+                              } else {
+                                weight = '';
+                              }
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, weightUnit: e.target.value };
+                              updatedVariations[index] = { ...variation, weight: weight, weightUnit: newUnit };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -582,17 +732,21 @@ const AddItem: React.FC = () => {
 
                       {/* Dimensions */}
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Dimensions (L × W × H)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Dimensions (L × W × H) <span className="text-red-500">*</span></label>
                         <div className="flex gap-2">
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9.]*"
                             value={variation.dimensions.length}
                             onChange={(e) => {
+                              let val = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = val.split('.');
+                              if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, length: e.target.value === '' ? '' : parseFloat(e.target.value) }
+                                dimensions: { ...variation.dimensions, length: val }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -601,14 +755,18 @@ const AddItem: React.FC = () => {
                           />
                           <span className="text-gray-400 flex items-center">×</span>
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9.]*"
                             value={variation.dimensions.width}
                             onChange={(e) => {
+                              let val = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = val.split('.');
+                              if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, width: e.target.value === '' ? '' : parseFloat(e.target.value) }
+                                dimensions: { ...variation.dimensions, width: val }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -617,14 +775,18 @@ const AddItem: React.FC = () => {
                           />
                           <span className="text-gray-400 flex items-center">×</span>
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9.]*"
                             value={variation.dimensions.height}
                             onChange={(e) => {
+                              let val = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = val.split('.');
+                              if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, height: e.target.value === '' ? '' : parseFloat(e.target.value) }
+                                dimensions: { ...variation.dimensions, height: val }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -634,8 +796,38 @@ const AddItem: React.FC = () => {
                           <select
                             value={variation.dimensionsUnit}
                             onChange={(e) => {
+                              const prevUnit = variation.dimensionsUnit;
+                              const newUnit = e.target.value;
+                              const convert = (val: any) => {
+                                let num = parseFloat(val);
+                                if (isNaN(num)) return '';
+                                // Convert to cm first
+                                let cm = num;
+                                switch (prevUnit) {
+                                  case 'cm': cm = num; break;
+                                  case 'm': cm = num * 100; break;
+                                  case 'in': cm = num * 2.54; break;
+                                  case 'ft': cm = num * 30.48; break;
+                                }
+                                // Convert cm to new unit
+                                switch (newUnit) {
+                                  case 'cm': return Math.round(cm * 1000) / 1000;
+                                  case 'm': return Math.round((cm / 100) * 1000) / 1000;
+                                  case 'in': return Math.round((cm / 2.54) * 1000) / 1000;
+                                  case 'ft': return Math.round((cm / 30.48) * 1000) / 1000;
+                                }
+                                return '';
+                              };
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, dimensionsUnit: e.target.value };
+                              updatedVariations[index] = {
+                                ...variation,
+                                dimensionsUnit: newUnit,
+                                dimensions: {
+                                  length: convert(variation.dimensions.length),
+                                  width: convert(variation.dimensions.width),
+                                  height: convert(variation.dimensions.height),
+                                }
+                              };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -715,35 +907,67 @@ const AddItem: React.FC = () => {
               </div>
 
               {/* Warranty Duration */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Duration</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.warrantyDuration.split(' ')[0] || ''}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      const unit = form.warrantyDuration.split(' ')[1] || 'month';
-                      setForm({...form, warrantyDuration: value ? `${value} ${unit}` : ''});
-                    }}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    placeholder="Enter duration"
-                  />
-                  <select
-                    value={form.warrantyDuration.split(' ')[1] || 'month'}
-                    onChange={(e) => {
-                      const value = form.warrantyDuration.split(' ')[0] || '';
-                      setForm({...form, warrantyDuration: value ? `${value} ${e.target.value}` : ''});
-                    }}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                  >
-                    <option value="week">Week(s)</option>
-                    <option value="month">Month(s)</option>
-                    <option value="year">Year(s)</option>
-                  </select>
-                </div>
-              </div>
+                 <div className="md:col-span-2">
+                   <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Duration <span className="text-red-500">*</span></label>
+                   <div className="flex gap-2">
+                     <input
+                       type="text"
+                       inputMode="decimal"
+                       pattern="[0-9.]*"
+                       value={form.warrantyDuration.split(' ')[0] || ''}
+                       onChange={(e) => {
+                         let value = e.target.value.replace(/[^0-9.]/g, '');
+                         const parts = value.split('.');
+                         if (parts.length > 2) value = parts[0] + '.' + parts.slice(1).join('');
+                         const unit = form.warrantyDuration.split(' ')[1] || 'month';
+                         setForm({...form, warrantyDuration: value ? `${value} ${unit}` : ''});
+                       }}
+                       className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                       placeholder="Enter duration"
+                     />
+                     <select
+                       value={form.warrantyDuration.split(' ')[1] || 'month'}
+                       onChange={(e) => {
+                         let value = form.warrantyDuration.split(' ')[0] || '';
+                         const prevUnit = form.warrantyDuration.split(' ')[1] || 'month';
+                         const newUnit = e.target.value;
+                         let num = parseFloat(value);
+                         if (!isNaN(num) && value !== '') {
+                           // Convert previous value to months first
+                           let months = num;
+                           switch (prevUnit) {
+                             case 'week': months = num / 4.34524; break;
+                             case 'month': months = num; break;
+                             case 'year': months = num * 12; break;
+                           }
+                           // Convert months to new unit
+                           switch (newUnit) {
+                             case 'week': num = Math.round(months * 4.34524 * 100) / 100; break;
+                             case 'month': num = Math.round(months * 100) / 100; break;
+                             case 'year': num = Math.round((months / 12) * 100) / 100; break;
+                           }
+                           value = num.toString();
+                         }
+                         setForm({...form, warrantyDuration: value ? `${value} ${newUnit}` : ''});
+                       }}
+                       className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                     >
+                       <option value="week">Week(s)</option>
+                       <option value="month">Month(s)</option>
+                       <option value="year">Year(s)</option>
+                     </select>
+                   </div>
+
+                   {/* Warranty Policy Field */}
+                   <label className="block text-sm font-medium text-gray-700 mb-2 mt-4">Warranty Policy <span className="text-red-500">*</span></label>
+                   <textarea
+                     value={form.warrantyPolicy}
+                     onChange={(e) => setForm({...form, warrantyPolicy: e.target.value})}
+                     rows={3}
+                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                     placeholder="Enter warranty policy details"
+                   />
+                 </div>
             </div>
           </div>
         </div>
@@ -759,7 +983,7 @@ const AddItem: React.FC = () => {
               price: 0,
               specialPrice: '',
               inStock: 0,
-              suggestedThreshold: 5,
+              // suggestedThreshold removed
               lowestPrice: '',
               imageURL: '',
               imageFile: null,
@@ -780,15 +1004,9 @@ const AddItem: React.FC = () => {
             className="px-5 py-2.5 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {submitting ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Saving...
-              </>
+              <span>Saving...</span>
             ) : (
-              <>
-                <Save className="w-4 h-4" />
-                Add Product
-              </>
+              'Save Item'
             )}
           </button>
         </div>

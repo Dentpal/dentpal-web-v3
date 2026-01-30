@@ -1,8 +1,31 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { getDoc, doc } from 'firebase/firestore';
+
+// Direct per-row fetch for employee name in Receipt Transactions table
+const EmployeeName = ({ handledBy }: { handledBy: string }) => {
+  const [name, setName] = useState<string>('Loading...');
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchName() {
+      try {
+        const docSnap = await getDoc(doc(db, 'Seller', handledBy));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (isMounted) setName(data.name || data.shopName || data.storeName || handledBy);
+        } else {
+          if (isMounted) setName(handledBy);
+        }
+      } catch {
+        if (isMounted) setName(handledBy);
+      }
+    }
+    fetchName();
+    return () => { isMounted = false; };
+  }, [handledBy]);
+  return <span>{name}</span>;
+};
 import Sidebar from "@/components/dashboard/Sidebar";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
-// import StatsCard from "@/components/dashboard/StatsCard";
-// import RecentOrders from "@/components/dashboard/RecentOrders";
 import RevenueChart from "@/components/dashboard/RevenueChart";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import Booking from "@/pages/Booking";
@@ -107,6 +130,27 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [phCities, setPhCities] = useState<Array<{ code: string; name: string; provinceCode: string }>>([]);
   // Admin sellers list for filtering & export table
   const [adminSellers, setAdminSellers] = useState<Array<{ uid: string; name?: string; shopName?: string; storeName?: string; province?: string; city?: string; zipCode?: string; address?: any }>>([]);
+    // Fetch all Seller documents for Employee name mapping
+    useEffect(() => {
+      async function fetchSellers() {
+        try {
+          const snapshot = await getDocs(collection(db, 'Seller'));
+          const sellers = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+          setAdminSellers(sellers);
+        } catch (err) {
+          console.error('Failed to fetch sellers:', err);
+        }
+      }
+      fetchSellers();
+    }, []);
+  // Map of Seller UID to name for quick lookup (for employee display)
+  const sellerUidToName = useMemo(() => {
+    const map: Record<string, string> = {};
+    adminSellers.forEach(s => {
+      map[s.uid] = s.name || s.shopName || s.storeName || s.uid;
+    });
+    return map;
+  }, [adminSellers]);
   // Admin metrics from Firebase (orders)
   const [adminMetrics, setAdminMetrics] = useState<{ totalOrders: number; deliveredOrders: number; shippedOrders: number }>({ totalOrders: 0, deliveredOrders: 0, shippedOrders: 0 });
   // Admin city selection: allow multi-select via checkboxes when a province is chosen
@@ -2510,10 +2554,10 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                       <table className="w-full text-sm">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                           <tr className="text-left text-xs font-bold tracking-wider uppercase">
-                            <th className="px-6 py-4 text-gray-700">Receipt No.</th>
+                            <th className="px-6 py-4 text-gray-700">Receipt No</th>
                             <th className="px-6 py-4 text-gray-700">Date</th>
-                            <th className="px-6 py-4 text-gray-700">Customer</th>
-                            <th className="px-6 py-4 text-gray-700">Type</th>
+                            <th className="px-6 py-4 text-gray-700">Employee</th>
+                            <th className="px-6 py-4 text-gray-700">Receipt Type</th>
                             <th className="px-6 py-4 text-right text-gray-700">Amount</th>
                             <th className="px-6 py-4 text-center text-gray-700">Status</th>
                           </tr>
@@ -2552,12 +2596,38 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 hour: '2-digit',
                                 minute: '2-digit'
                               }) : 'N/A';
-                              
-                              const customerName = order.customer?.name || 'Unknown Customer';
-                              const paymentType = order.feesBreakdown?.paymentMethod || 'N/A';
+
+
+                              // Find the most recent handledBy in statusHistory (any status)
+                              let employeeCell: React.ReactNode = 'N/A';
+                              if (Array.isArray(order.statusHistory)) {
+                                const relevant = order.statusHistory
+                                  .filter(e => e.handledBy)
+                                  .sort((a, b) => {
+                                    const ta = new Date(a.timestamp as any).getTime();
+                                    const tb = new Date(b.timestamp as any).getTime();
+                                    return tb - ta;
+                                  });
+                                if (relevant.length > 0) {
+                                  const handledBy = relevant[0].handledBy;
+                                  let handledById = '';
+                                  if (typeof handledBy === 'string') {
+                                    handledById = handledBy;
+                                  } else if (handledBy && typeof handledBy === 'object' && handledBy.id) {
+                                    handledById = handledBy.id;
+                                  }
+                                  if (handledById) {
+                                    employeeCell = <EmployeeName handledBy={handledById} />;
+                                  }
+                                }
+                              }
+
+                              // Receipt type: 'Sales' for normal, 'Refund' for refunded/returned/return_refund
+                              const refundStatuses = ['refunded', 'returned', 'return_refund'];
+                              const receiptType = refundStatuses.includes(order.status) ? 'Refund' : 'Sales';
                               const amount = Number(order.summary?.subtotal) || 0;
                               const status = order.status || 'pending';
-                              
+
                               // Status styling
                               const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
                                 'completed': { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Completed' },
@@ -2570,9 +2640,9 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 'return_refund': { bg: 'bg-rose-100', text: 'text-rose-700', label: 'Return/Refund' },
                                 'cancelled': { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' }
                               };
-                              
+
                               const statusStyle = statusConfig[status] || statusConfig['pending'];
-                              
+
                               return (
                                 <tr 
                                   key={order.id || idx} 
@@ -2582,45 +2652,15 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                   }}
                                   className="hover:bg-gray-50 transition-colors cursor-pointer"
                                 >
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-sm">
-                                        <span className="text-white text-xs font-bold">#{idx + 1}</span>
-                                      </div>
-                                      <div>
-                                        <div className="font-semibold text-gray-900">{order.id}</div>
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-4">
-                                    <div className="text-gray-900 font-medium">{date}</div>
-                                  </td>
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-                                        {customerName.charAt(0).toUpperCase()}
-                                      </div>
-                                      <div>
-                                        <div className="font-medium text-gray-900">{customerName}</div>
-                                        <div className="text-xs text-gray-500">ID: {order.userId || 'N/A'}</div>
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-4">
-                                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg">
-                                      <CreditCard className="w-3.5 h-3.5 text-blue-600" />
-                                      <span className="text-xs font-semibold text-blue-700">{paymentType}</span>
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-4 text-right">
-                                    <div className="text-lg font-bold text-gray-900">{currency.format(amount)}</div>
-                                  </td>
-                                  <td className="px-6 py-4">
-                                    <div className="flex justify-center">
-                                      <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${statusStyle.bg} ${statusStyle.text} border border-current border-opacity-20`}>
-                                        {statusStyle.label}
-                                      </span>
-                                    </div>
+                                  <td className="px-6 py-4 font-semibold text-gray-900">{order.id}</td>
+                                  <td className="px-6 py-4 text-gray-900 font-medium">{date}</td>
+                                  <td className="px-6 py-4 font-medium text-gray-900">{employeeCell}</td>
+                                  <td className="px-6 py-4 text-blue-700 font-semibold">{receiptType}</td>
+                                  <td className="px-6 py-4 text-right text-gray-900 font-bold">{currency.format(amount)}</td>
+                                  <td className="px-6 py-4 text-center">
+                                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${statusStyle.bg} ${statusStyle.text} border border-current border-opacity-20`}>
+                                      {statusStyle.label}
+                                    </span>
                                   </td>
                                 </tr>
                               );
@@ -2844,6 +2884,15 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 <span className="text-gray-600">Shipping Fee</span>
                                 <span className="font-semibold text-gray-900">
                                   {currency.format(Number(selectedReceipt.summary.sellerShippingCharge))}
+                                </span>
+                              </div>
+                            )}
+                            {/* Shipping Fee Wired (from sellerFeeBreakdowns.buyerShippingCharge) */}
+                            {selectedReceipt.sellerFeeBreakdowns?.buyerShippingCharge && Number(selectedReceipt.sellerFeeBreakdowns.buyerShippingCharge) > 0 && (
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-600">Shipping Fee Wired</span>
+                                <span className="font-semibold text-gray-900">
+                                  {currency.format(Number(selectedReceipt.sellerFeeBreakdowns.buyerShippingCharge))}
                                 </span>
                               </div>
                             )}
@@ -4441,6 +4490,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     
     return sellers;
   }, [adminFilters.seller, adminFilters.dateFrom, adminFilters.dateTo, adminFilters.province, adminSelectedCityCodes, adminSellers, confirmationOrders, phCities, phProvinces]);
+
+  // END useMemo for adminSellersDisplayed
 
   return (
     <div className="min-h-screen bg-background flex">
