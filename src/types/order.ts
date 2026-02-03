@@ -65,6 +65,7 @@ export interface Order {
     status: string;
     note: string;
     timestamp: Timestamp | Date;
+    handledBy?: string; // Employee/seller UID who handled the status change
   }>;
   // Return request information
   returnRequestId?: string;

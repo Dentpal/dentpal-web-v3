@@ -29,7 +29,6 @@ import PoliciesTab from '@/components/policies/PoliciesTab';
 import ChatsTab from '@/components/chats/ChatsTab';
 import { ItemsTab, ItemsAll, ItemsList } from '@/components/items';
 import AddItem from '@/components/items/AddItem';
-import ItemsView from '@/components/items/ItemsView';
 import { Order } from "@/types/order";
 import { DollarSign, Users, ShoppingCart, TrendingUp, Filter, Download, ChevronDown, ChevronRight, ClipboardList, CreditCard } from "lucide-react";
 // Add permission-aware auth hook
@@ -118,8 +117,9 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [phCities, setPhCities] = useState<Array<{ code: string; name: string; provinceCode: string }>>([]);
   // Admin sellers list for filtering & export table
   const [adminSellers, setAdminSellers] = useState<Array<{ uid: string; name?: string; shopName?: string; storeName?: string; province?: string; city?: string; zipCode?: string; address?: any }>>([]);
-    // Fetch all Seller documents for Employee name mapping (for both admin and sellers)
+    // Admin-only: Fetch all Seller documents for Employee name mapping
     useEffect(() => {
+      if (!isAdmin) return;
       async function fetchSellers() {
         try {
           const snapshot = await getDocs(collection(db, 'Seller'));
@@ -130,18 +130,23 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         }
       }
       fetchSellers();
-    }, []);
+    }, [isAdmin]);
 
     // Dedicated sellerNameMap state for employee name lookup (for all roles)
     const [sellerNameMap, setSellerNameMap] = useState<Record<string, string>>({});
     useEffect(() => {
-      // Build name map from adminSellers for both admin and non-admin users
-      const map: Record<string, string> = {};
-      adminSellers.forEach(s => {
-        map[s.uid] = s.name || s.shopName || s.storeName || s.uid;
-      });
-      setSellerNameMap(map);
-    }, [adminSellers]);
+      if (isAdmin) {
+        // Build from adminSellers
+        const map: Record<string, string> = {};
+        adminSellers.forEach(s => {
+          map[s.uid] = s.name || s.shopName || s.storeName || s.uid;
+        });
+        setSellerNameMap(map);
+      } else {
+        // For non-admins, optionally fetch or set as needed (could be left empty if not needed)
+        setSellerNameMap({});
+      }
+    }, [isAdmin, adminSellers]);
 
     // Use sellerNameMap for all lookups
     const sellerUidToName = sellerNameMap;
@@ -2592,21 +2597,18 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               }) : 'N/A';
 
 
-                              // Find handledBy from statusHistory (any status with handledBy field)
+                              // Find the most recent handledBy in statusHistory (any status)
                               let employeeCell: React.ReactNode = 'N/A';
-                              
-                              if (Array.isArray(order.statusHistory) && order.statusHistory.length > 0) {
-                                // Find the most recent entry that has handledBy
-                                const entryWithHandledBy = order.statusHistory
-                                  .filter((e: any) => e.handledBy)
-                                  .sort((a: any, b: any) => {
+                              if (Array.isArray(order.statusHistory)) {
+                                const relevant = order.statusHistory
+                                  .filter(e => e.handledBy)
+                                  .sort((a, b) => {
                                     const ta = new Date(a.timestamp as any).getTime();
                                     const tb = new Date(b.timestamp as any).getTime();
-                                    return tb - ta; // Most recent first
-                                  })[0];
-                                
-                                if (entryWithHandledBy) {
-                                  const handledBy = (entryWithHandledBy as any).handledBy;
+                                    return tb - ta;
+                                  });
+                                if (relevant.length > 0) {
+                                  const handledBy = relevant[0].handledBy;
                                   let handledById = '';
                                   if (typeof handledBy === 'string') {
                                     handledById = handledBy;
@@ -2622,7 +2624,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               // Receipt type: 'Sales' for normal, 'Refund' for refunded/returned/return_refund
                               const refundStatuses = ['refunded', 'returned', 'return_refund'];
                               const receiptType = refundStatuses.includes(order.status) ? 'Refund' : 'Sales';
-                              const amount = Number(order.summary?.total) || 0;
+                              const amount = Number(order.summary?.subtotal) || 0;
                               const status = order.status || 'pending';
 
                               // Status styling
@@ -2631,18 +2633,11 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 'confirmed': { bg: 'bg-green-100', text: 'text-green-700', label: 'Confirmed' },
                                 'processing': { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Processing' },
                                 'to_ship': { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'To Ship' },
-                                'shipping': { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Shipping' },
-                                'shipped': { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Shipped' },
                                 'pending': { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Pending' },
                                 'refunded': { bg: 'bg-rose-100', text: 'text-rose-700', label: 'Refunded' },
                                 'returned': { bg: 'bg-rose-100', text: 'text-rose-700', label: 'Returned' },
                                 'return_refund': { bg: 'bg-rose-100', text: 'text-rose-700', label: 'Return/Refund' },
-                                'return_requested': { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Return Requested' },
-                                'return_approved': { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Return Approved' },
-                                'return_rejected': { bg: 'bg-red-100', text: 'text-red-700', label: 'Return Rejected' },
-                                'cancelled': { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' },
-                                'canceled': { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' },
-                                'failed-delivery': { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed Delivery' }
+                                'cancelled': { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' }
                               };
 
                               const statusStyle = statusConfig[status] || statusConfig['pending'];
@@ -2742,28 +2737,6 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
 
                           {/* Order Information */}
                           <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium text-gray-600">Employee</span>
-                              <span className="text-sm font-bold text-gray-900">
-                                {(() => {
-                                  if (Array.isArray(selectedReceipt.statusHistory) && selectedReceipt.statusHistory.length > 0) {
-                                    const entryWithHandledBy = selectedReceipt.statusHistory
-                                      .filter((e: any) => e.handledBy)
-                                      .sort((a: any, b: any) => {
-                                        const ta = new Date(a.timestamp as any).getTime();
-                                        const tb = new Date(b.timestamp as any).getTime();
-                                        return tb - ta;
-                                      })[0];
-                                    if (entryWithHandledBy) {
-                                      const handledBy = (entryWithHandledBy as any).handledBy;
-                                      const handledById = typeof handledBy === 'string' ? handledBy : handledBy?.id;
-                                      return sellerUidToName[handledById] || handledById || 'N/A';
-                                    }
-                                  }
-                                  return 'N/A';
-                                })()}
-                              </span>
-                            </div>
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-medium text-gray-600">Order ID</span>
                               <span className="text-sm font-bold text-gray-900">{selectedReceipt.id}</span>
@@ -2905,40 +2878,38 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 {currency.format(Number(selectedReceipt.summary?.subtotal) || 0)}
                               </span>
                             </div>
-                            {/* Shipping Fee from Order.summary.buyerShippingCharge */}
-                            {selectedReceipt.summary?.buyerShippingCharge && Number(selectedReceipt.summary.buyerShippingCharge) > 0 && (
+                            {selectedReceipt.summary?.sellerShippingCharge && Number(selectedReceipt.summary.sellerShippingCharge) > 0 && (
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-600">Shipping Fee</span>
                                 <span className="font-semibold text-gray-900">
-                                  {currency.format(Number(selectedReceipt.summary.buyerShippingCharge))}
+                                  {currency.format(Number(selectedReceipt.summary.sellerShippingCharge))}
                                 </span>
                               </div>
                             )}
-                            {/* Payment Fee from Order.feesBreakdown.paymentProcessingFee */}
+                            {/* Shipping Fee Wired (from sellerFeeBreakdowns.buyerShippingCharge) */}
+                            {selectedReceipt.sellerFeeBreakdowns?.buyerShippingCharge && Number(selectedReceipt.sellerFeeBreakdowns.buyerShippingCharge) > 0 && (
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-600">Shipping Fee Wired</span>
+                                <span className="font-semibold text-gray-900">
+                                  {currency.format(Number(selectedReceipt.sellerFeeBreakdowns.buyerShippingCharge))}
+                                </span>
+                              </div>
+                            )}
                             {selectedReceipt.feesBreakdown?.paymentProcessingFee && Number(selectedReceipt.feesBreakdown.paymentProcessingFee) > 0 && (
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-600">Payment Fee</span>
-                                <span className="font-semibold text-gray-900">
-                                  {currency.format(Number(selectedReceipt.feesBreakdown.paymentProcessingFee))}
+                                <span className="text-red-600 font-semibold">
+                                  -{currency.format(Number(selectedReceipt.feesBreakdown.paymentProcessingFee))}
                                 </span>
                               </div>
                             )}
-                            {/* Platform Fee from Order.feesBreakdown.platformFee */}
                             {selectedReceipt.feesBreakdown?.platformFee && Number(selectedReceipt.feesBreakdown.platformFee) > 0 && (
-                              <>
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="text-gray-600">Platform Fee</span>
-                                  <span className="font-semibold text-gray-900">
-                                    {currency.format(Number(selectedReceipt.feesBreakdown.platformFee))}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="text-gray-600">Platform VAT (12% inclusive)</span>
-                                  <span className="font-semibold text-red-600">
-                                    {currency.format(Number(selectedReceipt.feesBreakdown.platformFee) * 0.12)}
-                                  </span>
-                                </div>
-                              </>
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-600">Platform Fee</span>
+                                <span className="text-red-600 font-semibold">
+                                  -{currency.format(Number(selectedReceipt.feesBreakdown.platformFee))}
+                                </span>
+                              </div>
                             )}
                             <div className="border-t border-gray-300 pt-2 mt-2">
                               <div className="flex items-center justify-between">
@@ -2946,7 +2917,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 <span className="text-xl font-bold text-teal-600">
                                   {currency.format(
                                     (Number(selectedReceipt.summary?.subtotal) || 0) +
-                                    (Number(selectedReceipt.summary?.buyerShippingCharge) || 0)
+                                    (Number(selectedReceipt.sellerFeeBreakdowns?.buyerShippingCharge) || 0)
                                   )}
                                 </span>
                               </div>
@@ -4065,13 +4036,18 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         );
       case "items":
         if (!isAllowed("add-product")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
-        return <ItemsView />;
+        return (
+          <ItemsTab />
+        );
       case "items-all":
         if (!isAllowed("add-product")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return <ItemsAll />;
       case "items-list":
         if (!isAllowed("add-product")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return <ItemsList />;
+      case "items-add":
+        if (!isAllowed("add-product")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
+        return <AddItem />;
       case "items-add":
         if (!isAllowed("add-product")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return <AddItem />;
