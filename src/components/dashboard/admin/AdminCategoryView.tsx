@@ -58,10 +58,10 @@ export const AdminCategoryView = ({ categoryMetrics, onExportCSV }: AdminCategor
                       <div className="text-sm font-semibold text-gray-900">{category.sold.toLocaleString()}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-green-600">{formatCurrency(category.netPayout)}</div>
+                      <div className="text-sm font-bold text-green-600">{formatCurrency(category.grossSales)}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-semibold text-teal-600">{formatCurrency(category.netPayout * 0.05)}</div>
+                      <div className="text-sm font-semibold text-teal-600">{formatCurrency(category.platformFee)}</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-bold text-gray-900">{formatCurrency(category.netPayout)}</div>
