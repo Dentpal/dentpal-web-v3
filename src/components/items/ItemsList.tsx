@@ -39,7 +39,11 @@ interface InventoryItem {
   variationCount?: number;
 }
 
-const ItemsList: React.FC = () => {
+interface ItemsListProps {
+  onAddItemClick?: () => void;
+}
+
+const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -515,10 +519,14 @@ const ItemsList: React.FC = () => {
           className="ml-2 px-4 py-2 rounded-lg bg-green-600 text-white font-semibold text-sm shadow hover:bg-green-700 transition"
           style={{ minWidth: 110 }}
           onClick={() => {
-            const url = new URL(window.location.href);
-            url.searchParams.set('tab', 'items-add');
-            window.history.pushState({}, '', url.pathname + url.search);
-            window.dispatchEvent(new Event('popstate'));
+            if (onAddItemClick) {
+              onAddItemClick();
+            } else {
+              const url = new URL(window.location.href);
+              url.searchParams.set('tab', 'items-add');
+              window.history.pushState({}, '', url.pathname + url.search);
+              window.dispatchEvent(new Event('popstate'));
+            }
           }}
         >
           Add Item
@@ -563,7 +571,7 @@ const ItemsList: React.FC = () => {
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
-<td colSpan={catalogTab === 'pending_qc' ? 5 : 6} className="px-4 py-8 text-center text-xs text-gray-500">No products found.</td>
+              <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide"></th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">EDIT ITEM</th>
             </tr>
           </thead>

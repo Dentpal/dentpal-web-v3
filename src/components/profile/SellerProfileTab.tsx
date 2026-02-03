@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ProfileUpload from './ProfileUpload';
 import { useAuth } from '@/hooks/use-auth';
 import { Pencil, Save, X, Loader2, Upload, Paperclip, CheckCircle2, AlertCircle } from 'lucide-react';
 import Tesseract from 'tesseract.js';
@@ -24,6 +25,22 @@ const TAX_TYPE_CATALOG = [
  * Streamlined seller profile tab focused on Vendor Enrollment.
  */
 const SellerProfileTab: React.FC = () => {
+		// Modal state for profile image upload
+		const [profileUploadOpen, setProfileUploadOpen] = useState(false);
+		// Modal state for cover image upload
+		const [coverUploadOpen, setCoverUploadOpen] = useState(false);
+
+		// Handler for image upload (profile)
+		const handleProfileImageUpload = () => {
+			setProfileUploadOpen(false);
+			// Optionally, show a success message or refresh state
+		};
+
+		// Handler for image upload (cover)
+		const handleCoverImageUpload = () => {
+			setCoverUploadOpen(false);
+			// Optionally, show a success message or refresh state
+		};
 	const { uid } = useAuth();
 	const { vendorProfileComplete } = useProfileCompletion();
 	const [isEditing, setIsEditing] = useState(false);
@@ -334,6 +351,34 @@ const SellerProfileTab: React.FC = () => {
 						<div className="text-gray-900">{(vendor.taxTypes || []).join(', ') || '-'}</div>
 					</div>
 				</div>
+				{/* Action buttons below profile info */}
+				<div className="mt-6 flex gap-3">
+					<button
+						className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition"
+						onClick={() => setProfileUploadOpen(true)}
+					>
+						Submit Profile
+					</button>
+					<button
+						className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+						onClick={() => setCoverUploadOpen(true)}
+					>
+						Submit Cover Image
+					</button>
+				</div>
+				{/* ProfileUpload modals */}
+				<ProfileUpload
+					open={profileUploadOpen}
+					onClose={() => setProfileUploadOpen(false)}
+					onUpload={handleProfileImageUpload}
+					title="Upload Profile Image"
+				/>
+				<ProfileUpload
+					open={coverUploadOpen}
+					onClose={() => setCoverUploadOpen(false)}
+					onUpload={handleCoverImageUpload}
+					title="Upload Cover Image"
+				/>
 			</div>
 		</div>
 	);
@@ -1165,7 +1210,6 @@ const SellerProfileTab: React.FC = () => {
 										</div>
 										{errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
 									</div>
-									<div className="p-3 border border-gray-200 rounded-lg">
 										<div className="text-xs text-gray-500">Website</div>
 										<div className="flex items-center justify-between gap-2">
 											<div className="text-sm font-medium text-gray-900">{vendor.website || '—'}</div>
@@ -1194,25 +1238,24 @@ const SellerProfileTab: React.FC = () => {
 									<ul className="text-sm text-gray-900 space-y-1">
 										<li className="flex items-center justify-between"><span>BIR 2303</span><span className="text-gray-700">{vendor.requirements.bir2303 ? (vendor.requirements.bir2303 as File).name : '—'}</span></li>
 										<li className="flex items-center justify-between"><span>SEC/DTI</span><span className="text-gray-700">{vendor.requirements.secOrDti ? (vendor.requirements.secOrDti as File).name : '—'}</span></li>
-																				<li className="flex items-center justify-between"><span>FDA LTO</span><span className="text-gray-700">{vendor.requirements.fdaLto ? (vendor.requirements.fdaLto as File).name : '—'}</span></li>
+										<li className="flex items-center justify-between"><span>FDA LTO</span><span className="text-gray-700">{vendor.requirements.fdaLto ? (vendor.requirements.fdaLto as File).name : '—'}</span></li>
 										<li className="flex items-center justify-between"><span>Catalogue</span><span className="text-gray-700">{vendor.requirements.catalogue ? (vendor.requirements.catalogue as File).name : '—'}</span></li>
 										<li className="flex items-center justify-between"><span>Warranty Policy</span><span className="text-gray-700">{vendor.requirements.warrantyPolicy ? (vendor.requirements.warrantyPolicy as File).name : '—'}</span></li>
 									</ul>
 									<div className="mt-2"><button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2)}>Edit documents</button></div>
 								</div>
-							</div>
 							<DialogFooter className="px-6 py-4 border-t">
-								<button className="px-3 py-2 text-xs rounded-lg border border-gray-200" onClick={() => setReviewOpen(false)}>Back to edit</button>
-								<button
-									disabled={submitLoading}
-									onClick={submitEnrollment}
-									className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
-								>
-									{submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Confirm & Submit
-								</button>
-							</DialogFooter>
-						</DialogContent>
-					</Dialog>
+							<button className="px-3 py-2 text-xs rounded-lg border border-gray-200" onClick={() => setReviewOpen(false)}>Back to edit</button>
+							<button
+								disabled={submitLoading}
+								onClick={submitEnrollment}
+								className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+							>
+								{submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Confirm & Submit
+							</button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
 
 					{/* Success Dialog */}
 					<Dialog open={successOpen} onOpenChange={(o)=>{ setSuccessOpen(o); if(!o){ window.location.reload(); } }}>

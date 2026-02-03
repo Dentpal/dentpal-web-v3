@@ -17,7 +17,7 @@ import { Package, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, 
 import { storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-const AddItem: React.FC = () => {
+const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const [submitting, setSubmitting] = useState(false);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>([]);
   const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string }>>([]);
@@ -276,6 +276,11 @@ const AddItem: React.FC = () => {
         title: 'Success', 
         description: 'Product submitted for admin approval. It will appear in Pending QC.' 
       });
+      
+      // Call success callback if provided
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 1000);
+      }
       
       // Reset form
       setForm({

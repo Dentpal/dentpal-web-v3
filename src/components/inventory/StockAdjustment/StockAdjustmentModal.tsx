@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ImageSelect from './ImageSelect';
 import VariationAdjustmentRow from './VariationAdjustmentRow';
 
@@ -9,13 +9,11 @@ interface StockAdjustmentModalProps {
   setReason: (val: string) => void;
   notes: string;
   setNotes: (val: string) => void;
+  currentProduct: any | null;
   variations: any[];
-  variationAdjustments: { [id: string]: number };
-  setVariationAdjustments: (cb: (prev: { [id: string]: number }) => { [id: string]: number }) => void;
-  selectedVariations?: { [id: string]: boolean };
-  setSelectedVariations?: (cb: (prev: { [id: string]: boolean }) => { [id: string]: boolean }) => void;
+  onConfirmProduct: (selectedVariationData: {[variationId: string]: {selected: boolean; adjustmentValue: number}}) => void;
   modalError: string;
-  onSubmit: () => void;
+  setModalError: (error: string) => void;
 }
 
 const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
@@ -25,19 +23,69 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
   setReason,
   notes,
   setNotes,
+  currentProduct,
   variations,
-  variationAdjustments,
-  setVariationAdjustments,
-  selectedVariations = {},
-  setSelectedVariations = () => {},
+  onConfirmProduct,
   modalError,
-  onSubmit,
+  setModalError,
 }) => {
+  const [localVariationAdjustments, setLocalVariationAdjustments] = useState<{[id: string]: number}>({});
+  const [localSelectedVariations, setLocalSelectedVariations] = useState<{[id: string]: boolean}>({});
+
+  // Reset local state when product changes
+  useEffect(() => {
+    if (currentProduct) {
+      setLocalVariationAdjustments({});
+      setLocalSelectedVariations({});
+      setModalError('');
+    }
+  }, [currentProduct?.id]);
+
   if (!open) return null;
 
   let type: 'add' | 'count' | 'remove' = 'add';
   if (reason === 'Inventory Count') type = 'count';
   if (reason === 'Loss/Damage') type = 'remove';
+
+  const handleAddProduct = () => {
+    const hasSelected = Object.values(localSelectedVariations).some(v => v);
+    if (!hasSelected) {
+      setModalError('Please select at least one variation');
+      return;
+    }
+
+    // Validate adjustments
+    const hasValidAdjustments = Object.entries(localSelectedVariations).some(([varId, selected]) => {
+      if (!selected) return false;
+      const adjustment = localVariationAdjustments[varId] || 0;
+      if (reason === 'Receive Items' || reason === 'Loss/Damage') {
+        return adjustment > 0;
+      }
+      return true; // Inventory Count can be 0
+    });
+
+    if (!hasValidAdjustments) {
+      setModalError('Please enter valid adjustment values for selected variations');
+      return;
+    }
+
+    // Prepare data
+    const selectedData: {[variationId: string]: {selected: boolean; adjustmentValue: number}} = {};
+    Object.keys(localSelectedVariations).forEach(varId => {
+      selectedData[varId] = {
+        selected: localSelectedVariations[varId] || false,
+        adjustmentValue: localVariationAdjustments[varId] || 0
+      };
+    });
+
+    onConfirmProduct(selectedData);
+    
+    // Reset local state
+    setLocalVariationAdjustments({});
+    setLocalSelectedVariations({});
+  };
+
+  const isProductSelection = currentProduct !== null;
 
   return (
     <div style={{
@@ -52,100 +100,136 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
       justifyContent: 'center',
       zIndex: 1000,
     }}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: 32, minWidth: 400, boxShadow: '0 2px 16px #0002', position: 'relative' }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 18 }}>Inventory - Stock Adjustment</h2>
-        <div style={{ marginBottom: 18 }}>
-          <label style={{ fontWeight: 600 }}>Selected Reason</label><br />
-          <select value={reason} onChange={e => setReason(e.target.value)} style={{ width: '100%', padding: 8, marginTop: 6 }}>
-            <option>Receive Items</option>
-            <option>Inventory Count</option>
-            <option>Loss/Damage</option>
-          </select>
-        </div>
-        <div style={{ marginBottom: 18 }}>
-          <label style={{ fontWeight: 600 }}>Notes</label><br />
-          <textarea
-            value={notes}
-            onChange={e => {
-              let val = e.target.value;
-              if (val.length > 500) val = val.slice(0, 500);
-              setNotes(val);
-            }}
-            style={{ width: '100%', padding: 8, marginTop: 6 }}
-            rows={2}
-            maxLength={500}
-            required
-            placeholder="Enter notes"
-          />
-          <div style={{ fontSize: 13, color: '#888', marginTop: 4, textAlign: 'right' }}>{notes.length}/500</div>
-        </div>
-        {variations.length > 0 && (
+      <div style={{ 
+        background: '#fff', 
+        borderRadius: 12, 
+        padding: 32, 
+        minWidth: 500, 
+        maxWidth: 700,
+        maxHeight: '80vh',
+        overflow: 'auto',
+        boxShadow: '0 2px 16px #0002', 
+        position: 'relative' 
+      }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 18, color: '#111827' }}>
+          {currentProduct ? `Select Variations: ${currentProduct.product || currentProduct.name}` : 'Product Selection'}
+        </h2>
+
+        {/* Show current reason */}
+        {currentProduct && (
+          <div style={{ 
+            background: '#f0fdf4', 
+            border: '1px solid #3bb764', 
+            borderRadius: 8, 
+            padding: 12, 
+            marginBottom: 18 
+          }}>
+            <div style={{ fontSize: 13, color: '#166534', marginBottom: 4 }}>
+              <strong>Adjustment Reason:</strong> {reason}
+            </div>
+            <div style={{ fontSize: 12, color: '#16803d' }}>
+              Select variations below and enter adjustment values
+            </div>
+          </div>
+        )}
+
+        {/* Product Variation Selection */}
+        {isProductSelection && variations.length > 0 && (
           <>
             <div style={{ marginBottom: 18 }}>
-              <label style={{ fontWeight: 600 }}>Select Variation</label><br />
-              <ImageSelect
-                options={variations.map(v => ({
-                  id: v.id,
-                  name: v.name || v.id,
-                  imageUrl: v.imageURL || v.imageUrl,
-                }))}
-                value={Object.keys(selectedVariations).find(id => selectedVariations[id]) || ''}
-                onChange={selectedId => {
-                  setSelectedVariations(() => {
-                    const obj: { [id: string]: boolean } = {};
-                    variations.forEach(v => { obj[v.id] = v.id === selectedId; });
-                    return obj;
-                  });
-                  // Reset adjustment value for new selection
-                  setVariationAdjustments(prev => {
-                    const obj: { [id: string]: number } = {};
-                    variations.forEach(v => { obj[v.id] = v.id === selectedId ? prev[v.id] || 0 : 0; });
-                    return obj;
-                  });
-                }}
-                placeholder="-- Select Variation --"
-              />
+              <label style={{ fontWeight: 600 }}>Current Reason: {reason}</label>
+              <p style={{ fontSize: 13, color: '#666', marginTop: 4 }}>Select variations and enter adjustment values below</p>
             </div>
-            {variations.map(variation => (
-              selectedVariations[variation.id] ? (
-                <div key={variation.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                  {(variation.imageURL || variation.imageUrl) ? (
-                    <img
-                      src={variation.imageURL || variation.imageUrl}
-                      alt={variation.name || variation.id}
-                      style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', background: '#f3f4f6', marginTop: 4 }}
+            
+            <div style={{ marginBottom: 18, maxHeight: 400, overflow: 'auto' }}>
+              {variations.map(variation => (
+                <div key={variation.id} style={{ 
+                  marginBottom: 16, 
+                  padding: 16, 
+                  border: localSelectedVariations[variation.id] ? '2px solid #3bb764' : '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  background: localSelectedVariations[variation.id] ? '#f0fdf4' : '#fff'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                    <input
+                      type="checkbox"
+                      checked={localSelectedVariations[variation.id] || false}
+                      onChange={e => {
+                        setLocalSelectedVariations(prev => ({
+                          ...prev,
+                          [variation.id]: e.target.checked
+                        }));
+                      }}
+                      style={{ marginTop: 20, cursor: 'pointer', width: 18, height: 18 }}
                     />
-                  ) : (
-                    <div style={{ width: 56, height: 56, borderRadius: 8, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb', fontSize: 28, marginTop: 4 }}>
-                      <span role="img" aria-label="variation">📦</span>
+                    {(variation.imageURL || variation.imageUrl) ? (
+                      <img
+                        src={variation.imageURL || variation.imageUrl}
+                        alt={variation.name || variation.id}
+                        style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', background: '#f3f4f6' }}
+                      />
+                    ) : (
+                      <div style={{ width: 56, height: 56, borderRadius: 8, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb', fontSize: 28 }}>
+                        <span role="img" aria-label="variation">📦</span>
+                      </div>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <VariationAdjustmentRow
+                        variation={variation}
+                        value={localVariationAdjustments[variation.id] || 0}
+                        type={type}
+                        onChange={val => setLocalVariationAdjustments(prev => ({ ...prev, [variation.id]: val }))}
+                        disabled={!localSelectedVariations[variation.id]}
+                      />
                     </div>
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <VariationAdjustmentRow
-                      variation={variation}
-                      value={variationAdjustments[variation.id] || 0}
-                      type={type}
-                      onChange={val => setVariationAdjustments(prev => ({ ...prev, [variation.id]: val }))}
-                      disabled={false}
-                    />
                   </div>
                 </div>
-              ) : null
-            ))}
+              ))}
+            </div>
           </>
         )}
+
+        {/* Action Buttons */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
-          <button onClick={onClose} style={{ padding: '8px 20px', borderRadius: 6, background: '#eee', fontWeight: 500 }}>Cancel</button>
-          <button
-            style={{ padding: '8px 20px', borderRadius: 6, background: '#3bb764', color: '#fff', fontWeight: 500, boxShadow: '0 2px 8px 0 #3bb76422', border: 'none', fontSize: 16, transition: 'background 0.2s' }}
-            onClick={e => {
-              e.preventDefault();
-              onSubmit();
+          <button 
+            onClick={onClose} 
+            style={{ 
+              padding: '10px 24px', 
+              borderRadius: 6, 
+              background: '#eee', 
+              border: 'none',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontSize: 15
             }}
-          >Submit</button>
+          >
+            {isProductSelection ? 'Cancel' : 'Close'}
+          </button>
+          {isProductSelection ? (
+            <button
+              style={{ 
+                padding: '10px 24px', 
+                borderRadius: 6, 
+                background: '#3bb764', 
+                color: '#fff', 
+                fontWeight: 500, 
+                boxShadow: '0 2px 8px 0 #3bb76422', 
+                border: 'none', 
+                fontSize: 15, 
+                cursor: 'pointer',
+                transition: 'background 0.2s' 
+              }}
+              onClick={handleAddProduct}
+            >
+              Add to Batch
+            </button>
+          ) : null}
         </div>
+
         {modalError && (
-          <div style={{ color: '#dc2626', marginTop: 12, fontSize: 15, fontWeight: 500, textAlign: 'center' }}>{modalError}</div>
+          <div style={{ color: '#dc2626', marginTop: 16, fontSize: 14, fontWeight: 500, textAlign: 'center', background: '#fee', padding: 12, borderRadius: 6 }}>
+            {modalError}
+          </div>
         )}
       </div>
     </div>

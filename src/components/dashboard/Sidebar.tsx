@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   LayoutDashboard, 
@@ -71,16 +71,7 @@ const menuItems: MenuItem[] = [
       { id: "stock-adjustment", label: "Stock Adjustment", icon: Edit },
     ]
   },
-  { 
-    id: "items", 
-    label: "Items", 
-    icon: PlusSquare,
-    subItems: [
-      // { id: "items-all", label: "All", icon: List },
-      { id: "items-list", label: "Item List", icon: Edit },
-      { id: "items-add", label: "Add Item", icon: Plus }
-    ]
-  },
+  { id: "items", label: "Items", icon: PlusSquare },
   { id: "chats", label: "Chats", icon: MessageSquare },
   //{ id: "notifications", label: "Notifications", icon: Bell },
   { id: "product-qc", label: "QC Product", icon: CheckCircle },
@@ -107,6 +98,22 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     : role
     ? `${role.charAt(0).toUpperCase()}${role.slice(1)} Panel`
     : 'Panel';
+
+  // Filter menu items based on user role
+  const filteredMenuItems = useMemo(() => {
+    return menuItems.map(item => {
+      // For Dashboard, only show sub-items for sellers
+      if (item.id === 'dashboard' && item.subItems) {
+        if (isSeller && !isAdmin) {
+          return item; // Keep all sub-items for sellers
+        } else {
+          // Remove sub-items for admins and other roles
+          return { ...item, subItems: undefined };
+        }
+      }
+      return item;
+    });
+  }, [isSeller, isAdmin]);
 
   const permissionByMenuId: Record<string, string> = {
     dashboard: "dashboard",
@@ -152,7 +159,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
   const visibleMenuItems = loading
     ? []
     : (() => {
-        let permitted = menuItems.filter((item) => {
+        let permitted = filteredMenuItems.filter((item) => {
           if (item.id === 'product-qc' && !isAdmin) return false;
           if (item.id === 'warranty' && !isAdmin) return false;
           if (item.id === 'categories' && !isAdmin) return false;

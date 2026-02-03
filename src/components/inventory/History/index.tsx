@@ -12,9 +12,11 @@ const History: React.FC = () => {
 	const [selectedLog, setSelectedLog] = useState<any | null>(null);
 	const [sheetOpen, setSheetOpen] = useState(false);
 
-	// Filter logs by search, date, and adjustment !== 0
-		const filteredLogs = logs.filter(row => {
-			if (row.adjustment === 0) return false;
+	// Filter logs by search, date, and adjustment !== 0 (but allow batch adjustments)
+	const filteredLogs = logs.filter(row => {
+		// Allow batch adjustments even if adjustment is 0
+		if (!row.isBatch && row.adjustment === 0) return false;
+		
 			const matchesSearch =
 				!search ||
 				row.productName?.toLowerCase().includes(search.toLowerCase()) ||
@@ -83,19 +85,55 @@ const History: React.FC = () => {
 						) : filteredLogs.length === 0 ? (
 							<tr><td colSpan={5} className="text-center py-8">No history found.</td></tr>
 						) : (
-							filteredLogs.map((row, idx) => (
-								<tr
-									key={idx}
-									className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer group"
-									onClick={() => { setSelectedLog(row); setSheetOpen(true); }}
-								>
-									<td className="px-5 py-3">{formatTimestamp(row.timestampRaw)}</td>
-									<td className="px-5 py-3">{row.adjustment > 0 ? `+${row.adjustment}` : row.adjustment}</td>
-									<td className="px-5 py-3">{row.modifiedByName}</td>
-									<td className="px-5 py-3">{row.productName}{row.variationName ? ` (${row.variationName})` : ''}</td>
-									<td className="px-5 py-3">{row.action}</td>
-								</tr>
-							))
+							filteredLogs.map((row, idx) => {
+								const isBatchRow = row.isBatch;
+								const displayAdjustment = isBatchRow ? `${row.totalItemsAdjusted} items` : (row.adjustment > 0 ? `+${row.adjustment}` : row.adjustment);
+								
+								return (
+									<tr
+										key={idx}
+										className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer group"
+										onClick={() => { setSelectedLog(row); setSheetOpen(true); }}
+										style={{
+											background: isBatchRow ? '#f0f9ff' : 'transparent'
+										}}
+									>
+										<td className="px-5 py-3">{formatTimestamp(row.timestampRaw)}</td>
+										<td className="px-5 py-3">
+											{isBatchRow ? (
+												<span style={{ 
+													background: '#dbeafe', 
+													color: '#1e40af', 
+													padding: '4px 10px', 
+													borderRadius: 6, 
+													fontSize: 13,
+													fontWeight: 600,
+													display: 'inline-flex',
+													alignItems: 'center',
+													gap: 6
+												}}>
+												{displayAdjustment}
+												</span>
+											) : (
+												displayAdjustment
+											)}
+										</td>
+										<td className="px-5 py-3">{row.modifiedByName}</td>
+										<td className="px-5 py-3">
+											{isBatchRow ? (
+												<span style={{ fontWeight: 600, color: '#1e40af' }}>
+													{row.productName}
+												</span>
+											) : (
+												<span>
+													{row.productName}{row.variationName ? ` (${row.variationName})` : ''}
+												</span>
+											)}
+										</td>
+										<td className="px-5 py-3">{row.action}</td>
+									</tr>
+								);
+							})
 						)}
 					</tbody>
 				</table>
@@ -103,57 +141,371 @@ const History: React.FC = () => {
 
 			{/* Side panel for log details */}
 			<Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-				<SheetContent side="right" style={{ minWidth: 400, maxWidth: 480, padding: 0, background: '#f9fafb' }}>
-					<SheetHeader style={{ padding: '32px 32px 0 32px', borderBottom: '1px solid #e5e7eb', background: '#fff', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
-						<SheetTitle style={{ fontSize: 22, fontWeight: 700, color: '#2563eb', letterSpacing: 0.5 }}>Inventory Log Details</SheetTitle>
+				<SheetContent side="right" style={{ minWidth: 450, maxWidth: 550, padding: 0, background: 'linear-gradient(to bottom, #f8fafc 0%, #f1f5f9 100%)' }}>
+					<SheetHeader style={{ 
+						padding: '28px 28px 24px 28px', 
+						borderBottom: '2px solid #e2e8f0', 
+						background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
+						boxShadow: '0 4px 12px rgba(37, 99, 235, 0.15)'
+					}}>
+						<SheetTitle style={{ 
+							fontSize: 24, 
+							fontWeight: 700, 
+							color: '#fff', 
+						letterSpacing: 0.3
+					}}>
+							Inventory Log Details
+						</SheetTitle>
 					</SheetHeader>
 					{selectedLog && (
-						<div style={{ padding: 32, paddingTop: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Timestamp:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{formatTimestamp(selectedLog.timestampRaw)}</span>
+						<div style={{ padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
+							{/* Batch ID Badge - Only show if it's a batch */}
+							{selectedLog.isBatch && selectedLog.batchId && (
+								<div style={{ 
+									background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+									borderRadius: 12, 
+								padding: '20px 24px',
+								boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+								border: '2px solid #60a5fa'
+							}}>
+								<div style={{ marginBottom: 12 }}>
+									<span style={{ fontSize: 20, fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>Batch Adjustment</span>
+									</div>
+									<div style={{ 
+										fontSize: 14, 
+										fontWeight: 600, 
+										color: '#fff',
+									fontFamily: 'monospace'
+								}}>
+									{selectedLog.batchId}
+								</div>
+								<div style={{ 
+									fontSize: 13, 
+									color: '#dbeafe',
+										marginTop: 4
+									}}>
+										{selectedLog.totalItemsAdjusted} product variations adjusted
+									</div>
+								</div>
+							)}
+
+							{/* Timestamp Card */}
+							<div style={{ 
+								background: '#fff', 
+								borderRadius: 12, 
+								padding: '16px 20px',
+								boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+								border: '1px solid #e2e8f0'
+							}}>
+							<div style={{ marginBottom: 8 }}>
+								<span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Timestamp</span>
 							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Action:</span>
-								<span style={{ fontSize: 16, color: '#2563eb', fontWeight: 600 }}>{selectedLog.action}</span>
+							<div style={{ fontSize: 16, color: '#1e293b', fontWeight: 500 }}>
+									{formatTimestamp(selectedLog.timestampRaw)}
+								</div>
 							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Product Name:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.productName}</span>
+
+							{/* Action & Type Card */}
+							<div style={{ 
+								background: selectedLog.action === 'Loss/Damage' ? '#fef2f2' : 
+											selectedLog.action === 'Receive Items' ? '#f0fdf4' : '#f0f9ff',
+								borderRadius: 12, 
+								padding: '16px 20px',
+								boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+								border: `2px solid ${selectedLog.action === 'Loss/Damage' ? '#fecaca' : 
+														selectedLog.action === 'Receive Items' ? '#bbf7d0' : '#bfdbfe'}`
+							}}>
+							<div style={{ marginBottom: 8 }}>
+									<span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Action Type</span>
+								</div>
+								<div style={{ 
+									fontSize: 18, 
+									fontWeight: 700, 
+
+									color: selectedLog.action === 'Loss/Damage' ? '#dc2626' : 
+										   selectedLog.action === 'Receive Items' ? '#16a34a' : '#2563eb'
+								}}>
+									{selectedLog.action}
+								</div>
 							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Modified by:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.modifiedByName}</span>
+
+							{/* Products in Batch - Only show if it's a batch */}
+							{selectedLog.isBatch && selectedLog.batchItems && selectedLog.batchItems.length > 0 && (
+								<div style={{ 
+									background: '#fff', 
+									borderRadius: 12, 
+									padding: '20px',
+									boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+									border: '1px solid #e2e8f0'
+								}}>
+									<div style={{ 
+										fontSize: 14, 
+										fontWeight: 700, 
+										color: '#475569', 
+										marginBottom: 16,
+										paddingBottom: 12,
+										borderBottom: '2px solid #e2e8f0',
+										textTransform: 'uppercase',
+										letterSpacing: 1
+									}}>
+										Products in This Batch ({selectedLog.batchItems.length})
+									</div>
+									
+									<div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+										{selectedLog.batchItems.map((item: any, idx: number) => (
+											<div key={idx} style={{ 
+												background: '#f9fafb',
+												borderRadius: 8,
+												padding: '12px 16px',
+												border: '1px solid #e5e7eb'
+											}}>
+												<div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+													{item.imageUrl && (
+														<img 
+															src={item.imageUrl} 
+															alt={item.productName}
+															style={{ 
+																width: 40, 
+																height: 40, 
+																borderRadius: 6, 
+																objectFit: 'cover',
+																border: '2px solid #e5e7eb'
+															}} 
+														/>
+													)}
+													<div style={{ flex: 1 }}>
+														<div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b' }}>
+															{item.productName}
+														</div>
+														<div style={{ fontSize: 13, color: '#64748b' }}>
+															{item.variationName}
+														</div>
+													</div>
+												</div>
+												<div style={{ 
+													display: 'flex', 
+													justifyContent: 'space-between',
+													paddingLeft: 52,
+													fontSize: 13
+												}}>
+													<span style={{ color: '#64748b' }}>
+														Stock: {item.stockBefore} → <span style={{ fontWeight: 600, color: '#16a34a' }}>{item.stockAfter}</span>
+													</span>
+													<span style={{ 
+														fontWeight: 600,
+														color: item.adjustmentQty > 0 ? '#16a34a' : '#dc2626'
+													}}>
+														{item.adjustmentQty > 0 ? `+${item.adjustmentQty}` : item.adjustmentQty}
+													</span>
+												</div>
+											</div>
+										))}
+									</div>
+								</div>
+							)}
+
+							{/* Product Information Section - Only for individual adjustments */}
+							{!selectedLog.isBatch && (
+								<div style={{ 
+									background: '#fff', 
+									borderRadius: 12, 
+									padding: '20px',
+									boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+									border: '1px solid #e2e8f0'
+								}}>
+									<div style={{ 
+										fontSize: 14, 
+										fontWeight: 700, 
+										color: '#475569', 
+										marginBottom: 16,
+										paddingBottom: 12,
+										borderBottom: '2px solid #e2e8f0',
+										textTransform: 'uppercase',
+										letterSpacing: 1
+									}}>
+										Product Information
+									</div>
+									
+									<div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+										<div>
+											<div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 }}>
+												Product Name
+											</div>
+											<div style={{ fontSize: 16, color: '#1e293b', fontWeight: 600 }}>
+												{selectedLog.productName}
+											</div>
+										</div>
+										
+										<div>
+											<div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 }}>
+												Variant
+											</div>
+											<div style={{ fontSize: 15, color: '#475569', fontWeight: 500 }}>
+												{selectedLog.variationName || 'N/A'}
+											</div>
+										</div>
+
+										<div>
+											<div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 }}>
+												Modified By
+											</div>
+										<div style={{ fontSize: 15, color: '#1e293b', fontWeight: 500 }}>
+											{selectedLog.modifiedByName}
+											</div>
+										</div>
+									</div>
+								</div>
+							)}
+
+							{/* Modified By - Show for batch adjustments */}
+							{selectedLog.isBatch && (
+								<div style={{ 
+									background: '#fff', 
+									borderRadius: 12, 
+									padding: '16px 20px',
+									boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+									border: '1px solid #e2e8f0'
+								}}>
+								<div style={{ marginBottom: 8 }}>
+									<span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Modified By</span>
+								</div>
+								<div style={{ fontSize: 16, color: '#1e293b', fontWeight: 500 }}>
+										{selectedLog.modifiedByName}
+									</div>
+								</div>
+							)}
+
+							{/* Stock Changes Section - Only for individual adjustments */}
+							{!selectedLog.isBatch && (
+								<div style={{ 
+									background: 'linear-gradient(135deg, #fafafa 0%, #f4f4f5 100%)', 
+									borderRadius: 12, 
+									padding: '20px',
+									boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+									border: '1px solid #e2e8f0'
+								}}>
+									<div style={{ 
+										fontSize: 14, 
+										fontWeight: 700, 
+										color: '#475569', 
+										marginBottom: 16,
+										paddingBottom: 12,
+										borderBottom: '2px solid #d1d5db',
+										textTransform: 'uppercase',
+										letterSpacing: 1
+									}}>
+										Stock Changes
+									</div>
+
+									<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+										{/* Stock Before */}
+										<div style={{ 
+											flex: 1,
+											background: '#fff',
+											borderRadius: 10,
+											padding: '16px',
+											border: '2px solid #e2e8f0',
+											textAlign: 'center'
+										}}>
+											<div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+												Before
+											</div>
+											<div style={{ fontSize: 28, fontWeight: 700, color: '#475569' }}>
+												{selectedLog.beforeStock}
+											</div>
+										</div>
+
+										{/* Arrow & Adjustment */}
+										<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+											<div style={{ 
+												fontSize: 24, 
+												fontWeight: 700,
+												color: selectedLog.adjustment > 0 ? '#16a34a' : '#dc2626',
+												background: selectedLog.adjustment > 0 ? '#dcfce7' : '#fee2e2',
+												borderRadius: 8,
+											padding: '8px 16px',
+											border: `2px solid ${selectedLog.adjustment > 0 ? '#86efac' : '#fca5a5'}`
+										}}>
+											{selectedLog.adjustment > 0 ? `+${selectedLog.adjustment}` : selectedLog.adjustment}
+											</div>
+										</div>
+
+										{/* Stock After */}
+										<div style={{ 
+											flex: 1,
+											background: '#fff',
+											borderRadius: 10,
+											padding: '16px',
+											border: '2px solid #e2e8f0',
+											textAlign: 'center'
+										}}>
+											<div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+												After
+											</div>
+											<div style={{ fontSize: 28, fontWeight: 700, color: '#16a34a' }}>
+												{selectedLog.afterStock}
+											</div>
+										</div>
+									</div>
+								</div>
+							)}
+
+							{/* Reason Section */}
+							<div style={{ 
+								background: '#fff', 
+								borderRadius: 12, 
+								padding: '16px 20px',
+								boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+								border: '1px solid #e2e8f0'
+							}}>
+							<div style={{ marginBottom: 8 }}>
+								<span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Reason</span>
 							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Variant:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.variationName}</span>
+							<div style={{ fontSize: 15, color: '#334155', lineHeight: 1.6 }}>
+									{selectedLog.reason || 'No reason provided'}
+								</div>
 							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Reason:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.reason}</span>
-							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Adjustment:</span>
-								<span style={{ fontSize: 16, fontWeight: 600, color: selectedLog.adjustment > 0 ? '#16a34a' : '#dc2626' }}>{selectedLog.adjustment > 0 ? `+${selectedLog.adjustment}` : selectedLog.adjustment}</span>
-							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Stock Before:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.beforeStock}</span>
-							</div>
-							<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120 }}>Stock After:</span>
-								<span style={{ fontSize: 16, color: '#111827' }}>{selectedLog.afterStock}</span>
-							</div>
-							<div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-								<span style={{ fontWeight: 600, color: '#6b7280', minWidth: 120, marginTop: 2 }}>Detail:</span>
-								<span style={{ fontSize: 15, color: '#374151', whiteSpace: 'pre-line' }}>{selectedLog.detail}</span>
-							</div>
+
 						</div>
 					)}
-					<SheetClose asChild>
-						<button style={{ margin: 0, marginTop: 12, marginBottom: 24, padding: '12px 0', borderRadius: 8, background: '#16a34a', color: '#fff', fontWeight: 600, width: 'calc(100% - 64px)', marginLeft: 32, marginRight: 32, fontSize: 16, boxShadow: '0 2px 8px #2563eb22', border: 'none', transition: 'background 0.2s' }}>Close</button>
-					</SheetClose>
+					<div style={{ 
+						padding: '20px 24px', 
+						borderTop: '2px solid #e2e8f0',
+						background: '#fff',
+						position: 'sticky',
+						bottom: 0
+					}}>
+						<SheetClose asChild>
+							<button style={{ 
+								width: '100%',
+								padding: '14px 0', 
+								borderRadius: 10, 
+								background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)', 
+								color: '#fff', 
+								fontWeight: 600, 
+								fontSize: 16, 
+								boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)', 
+								border: 'none', 
+								cursor: 'pointer',
+								transition: 'all 0.2s',
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								gap: 8
+							}}
+							onMouseEnter={(e) => {
+								e.currentTarget.style.transform = 'translateY(-2px)';
+								e.currentTarget.style.boxShadow = '0 6px 16px rgba(22, 163, 74, 0.4)';
+							}}
+							onMouseLeave={(e) => {
+								e.currentTarget.style.transform = 'translateY(0)';
+								e.currentTarget.style.boxShadow = '0 4px 12px rgba(22, 163, 74, 0.3)';
+							}}
+							>
+								Close
+							</button>
+						</SheetClose>
+					</div>
 				</SheetContent>
 			</Sheet>
 		</div>

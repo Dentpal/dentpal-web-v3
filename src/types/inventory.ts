@@ -18,21 +18,31 @@ export interface InventoryItem {
   location?: string;
 }
 
-export interface StockAdjustment {
-  id: string;
-  adjustmentNo: string;
-  date: string;
-  reason: string;
-  itemName: string;
-  sku: string;
+export interface StockAdjustmentItem {
+  productId: string;
+  productName: string;
+  variationId: string;
+  variationName: string;
   stockBefore: number;
   stockAfter: number;
   adjustmentQty: number;
+  imageUrl?: string;
+}
+
+export interface StockAdjustment {
+  id: string;
+  batchId: string; // Unique identifier for the batch adjustment
+  adjustmentNo: string;
+  date: string;
+  reason: string;
   adjustmentType: 'add' | 'remove' | 'adjust';
   userEditor: string;
+  userId: string;
   timestamp: string;
   notes?: string;
-  category: string;
+  items: StockAdjustmentItem[]; // Multiple products/variations
+  sellerId: string;
+  totalItemsAdjusted: number;
 }
 
 export interface InventoryFilters {

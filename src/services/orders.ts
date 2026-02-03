@@ -250,27 +250,15 @@ const mapDocToOrder = (id: string, data: any): Order => {
     deliveredAt: deliveredMs ? new Date(deliveredMs).toISOString() : undefined,
     package: { size: 'medium', dimensions: `${data.shippingInfo?.addressLine1 ? '' : ''}`.trim(), weight: '' },
     priority: 'normal',
-    status: (() => {
-      const shippingStatus = String(data.shippingInfo?.status || '').toLowerCase();
-      const paymentStatus = String(data.paymentInfo?.status || '').toLowerCase();
-      const topLevelStatus = String(data.status || '').toLowerCase();
-      
-      // Return and refund statuses
-      if (['return_requested', 'return_approved', 'return_rejected', 'returned', 'refunded', 'return_refund'].includes(topLevelStatus)) {
-        return topLevelStatus as any;
-      }
-      
-      if (['delivered', 'completed', 'success', 'succeeded'].includes(shippingStatus) || ['delivered', 'completed', 'success', 'succeeded'].includes(topLevelStatus)) return 'completed';
-      if (['failed-delivery', 'delivery_failed', 'failed_delivery'].includes(shippingStatus) || ['failed-delivery', 'delivery_failed', 'failed_delivery'].includes(topLevelStatus)) return 'failed-delivery';
-      if (['shipping', 'in_transit', 'in-transit', 'dispatched', 'out_for_delivery', 'out-for-delivery'].includes(shippingStatus) || ['shipping', 'processing'].includes(topLevelStatus)) return 'shipping';
-      // Check for confirmed status first, before to_ship
-      if (topLevelStatus === 'confirmed') return 'confirmed';
-      if (['to_ship', 'to-ship', 'packed', 'ready_to_ship'].includes(shippingStatus) || ['to_ship', 'to-ship', 'packed', 'ready_to_ship'].includes(topLevelStatus) || ['paid', 'success', 'succeeded'].includes(paymentStatus)) return 'to_ship';
-      if (['cancelled', 'canceled'].includes(topLevelStatus) || ['failed', 'payment_failed', 'refused'].includes(paymentStatus)) return 'cancelled';
-      if (['pending', 'unpaid'].includes(paymentStatus) || ['pending', 'unpaid'].includes(topLevelStatus)) return 'pending';
-      return 'pending';
-    })(),
+    status: (data.status || 'pending') as any, // Use the actual status from Firebase
     fulfillmentStage,
+    // Status History with handledBy tracking - preserve raw data
+    statusHistory: Array.isArray(data.statusHistory) ? data.statusHistory.map((entry: any) => ({
+      status: entry.status,
+      note: entry.note,
+      timestamp: entry.timestamp,
+      handledBy: entry.handledBy, // Preserve as-is from Firestore
+    })) : undefined,
     // NEW: Preserve raw nested financial structures for dashboard calculations
     summary: data.summary ? {
       subtotal: data.summary.subtotal != null ? Number(data.summary.subtotal) : undefined,
