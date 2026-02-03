@@ -949,7 +949,7 @@ export const createJRSShipping = onRequest({
       }
 
       const newHistoryEntry = {
-        status: "shipping", 
+        status: "to-hand-over", 
         note: shippingNote,
         timestamp: new Date(),
       };
@@ -981,15 +981,10 @@ export const createJRSShipping = onRequest({
             }
           }
         },
-        status: "shipping",
+        fulfillmentStage: "to-hand-over",
         statusHistory: FieldValue.arrayUnion(newHistoryEntry),
         updatedAt: new Date(),
       };
-
-      // Remove fulfillmentStage field if it exists
-      if (orderData.fulfillmentStage !== undefined) {
-        updateData.fulfillmentStage = FieldValue.delete();
-      }
 
       logger.info("Attempting to update order in Firestore", {
         orderId: payload.orderId,

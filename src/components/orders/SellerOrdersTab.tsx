@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Order } from '@/types/order';
-import { Search, RefreshCcw, ShoppingCart } from 'lucide-react';
+import { Search, RefreshCcw, ShoppingCart, Printer } from 'lucide-react';
 import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage } from './config';
 import AllOrdersView from './views/AllOrdersView';
 // Hidden views - orders go directly to to-ship after payment
@@ -15,6 +15,8 @@ import ReturnRefundOrdersView from './views/ReturnRefundOrdersView';
 import OrdersService from '@/services/orders';
 import { useAuth } from '@/hooks/useAuth';
 import { auth } from '@/lib/firebase';
+import QRCode from 'qrcode';
+import dentpalLogo from '@/assets/dentpal_logo.png';
 
 /**
  * OrderTab
@@ -88,6 +90,18 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     pickupTime: '09:00',
   });
   const { user } = useAuth();
+
+  // Selection state for bulk actions in To Hand Over tab
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  
+  // Selection state for bulk JRS shipping in To Arrangement tab
+  const [selectedArrangementOrderIds, setSelectedArrangementOrderIds] = useState<Set<string>>(new Set());
+
+  // Clear selection when switching tabs or sub-tabs
+  useEffect(() => {
+    setSelectedOrderIds(new Set());
+    setSelectedArrangementOrderIds(new Set());
+  }, [activeSubTab, toShipSubTab]);
 
   // Close date picker when clicking outside
   useEffect(() => {
@@ -259,14 +273,510 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
-  // Handle moving order to hand over
+  // Handle Print Pack List - moves all orders from to-pack to to-arrangement
+  const handlePrintPackList = async () => {
+    const toPackOrders = dateFilteredOrders.filter(o => 
+      mapOrderToStage(o) === 'to-ship' && 
+      (o.fulfillmentStage || 'to-pack') === 'to-pack'
+    );
+    
+    if (toPackOrders.length === 0) {
+      alert('No orders in To Pack stage.');
+      return;
+    }
+
+    // Open print window first
+    const printWindow = printPackList(toPackOrders);
+    
+    if (!printWindow) {
+      alert('Unable to open print window. Please check your popup blocker settings.');
+      return;
+    }
+
+    // Wait for the print dialog to be handled (printed or closed)
+    // We'll move orders after the window is closed
+    const checkWindowClosed = setInterval(async () => {
+      if (printWindow.closed) {
+        clearInterval(checkWindowClosed);
+        
+        // Ask user to confirm they printed the pack list
+        const confirmPrinted = confirm(
+          `Did you print or save the pack list?\n\n` +
+          `Click OK to move ${toPackOrders.length} order(s) to Arrangement stage.\n` +
+          `Click Cancel to keep orders in To Pack stage.`
+        );
+        
+        if (confirmPrinted) {
+          try {
+            // Move all orders to arrangement
+            const updatePromises = toPackOrders.map(order => 
+              OrdersService.updateFulfillmentStage(order.id, 'to-arrangement')
+            );
+            
+            await Promise.all(updatePromises);
+            
+            // Switch to arrangement tab to show the moved orders
+            setToShipSubTab('to-arrangement');
+            
+            alert(`Successfully moved ${toPackOrders.length} order(s) to Arrangement stage.`);
+            onRefresh?.();
+          } catch (error) {
+            console.error('Failed to move orders:', error);
+            alert('Failed to move orders. Please try again.');
+          }
+        }
+      }
+    }, 500);
+  };
+
+  // Print pack list for multiple orders with detailed information
+  const printPackList = (orders: Order[]) => {
+    const w = window.open('', '_blank');
+    if (!w) return null;
+    
+    // Generate detailed order cards
+    const orderCardsHTML = orders.map((order, idx) => {
+      // Get shipping address
+      const address = order.shippingInfo 
+        ? `${order.shippingInfo.addressLine1 || ''}${order.shippingInfo.addressLine2 ? ', ' + order.shippingInfo.addressLine2 : ''}, ${order.shippingInfo.city || ''}, ${order.shippingInfo.state || ''} ${order.shippingInfo.postalCode || ''}`
+        : order.region 
+        ? `${order.region.barangay || ''}, ${order.region.municipality || ''}, ${order.region.province || ''} ${order.region.zip || ''}`
+        : 'No address available';
+
+      // Generate items list with variation
+      const itemsHTML = order.items && order.items.length > 0
+        ? order.items.map(item => {
+            const variation = item.sku ? ` (${item.sku})` : '';
+            return `<div class="item-row">
+              <span class="item-name">${item.name}${variation}</span>
+              <span class="item-qty">x${item.quantity}</span>
+            </div>`;
+          }).join('')
+        : `<div class="item-row"><span class="item-name">${order.itemsBrief || `${order.orderCount || 0} item(s)`}</span></div>`;
+
+      return `
+        <div class="order-card">
+          <div class="order-header">
+            <span class="order-number">#${idx + 1}</span>
+            <span class="order-id">Order ID: ${order.id}</span>
+          </div>
+          <div class="order-info">
+            <div class="info-row">
+              <span class="label">Date:</span>
+              <span class="value">${order.timestamp || '—'}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Buyer:</span>
+              <span class="value">${order.customer?.name || '—'}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Address:</span>
+              <span class="value">${address}</span>
+            </div>
+          </div>
+          <div class="items-section">
+            <div class="items-header">Products:</div>
+            ${itemsHTML}
+          </div>
+        </div>
+        <div class="divider"></div>
+      `;
+    }).join('');
+    
+    w.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Pack List - ${new Date().toLocaleDateString()}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; 
+      padding: 16px; 
+      color: #1f2937;
+      background: #ffffff;
+    }
+    .header { 
+      border-bottom: 3px solid #0d9488; 
+      padding-bottom: 10px; 
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .header-left {
+      flex: 1;
+    }
+    .header h1 { 
+      font-size: 24px; 
+      color: #0d9488; 
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .header .date { 
+      font-size: 13px; 
+      color: #6b7280;
+    }
+    .header-right {
+      text-align: right;
+    }
+    .order-count {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0d9488;
+      background: #f0fdfa;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 2px solid #5eead4;
+    }
+    .order-count-label {
+      font-size: 11px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .summary {
+      background: #f0fdfa;
+      border: 2px solid #5eead4;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: #134e4a;
+      font-weight: 600;
+      display: none;
+    }
+    .order-card {
+      background: #ffffff;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+    }
+    .order-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #f3f4f6;
+      margin-bottom: 8px;
+    }
+    .order-number {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0d9488;
+      background: #f0fdfa;
+      padding: 3px 10px;
+      border-radius: 5px;
+    }
+    .order-id {
+      font-size: 13px;
+      font-weight: 600;
+      color: #4b5563;
+    }
+    .order-info {
+      margin-bottom: 8px;
+    }
+    .info-row {
+      display: flex;
+      padding: 3px 0;
+      font-size: 13px;
+    }
+    .info-row .label {
+      font-weight: 600;
+      color: #6b7280;
+      min-width: 70px;
+    }
+    .info-row .value {
+      color: #1f2937;
+      flex: 1;
+    }
+    .items-section {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 8px;
+    }
+    .items-header {
+      font-weight: 700;
+      color: #374151;
+      font-size: 13px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .item-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .item-row:last-child {
+      border-bottom: none;
+    }
+    .item-name {
+      font-size: 12px;
+      color: #1f2937;
+      flex: 1;
+    }
+    .item-qty {
+      font-size: 12px;
+      font-weight: 600;
+      color: #0d9488;
+      margin-left: 10px;
+    }
+    .divider {
+      height: 1px;
+      background: linear-gradient(to right, #e5e7eb, #d1d5db, #e5e7eb);
+      margin: 12px 0;
+    }
+    .footer { 
+      margin-top: 20px; 
+      padding-top: 16px; 
+      border-top: 2px solid #e5e7eb; 
+      text-align: center; 
+      font-size: 11px; 
+      color: #9ca3af;
+    }
+    @media print {
+      body { 
+        padding: 10mm; 
+      }
+      .header { 
+        page-break-after: avoid; 
+      }
+      .order-card { 
+        page-break-inside: avoid; 
+        break-inside: avoid;
+      }
+      .divider {
+        page-break-after: avoid;
+      }
+      @page { 
+        size: A4; 
+        margin: 10mm; 
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <h1>📦 Pack List</h1>
+      <div class="date">Generated: ${new Date().toLocaleString('en-US', { 
+        dateStyle: 'full', 
+        timeStyle: 'short' 
+      })}</div>
+    </div>
+    <div class="header-right">
+      <span class="order-count-label">Total Orders</span>
+      <div class="order-count">${orders.length}</div>
+    </div>
+  </div>
+  
+  <div class="summary">
+    Total Orders to Pack: ${orders.length}
+  </div>
+  
+  ${orderCardsHTML}
+  
+  <div class="footer">
+    DentPal Pack List - All orders listed above are ready for packing and arrangement<br>
+    Please verify all items before moving to the next stage
+  </div>
+  
+  <script>
+    // Auto-trigger print dialog when page loads
+    window.onload = function() {
+      window.print();
+    };
+  </script>
+</body>
+</html>`);
+    
+    w.document.close();
+    return w;
+  };
+
+  // Handle moving order to hand over - Now called from To Hand Over tab to complete handover and move to Shipping
   const handleMoveToHandOver = async (order: Order) => {
     try {
-      await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over');
+      // Move order to shipping tab (status: processing/shipping)
+      await OrdersService.updateOrderStatus(order.id, 'processing');
+      
+      // Navigate to Shipping tab after successful handover
+      setActiveSubTab('shipping');
+      setPage(1);
       onRefresh?.();
     } catch (error) {
-      console.error('Failed to move order to hand over:', error);
-      alert('Failed to move order. Please try again.');
+      console.error('Failed to complete handover:', error);
+      alert('Failed to complete handover. Please try again.');
+    }
+  };
+
+  // Handle toggling order selection in To Hand Over tab
+  const handleToggleOrderSelection = (order: Order) => {
+    setSelectedOrderIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(order.id)) {
+        newSet.delete(order.id);
+      } else {
+        newSet.add(order.id);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle bulk complete handover for selected orders
+  const handleBulkCompleteHandover = async () => {
+    if (selectedOrderIds.size === 0) return;
+
+    const confirmed = window.confirm(
+      `Complete handover for ${selectedOrderIds.size} selected order(s)? They will be moved to the Shipping tab.`
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      // Process all selected orders
+      const promises = Array.from(selectedOrderIds).map(orderId =>
+        OrdersService.updateOrderStatus(orderId, 'processing')
+      );
+      
+      await Promise.all(promises);
+      
+      // Clear selection and refresh
+      setSelectedOrderIds(new Set());
+      setActiveSubTab('shipping');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to complete bulk handover:', error);
+      alert('Failed to complete handover for some orders. Please try again.');
+    }
+  };
+
+  // Handle toggling order selection in To Arrangement tab
+  const handleToggleArrangementOrderSelection = (order: Order) => {
+    setSelectedArrangementOrderIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(order.id)) {
+        newSet.delete(order.id);
+      } else {
+        newSet.add(order.id);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle bulk JRS shipping for selected orders in To Arrangement tab
+  const handleBulkCreateJRSShipping = async () => {
+    if (selectedArrangementOrderIds.size === 0) return;
+
+    // Show pickup schedule dialog for bulk orders
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const pickupDate = prompt(
+      `Create JRS shipping for ${selectedArrangementOrderIds.size} selected order(s).\n\nEnter pickup date (YYYY-MM-DD):`,
+      tomorrow.toISOString().split('T')[0]
+    );
+    
+    if (!pickupDate) return;
+
+    const pickupTime = prompt('Enter pickup time (HH:MM in 24-hour format, between 09:00 and 14:00):', '09:00');
+    
+    if (!pickupTime) return;
+
+    // Validate pickup date and time
+    const selectedDateTime = new Date(`${pickupDate}T${pickupTime}`);
+    const now = new Date();
+    if (selectedDateTime < now) {
+      alert('Pickup date and time must be in the future.');
+      return;
+    }
+    const hour = selectedDateTime.getHours();
+    if (hour < 9 || hour > 14) {
+      alert('Pickup time must be between 9:00 AM and 2:00 PM.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Create JRS shipping for ${selectedArrangementOrderIds.size} order(s)?\n\nPickup: ${pickupDate} at ${pickupTime}\n\nThis will create shipping requests and move orders to Hand Over stage.`
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      const userEmail = user?.email || 'admin@dentpal.ph';
+      const requestedPickupSchedule = selectedDateTime.toISOString();
+      const idToken = await auth.currentUser?.getIdToken();
+      
+      if (!idToken) {
+        alert('Unable to authenticate your shipping request. Please sign in again.');
+        return;
+      }
+
+      const firebaseFunctionUrl = 'https://asia-southeast1-dentpal-161e5.cloudfunctions.net/createJRSShipping';
+      
+      // Process each order sequentially to avoid overwhelming the API
+      let successCount = 0;
+      let failCount = 0;
+      const selectedOrders = pagedOrders.filter(o => selectedArrangementOrderIds.has(o.id));
+      
+      for (const order of selectedOrders) {
+        try {
+          const response = await fetch(firebaseFunctionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              orderId: order.id,
+              requestedPickupSchedule,
+              createdByUserEmail: userEmail,
+              remarks: `DentPal Order #${order.id} - Bulk Pickup scheduled for ${pickupDate} at ${pickupTime}`,
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const jrsResponse = await response.json();
+          
+          if (jrsResponse.success) {
+            // Move order to To Hand Over stage
+            await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over');
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          console.error(`Failed to create JRS shipping for order ${order.id}:`, error);
+          failCount++;
+        }
+      }
+      
+      // Show result
+      if (successCount > 0) {
+        alert(`JRS shipping created successfully for ${successCount} order(s)!${failCount > 0 ? `\n\n${failCount} order(s) failed.` : ''}\n\nPickup scheduled: ${pickupDate} at ${pickupTime}\n\nOrders moved to Hand Over stage.`);
+      } else {
+        alert('Failed to create JRS shipping for all orders. Please try again.');
+      }
+      
+      // Clear selection and switch to To Hand Over tab
+      setSelectedArrangementOrderIds(new Set());
+      setToShipSubTab('to-hand-over');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to create bulk JRS shipping:', error);
+      alert('Failed to create JRS shipping for some orders. Please try again.');
     }
   };
 
@@ -299,7 +809,8 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
-  // Handle moving order to shipping (from hand-over) with JRS integration
+  // Handle moving order to shipping (from to-arrangement) with JRS integration
+  // Creates JRS shipping and moves order to to-hand-over stage
   const handleMoveToShipping = async (order: Order) => {
     // Show pickup schedule dialog first
     const tomorrow = new Date();
@@ -399,14 +910,17 @@ export const OrderTab: React.FC<OrderTabProps> = ({
                           jrsResponse.jrsResponse?.ShippingRequestEntityDto?.TrackingId || 
                           '';
         const trackingInfo = trackingId ? `, Tracking ID: ${trackingId}` : '';
-        alert(`Order shipped successfully!\n\nReference: ${jrsResponse.shippingReferenceNo}${trackingInfo}\n\nPickup scheduled: ${pickupDate} at ${pickupTime}`);
+        alert(`JRS shipping created successfully!\n\nReference: ${jrsResponse.shippingReferenceNo}${trackingInfo}\n\nPickup scheduled: ${pickupDate} at ${pickupTime}\n\nOrder moved to Hand Over stage.`);
       } else {
         console.error('JRS shipping failed:', jrsResponse);
         alert(`Shipping request created but JRS returned error: ${jrsResponse.error || 'Unknown error'}`);
       }
       
-      // Navigate to Shipping tab regardless of JRS success/failure
-      setActiveSubTab('shipping');
+      // Move order to To Hand Over stage after creating JRS shipping
+      await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over');
+      
+      // Switch to To Hand Over tab
+      setToShipSubTab('to-hand-over');
       setPage(1);
       onRefresh?.();
       
@@ -472,6 +986,172 @@ export const OrderTab: React.FC<OrderTabProps> = ({
 
   const copyToClipboard = async (text: string, which: 'id' | 'barcode') => {
     try { await navigator.clipboard.writeText(text); setCopied(which); setTimeout(()=> setCopied(null), 1200); } catch {}
+  };
+
+  // Build invoice HTML with QR code
+  const buildInvoiceHTML = async (order: Order) => {
+    const currency = order.currency || 'PHP';
+    const total = order.total != null ? order.total : '';
+    const hasItems = Array.isArray(order.items) && order.items.length > 0;
+    
+    // Format status for display
+    const formattedStatus = order.status
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+    
+    // Load and convert logo to base64
+    let logoDataUrl = '';
+    try {
+      const response = await fetch(dentpalLogo);
+      const blob = await response.blob();
+      logoDataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.error('Failed to load logo:', err);
+    }
+    
+    // Generate QR code for tracking ID
+    const trackingId = order.shippingInfo?.jrs?.trackingId || 'N/A';
+    let qrCodeDataUrl = '';
+    try {
+      qrCodeDataUrl = await QRCode.toDataURL(trackingId, {
+        width: 120,
+        margin: 1,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        }
+      });
+    } catch (err) {
+      console.error('Failed to generate QR code:', err);
+    }
+
+    const itemsMarkup = hasItems
+      ? `<table style="width:100%; border-collapse:collapse; margin-top:8px;">
+           <thead>
+             <tr>
+               <th align="left" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Item</th>
+               <th align="right" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Qty</th>
+               <th align="right" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Price</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${order.items!.map(it => `<tr>
+               <td style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.name}</td>
+               <td align="right" style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.quantity}</td>
+               <td align="right" style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.price != null ? currency + ' ' + it.price : ''}</td>
+             </tr>`).join('')}
+           </tbody>
+         </table>`
+      : `<div class="items">${order.itemsBrief || `${order.orderCount} item(s)`}</div>`;
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice ${order.id}</title>
+  <style>
+    :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --brand:#0d9488; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color: var(--ink); }
+    .sheet { max-width: 800px; margin: 24px auto; padding: 32px; border: 1px solid var(--line); border-radius: 16px; }
+    .header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand-badge { width:48px; height:48px; object-fit:contain; }
+    .title { font-size:20px; font-weight:700; }
+    .meta { text-align:right; font-size:12px; color: var(--muted); }
+    .section { padding:16px 0; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .grid-three { display:grid; grid-template-columns:1fr 1fr auto; gap:16px; align-items:start; }
+    .label { font-size:12px; color: var(--muted); }
+    .value { font-size:14px; font-weight:600; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; font-size:11px; border-radius:999px; border:1px solid var(--line); color:#0f172a; }
+    .items { background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .total { font-size:18px; font-weight:700; }
+    .footer { margin-top:24px; padding-top:16px; border-top:1px solid var(--line); font-size:12px; color: var(--muted); }
+    @media print { body { background:white; } .sheet { border:none; box-shadow:none; margin:0; border-radius:0; } .actions { display:none !important; } @page { size: A4; margin: 16mm; } }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div class="brand">
+        ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DentPal Logo" class="brand-badge" />` : '<div style="width:48px; height:48px; border-radius:10px; background:linear-gradient(135deg,#0ea5e9,#0d9488);"></div>'}
+        <div class="title">Waybill</div>
+      </div>
+      <div class="meta">
+        <div><strong>Order #</strong> ${order.id}</div>
+        <div>${order.timestamp}</div>
+      </div>
+    </div>
+
+    <div class="section grid-three">
+      <div>
+        <div class="label">Buyer</div>
+        <div class="value">${order.customer.name || ''}</div>
+        <div class="label" style="margin-top:8px">Contact</div>
+        <div class="value">${order.customer.contact || ''}</div>
+      </div>
+      <div>
+        <div class="label">Status</div>
+        <div class="badge">${formattedStatus}</div>
+        <div class="label" style="margin-top:8px">Tracking ID</div>
+        <div class="value" style="margin-top:4px;">${trackingId}</div>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start;">
+        <div class="label" style="text-align:center; margin-bottom:8px;">QR Code</div>
+        ${qrCodeDataUrl ? `<img src="${qrCodeDataUrl}" alt="QR Code" style="width:100px; height:100px; border:1px solid var(--line); border-radius:8px; padding:4px; background:white;" />` : '<div style="width:100px; height:100px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--muted);">No QR</div>'}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="label">Items</div>
+      ${itemsMarkup}
+    </div>
+
+    <div class="section" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:end;">
+      <div>
+        <div class="label">Package</div>
+        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
+          ${order.package?.size || '—'}
+        </div>
+        <div class="label" style="margin-top:12px;">Shipping Fee</div>
+        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
+          ${typeof order.summary?.shippingCost === 'number' ? `${order.currency || 'PHP'} ${order.summary.shippingCost}` : '—'}
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div class="label">Total Amount</div>
+        <div class="total">${currency} ${total}</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Thanks for your purchase. This is a system-generated waybill. For concerns, contact support.
+    </div>
+    <div class="actions" style="margin-top:16px">
+      <button onclick="window.print()" style="padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:white; cursor:pointer">Print</button>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  // Print invoice with QR code
+  const printInvoice = async (order: Order) => {
+    const html = await buildInvoiceHTML(order);
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 200);
   };
 
   const printSummary = (o: Order) => {
@@ -646,23 +1326,65 @@ export const OrderTab: React.FC<OrderTabProps> = ({
 
       {activeSubTab === 'to-ship' && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 shadow-sm mt-4">
-          <div className="flex flex-wrap gap-2">
-            {TO_SHIP_SUB_TABS.map(subTab => {
-              const isActive = subTab.id === toShipSubTab;
-              return (
-                <button
-                  key={subTab.id}
-                  onClick={() => setToShipSubTab(subTab.id)}
-                  className={`relative px-3 py-1.5 rounded-lg text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60
-                    ${isActive ? 'bg-orange-600 text-white shadow-sm' : 'bg-white text-orange-700 hover:bg-orange-100 border border-orange-300'}
-                  `}
-                >
-                  <span>{subTab.label}</span>
-                  <span className={`ml-2 inline-flex items-center justify-center text-[11px] font-semibold rounded-full px-1.5 min-w-[1.25rem]
-                    ${isActive ? 'bg-white/20 text-white' : 'bg-orange-200 text-orange-800'}`}>{countsByToShipSubTab[subTab.id]}</span>
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              {TO_SHIP_SUB_TABS.map(subTab => {
+                const isActive = subTab.id === toShipSubTab;
+                return (
+                  <button
+                    key={subTab.id}
+                    onClick={() => setToShipSubTab(subTab.id)}
+                    className={`relative px-3 py-1.5 rounded-lg text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/60
+                      ${isActive ? 'bg-orange-600 text-white shadow-sm' : 'bg-white text-orange-700 hover:bg-orange-100 border border-orange-300'}
+                    `}
+                  >
+                    <span>{subTab.label}</span>
+                    <span className={`ml-2 inline-flex items-center justify-center text-[11px] font-semibold rounded-full px-1.5 min-w-[1.25rem]
+                      ${isActive ? 'bg-white/20 text-white' : 'bg-orange-200 text-orange-800'}`}>{countsByToShipSubTab[subTab.id]}</span>
+                  </button>
+                );
+              })}
+            </div>
+            
+            {/* Print Pack List button - only show on To Pack tab */}
+            {toShipSubTab === 'to-pack' && countsByToShipSubTab['to-pack'] > 0 && (
+              <button
+                type="button"
+                onClick={handlePrintPackList}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm"
+              >
+                <Printer className="w-4 h-4" />
+                Print Pack List & Move All to Arrangement
+              </button>
+            )}
+
+            {/* Bulk Complete Handover button - only show on To Hand Over tab when orders are selected */}
+            {toShipSubTab === 'to-hand-over' && selectedOrderIds.size > 0 && (
+              <button
+                type="button"
+                onClick={handleBulkCompleteHandover}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition flex items-center gap-2 shadow-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Complete Handover ({selectedOrderIds.size} selected)
+              </button>
+            )}
+
+            {/* Bulk Create JRS Shipping button - only show on To Arrangement tab when orders are selected */}
+            {toShipSubTab === 'to-arrangement' && selectedArrangementOrderIds.size > 0 && (
+              <button
+                type="button"
+                onClick={handleBulkCreateJRSShipping}
+                className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition flex items-center gap-2 shadow-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                Create JRS Shipping ({selectedArrangementOrderIds.size} selected)
+              </button>
+            )}
           </div>
           <div className="mt-2 text-xs text-orange-600">
             Manage orders through packing, arrangement, and handover stages.
@@ -681,6 +1403,10 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             onMoveToPack={handleMoveToPack}
             onMoveToShipping={handleMoveToShipping}
             shippingLoading={shippingLoading}
+            selectedOrderIds={selectedOrderIds}
+            onToggleOrderSelection={handleToggleOrderSelection}
+            selectedArrangementOrderIds={selectedArrangementOrderIds}
+            onToggleArrangementOrderSelection={handleToggleArrangementOrderSelection}
           />
         )
         : (!loading && pagedOrders.length === 0 && activeSubTab !== 'return-refund'
@@ -847,17 +1573,13 @@ export const OrderTab: React.FC<OrderTabProps> = ({
                       className="text-xs px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50"
                       onClick={async () => {
                         try {
-                          if (activeSubTab === 'to-ship' && selectedOrder) {
-                            await handleMoveToArrangement(selectedOrder);
-                            setToShipSubTab('to-arrangement');
-                          }
-                          printSummary(selectedOrder);
+                          await printInvoice(selectedOrder);
                         } catch (e) {
-                          console.error(e);
+                          console.error('Error printing invoice:', e);
                         }
                       }}
                     >
-                      Print
+                      Print Invoice
                     </button>
                     <button 
                       className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-red-50 text-red-600 border border-red-200" 

@@ -15,6 +15,10 @@ interface OrderRowProps {
   onMoveToPack?: (order: Order) => void; // Move back from arrangement to pack
   onMoveToShipping?: (order: Order) => void; // Move from hand-over to shipping
   isShippingLoading?: boolean; // Loading state for shipping requests
+  // Checkbox selection support
+  isSelectable?: boolean; // Whether this order can be selected with checkbox
+  isSelected?: boolean; // Whether this order is currently selected
+  onToggleSelect?: (order: Order) => void; // Callback when checkbox is toggled
 }
 
 const buildInvoiceHTML = async (order: Order) => {
@@ -143,28 +147,21 @@ const buildInvoiceHTML = async (order: Order) => {
       ${itemsMarkup}
     </div>
 
-    {/* Summary: Price Breakdown with Package and Shipping Fee */}
-    <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-      <div className="text-sm text-gray-600">
-        <div className="font-medium">Package</div>
-        <div className="text-sm text-gray-500 mt-1">
-          {/* Show ProductName from JRS response if available */}
-          ${order.shippingInfo?.jrs?.response?.ProductName || order.package?.size || '—'}
+    <div class="section" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:end;">
+      <div>
+        <div class="label">Package</div>
+        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
+          ${order.package?.size || '—'}
         </div>
-        <div className="font-medium mt-3">Shipping Fee</div>
-        <div className="text-sm text-gray-500 mt-1">
+        <div class="label" style="margin-top:12px;">Shipping Fee</div>
+        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
           ${typeof order.summary?.shippingCost === 'number' ? `${order.currency || 'PHP'} ${order.summary.shippingCost}` : '—'}
         </div>
       </div>
-      <div className="text-right">
-        <div className="text-xs text-gray-500">Total Amount</div>
-        <div className="text-lg font-semibold">${order.currency || 'PHP'} ${order.total != null ? order.total : ''}</div>
+      <div style="text-align:right;">
+        <div class="label">Total Amount</div>
+        <div class="total">${currency} ${total}</div>
       </div>
-    </div>
-
-    <div class="section row">
-      <div class="label">Total</div>
-      <div class="total">${currency} ${total}</div>
     </div>
 
     <div class="footer">
@@ -201,7 +198,7 @@ const exportCSV = (order: Order) => {
     rows.push([order.itemsBrief || `${order.orderCount} item(s)`, '', '']);
   }
   rows.push([]);
-  rows.push(['Package', '', order.shippingInfo?.jrs?.response?.ProductName || order.package?.size || '—']);
+  rows.push(['Package', '', order.package?.size]);
   rows.push(['Shipping Fee', '', typeof order.summary?.shippingCost === 'number' ? String(order.summary.shippingCost) : '—']);
   rows.push(['Total', '', String(order.total ?? '')]);
 
@@ -234,7 +231,21 @@ const formatStatus = (status: string): string => {
     .join(' ');
 };
 
-const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip = false, onMoveToArrangement, onMoveToHandOver, onConfirmHandover, onMoveToPack, onMoveToShipping, isShippingLoading = false }) => {
+const OrderRow: React.FC<OrderRowProps> = ({ 
+  order, 
+  onDetails, 
+  onClick, 
+  isToShip = false, 
+  onMoveToArrangement, 
+  onMoveToHandOver, 
+  onConfirmHandover, 
+  onMoveToPack, 
+  onMoveToShipping, 
+  isShippingLoading = false,
+  isSelectable = false,
+  isSelected = false,
+  onToggleSelect
+}) => {
   const [open, setOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [itemsOpen, setItemsOpen] = React.useState(false);
@@ -247,7 +258,19 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip
     setOpen(true);
   };
 
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onToggleSelect) {
+      onToggleSelect(order);
+    }
+  };
+
   const handleMoveToArrangement = () => {
+    // Safety check: prevent moving to-hand-over orders back to arrangement
+    if (order.fulfillmentStage === 'to-hand-over') {
+      console.warn('Cannot move to-hand-over order back to arrangement');
+      return;
+    }
     if (onMoveToArrangement) {
       onMoveToArrangement(order);
     } else {
@@ -274,6 +297,16 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip
       onClick={handleDetails}
     >
       <div className="flex flex-col md:flex-row md:items-center gap-4">
+        {isSelectable && (
+          <div className="flex items-center" onClick={handleCheckboxClick}>
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => {}}
+              className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+            />
+          </div>
+        )}
         <div className="flex-1 flex items-center gap-6">
           {/* Date and time on separate lines */}
           <div className="w-32">
@@ -338,71 +371,28 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
-                className="text-xs px-3 py-1 border border-gray-400 text-gray-600 rounded-md font-medium hover:bg-gray-50"
-                onClick={() => onMoveToPack?.(order)}
+                className="text-xs px-3 py-1 border border-teal-600 text-teal-700 rounded-md font-medium hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                onClick={() => onMoveToShipping?.(order)}
+                disabled={isShippingLoading}
               >
-                ← To Pack
-              </button>
-              <button
-                type="button"
-                className="text-xs px-3 py-1 border border-orange-600 text-orange-700 rounded-md font-medium hover:bg-orange-50"
-                onClick={() => onMoveToHandOver?.(order)}
-              >
-                To Hand Over →
+                {isShippingLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                {isShippingLoading ? 'Create JRS Shipping →' : 'Create JRS Shipping →'}
               </button>
             </div>
           ) : order.fulfillmentStage === 'to-hand-over' ? (
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
-                className="text-xs px-3 py-1 border border-gray-400 text-gray-600 rounded-md font-medium hover:bg-gray-50"
-                onClick={() => onMoveToArrangement?.(order)}
+                className="text-xs px-3 py-1 border border-orange-600 text-orange-700 rounded-md font-medium hover:bg-orange-50"
+                onClick={() => onMoveToHandOver?.(order)}
               >
-                ← To Arrangement
-              </button>
-              <button
-                type="button"
-                className="text-xs px-3 py-1 border border-teal-600 text-teal-700 rounded-md font-medium hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                onClick={() => onMoveToShipping?.(order)}
-                disabled={isShippingLoading}
-              >
-                {isShippingLoading && <Loader2 className="w-3 h-3 animate-spin" />}
-                {isShippingLoading ? 'Shipping...' : 'Ship →'}
+                Complete Handover →
               </button>
             </div>
           ) : (
-            // Default (to-pack): show move to arrangement button + actions dropdown
+            // Default (to-pack): No buttons shown - bulk action will be used instead
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                className="text-xs px-3 py-1 border border-blue-600 text-blue-700 rounded-md font-medium hover:bg-blue-50"
-                onClick={() => onMoveToArrangement?.(order)}
-              >
-                To Arrangement →
-              </button>
-              <div className="relative" data-actions-menu>
-                <button
-                  type="button"
-                  className="text-xs px-3 py-1 border border-gray-200 rounded-md hover:bg-gray-50 shadow-sm flex items-center gap-1"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
-                  title="Invoice and export options"
-                >
-                  Actions <ChevronDown className="w-3 h-3" />
-                </button>
-                {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-10">
-                    <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2" onClick={() => { setMenuOpen(false); printInvoice(order); }}>
-                      <Printer className="w-4 h-4" /> Print invoice
-                    </button>
-                    <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2" onClick={() => { setMenuOpen(false); exportCSV(order); }}>
-                      <Download className="w-4 h-4" /> Export CSV
-                    </button>
-                    <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2" onClick={() => { setMenuOpen(false); exportPDF(order); }}>
-                      <FileText className="w-4 h-4" /> Export PDF
-                    </button>
-                  </div>
-                )}
-              </div>
+              {/* Buttons removed - will be replaced by bulk "Print Pack List" action */}
             </div>
           )
         ) : (
@@ -500,7 +490,7 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip
                 <div className="font-medium">Package</div>
                 <div className="text-sm text-gray-500 mt-1">
                   {/* Show ProductName from JRS response if available */}
-                  {order.shippingInfo?.jrs?.response?.ProductName || order.package?.size || '—'}
+                  {order.package?.size || '—'}
                 </div>
                 <div className="font-medium mt-3">Shipping Fee</div>
                 <div className="text-sm text-gray-500 mt-1">
@@ -519,20 +509,18 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, onDetails, onClick, isToShip
               {isToShip ? (
                 order.fulfillmentStage === 'to-arrangement' ? (
                   <>
-                    <button className="text-sm px-3 py-2 rounded border border-gray-400 text-gray-600 hover:bg-gray-50" onClick={() => { onMoveToPack?.(order); setOpen(false); }}>← To Pack</button>
-                    <button className="text-sm px-3 py-2 rounded bg-orange-600 text-white hover:bg-orange-700" onClick={() => { onMoveToHandOver?.(order); setOpen(false); }}>To Hand Over →</button>
-                  </>
-                ) : order.fulfillmentStage === 'to-hand-over' ? (
-                  <>
-                    <button className="text-sm px-3 py-2 rounded border border-gray-400 text-gray-600 hover:bg-gray-50" onClick={() => { onMoveToArrangement?.(order); setOpen(false); }}>← To Arrangement</button>
                     <button 
                       className="text-sm px-3 py-2 rounded bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" 
                       onClick={() => { onMoveToShipping?.(order); setOpen(false); }}
                       disabled={isShippingLoading}
                     >
                       {isShippingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {isShippingLoading ? 'Shipping...' : 'Ship →'}
+                      {isShippingLoading ? 'Creating JRS...' : 'Create JRS Shipping →'}
                     </button>
+                  </>
+                ) : order.fulfillmentStage === 'to-hand-over' ? (
+                  <>
+                    <button className="text-sm px-3 py-2 rounded bg-orange-600 text-white hover:bg-orange-700" onClick={() => { onMoveToHandOver?.(order); setOpen(false); }}>Complete Handover →</button>
                   </>
                 ) : (
                   <button className="text-sm px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700" onClick={() => { onMoveToArrangement?.(order); setOpen(false); }}>To Arrangement →</button>

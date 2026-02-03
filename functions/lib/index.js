@@ -783,7 +783,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 shippingNote += `. COD Amount: ₱${codAmount.toFixed(2)}`;
             }
             const newHistoryEntry = {
-                status: "shipping",
+                status: "to-hand-over",
                 note: shippingNote,
                 timestamp: new Date(),
             };
@@ -814,14 +814,10 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                         }
                     }
                 },
-                status: "shipping",
+                fulfillmentStage: "to-hand-over",
                 statusHistory: firestore_1.FieldValue.arrayUnion(newHistoryEntry),
                 updatedAt: new Date(),
             };
-            // Remove fulfillmentStage field if it exists
-            if (orderData.fulfillmentStage !== undefined) {
-                updateData.fulfillmentStage = firestore_1.FieldValue.delete();
-            }
             logger.info("Attempting to update order in Firestore", {
                 orderId: payload.orderId,
                 collection: orderResult.collection,
