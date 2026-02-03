@@ -108,6 +108,7 @@ const Dashboard = ({ user, onLogout }) => {
  * AVAILABLE UTILITIES YOU CAN USE ANYWHERE:
  */
 
+/*
 // Formatting
 import { formatCurrency, formatDuration, formatDate } from '@/utils/dashboard';
 const price = formatCurrency(1234.56); // "₱1,234.56"
@@ -132,5 +133,6 @@ const isRecent = withinLastDays('2026-01-15', 'last-30'); // true
 import { useDashboardFilters, useDashboardMetrics } from '@/hooks/dashboard';
 const { filters, setFilters, resetFilters } = useDashboardFilters();
 const { paidOrders, kpiMetrics } = useDashboardMetrics({ orders, filters });
+*/
 
 export default Dashboard;
