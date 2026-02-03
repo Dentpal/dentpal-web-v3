@@ -74,9 +74,10 @@ export const useDashboardMetrics = ({ orders, filters }: UseDashboardMetricsProp
     return Array.from(byDate.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, v]) => {
-        const d = new Date(date);
-        const label = `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')}`;
+        const [, month, day] = date.split('-');
+        const label = `${month}/${day}`;
         return { name: label, revenue: v.amount, count: v.count };
+      });
       });
   }, [paidOrders]);
 
