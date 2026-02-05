@@ -41,6 +41,7 @@ import OrdersService from '@/services/orders';
 import { useLocation, useNavigate } from 'react-router-dom';
 import WarrantyManager from '@/pages/admin/WarrantyManager';
 import CategoryManager from '@/pages/admin/CategoryManager';
+import { useProfileCompletion } from '@/hooks/useProfileCompletion';
 import { getProvinces as getPhProvinces, getCitiesByProvince as getPhCities, getCitiesByProvinceAsync as getPhCitiesAsync } from '../lib/phLocations';
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
@@ -79,6 +80,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const { uid, isSubAccount, parentId } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { isSeller } = useAuth();
+  const { vendorProfileComplete, loading: profileLoading } = useProfileCompletion();
   
   // New: seller dashboard UI state
   const [showTutorial, setShowTutorial] = useState(false);
@@ -554,7 +557,14 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   };
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || profileLoading) return;
+    
+    // For sellers with incomplete profiles, default to profile tab
+    if (isSeller && !isSubAccount && !vendorProfileComplete && activeItem === 'dashboard') {
+      setActiveItem('profile');
+      return;
+    }
+    
     if (!isAllowed(activeItem)) {
       const order = [
         "dashboard",
@@ -573,7 +583,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
       const firstAllowed = order.find((id) => isAllowed(id));
       if (firstAllowed) setActiveItem(firstAllowed);
     }
-  }, [authLoading, activeItem]);
+  }, [authLoading, profileLoading, activeItem, isSeller, isSubAccount, vendorProfileComplete]);
 
   const handleConfirmOrder = async (orderId: string) => {
     setLoading(true);
