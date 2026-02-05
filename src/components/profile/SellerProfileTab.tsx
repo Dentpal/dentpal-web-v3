@@ -29,6 +29,8 @@ const SellerProfileTab: React.FC = () => {
 		const [profileUploadOpen, setProfileUploadOpen] = useState(false);
 		// Modal state for cover image upload
 		const [coverUploadOpen, setCoverUploadOpen] = useState(false);
+		// Walkthrough/Welcome state
+		const [showWelcome, setShowWelcome] = useState(false);
 
 		// Handler for image upload (profile)
 		const handleProfileImageUpload = () => {
@@ -43,7 +45,21 @@ const SellerProfileTab: React.FC = () => {
 		};
 	const { uid } = useAuth();
 	const { vendorProfileComplete } = useProfileCompletion();
-	const [isEditing, setIsEditing] = useState(false);
+	// Automatically enable editing for incomplete profiles
+	const [isEditing, setIsEditing] = useState(!vendorProfileComplete);
+	
+	// Check if this is first visit (show welcome) - check on mount and when profile status changes
+	useEffect(() => {
+		const hasSeenWelcome = localStorage.getItem('dentpal_vendor_welcome_seen');
+		// Show welcome if profile is incomplete AND either haven't seen it OR it's been cleared
+		if (!vendorProfileComplete && !hasSeenWelcome) {
+			setShowWelcome(true);
+		}
+		// Auto-enable editing for incomplete profiles
+		if (!vendorProfileComplete) {
+			setIsEditing(true);
+		}
+	}, [vendorProfileComplete]);
 	const [saving, setSaving] = useState(false);
 	const [submitLoading, setSubmitLoading] = useState(false);
 
@@ -276,11 +292,24 @@ const SellerProfileTab: React.FC = () => {
 		<div className="flex items-center justify-between">
 			<h2 className="text-base font-semibold text-gray-900">Vendor Enrollment</h2>
 			<div className="flex items-center gap-2">
-				{!isEditing ? (
+				{!vendorProfileComplete && (
+					<button 
+						onClick={() => {
+							localStorage.removeItem('dentpal_vendor_welcome_seen');
+							setShowWelcome(true);
+						}} 
+						className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600"
+						title="View enrollment guide"
+					>
+						<span>❓</span> Guide
+					</button>
+				)}
+				{/* Only show Edit button if profile is complete */}
+				{vendorProfileComplete && !isEditing ? (
 					<button onClick={() => setIsEditing(true)} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50">
 						<Pencil className="w-4 h-4" /> Edit
 					</button>
-				) : (
+				) : vendorProfileComplete && isEditing ? (
 					<>
 						<button onClick={() => setIsEditing(false)} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50">
 							<X className="w-4 h-4" /> Cancel
@@ -300,10 +329,10 @@ const SellerProfileTab: React.FC = () => {
 							{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
 						</button>
 					</>
-				)}
+				) : null}
 			</div>
 		</div>
-	), [isEditing, saving]);
+	), [isEditing, saving, vendorProfileComplete]);
 
 	// Completed summary view (read-only)
 	const renderCompletedSummary = () => (
@@ -774,6 +803,110 @@ const SellerProfileTab: React.FC = () => {
 
 	return (
 		<div className="space-y-6">
+			{/* Welcome Walkthrough Dialog */}
+			<Dialog open={showWelcome} onOpenChange={(open) => {
+				setShowWelcome(open);
+				if (!open) {
+					localStorage.setItem('dentpal_vendor_welcome_seen', 'true');
+				}
+			}}>
+				<DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle className="text-xl flex items-center gap-2">
+							<span className="text-2xl">👋</span> Welcome to Vendor Enrollment!
+						</DialogTitle>
+						<DialogDescription className="text-base mt-2">
+							Let's get your seller account set up in a few easy steps.
+						</DialogDescription>
+					</DialogHeader>
+					
+					<div className="space-y-6 py-4">
+						{/* Step by step guide */}
+						<div className="space-y-4">
+							<div className="flex gap-4">
+								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center font-semibold text-lg">1</div>
+								<div>
+									<h3 className="font-semibold text-gray-900 mb-1">Upload BIR Form 2303</h3>
+									<p className="text-sm text-gray-600">Upload your BIR Certificate of Registration (Form 2303). We'll automatically extract your TIN, RDO code, tax types, and other details to save you time.</p>
+								</div>
+							</div>
+							
+							<div className="flex gap-4">
+								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-lg">2</div>
+								<div>
+									<h3 className="font-semibold text-gray-900 mb-1">Complete Company Information</h3>
+									<p className="text-sm text-gray-600">Fill in your company name, store name, and select the product categories you'll be selling (Consumables, Dental Equipment, etc.).</p>
+								</div>
+							</div>
+							
+							<div className="flex gap-4">
+								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-semibold text-lg">3</div>
+								<div>
+									<h3 className="font-semibold text-gray-900 mb-1">Provide Contact & Address Details</h3>
+									<p className="text-sm text-gray-600">Enter your contact person, phone number, email, and complete business address. We'll help you verify it on the map.</p>
+								</div>
+							</div>
+							
+							<div className="flex gap-4">
+								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-semibold text-lg">4</div>
+								<div>
+									<h3 className="font-semibold text-gray-900 mb-1">Upload Required Documents</h3>
+									<p className="text-sm text-gray-600">Submit SEC/DTI certificate, FDA/LTO permit, product catalogue, and warranty policy. These documents help us verify your business.</p>
+								</div>
+							</div>
+							
+							<div className="flex gap-4">
+								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-semibold text-lg">5</div>
+								<div>
+									<h3 className="font-semibold text-gray-900 mb-1">Review & Submit</h3>
+									<p className="text-sm text-gray-600">Review all your information, then submit for approval. Once approved, you'll have full access to all seller features!</p>
+								</div>
+							</div>
+						</div>
+						
+						{/* Important notes */}
+						<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+							<div className="flex gap-3">
+								<div className="text-blue-600 text-xl">💡</div>
+								<div>
+									<h4 className="font-semibold text-blue-900 mb-1">Helpful Tips</h4>
+									<ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+										<li>Have your BIR Form 2303 ready (PDF or image)</li>
+										<li>Prepare your business documents (SEC/DTI, FDA/LTO)</li>
+										<li>The process takes about 5-10 minutes to complete</li>
+										<li>You can save your progress and come back later</li>
+									</ul>
+								</div>
+							</div>
+						</div>
+					</div>
+					
+					<DialogFooter className="flex gap-2">
+						<button 
+							onClick={() => {
+								localStorage.setItem('dentpal_vendor_welcome_seen', 'true');
+								setShowWelcome(false);
+							}}
+							className="px-4 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+						>
+							I'll do this later
+						</button>
+						<button 
+							onClick={() => {
+								localStorage.setItem('dentpal_vendor_welcome_seen', 'true');
+								setShowWelcome(false);
+								if (!vendorProfileComplete) {
+									setIsEditing(true);
+								}
+							}}
+							className="px-4 py-2 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 font-medium"
+						>
+							Let's Get Started! 🚀
+						</button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+			
 			{Title}
 
 			{/* Show completed summary if profile is complete OR if vendor data exists */}
@@ -790,6 +923,27 @@ const SellerProfileTab: React.FC = () => {
 				</>
 			) : (
 				<>
+					{/* Progress banner with helpful context */}
+					{!vendorProfileComplete && (
+						<div className="bg-gradient-to-r from-teal-50 to-blue-50 border border-teal-200 rounded-lg p-4">
+							<div className="flex items-start gap-3">
+								<div className="text-2xl">📝</div>
+								<div className="flex-1">
+									<h3 className="font-semibold text-gray-900 mb-1">Complete Your Vendor Profile</h3>
+									<p className="text-sm text-gray-700 mb-2">
+										You're on <strong>Step {step + 1} of {STEPS.length}</strong>: {STEPS[step]}
+									</p>
+									<div className="w-full bg-gray-200 rounded-full h-2">
+										<div 
+											className="bg-teal-600 h-2 rounded-full transition-all duration-300" 
+											style={{ width: `${((step + 1) / STEPS.length) * 100}%` }}
+										/>
+									</div>
+								</div>
+							</div>
+						</div>
+					)}
+					
 					{/* Stepper Header and wizard shown only when not completed or when editing */}
 					<div className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-gray-100 px-3 py-2 rounded-t-lg">
 						<ol className="flex items-center gap-2 overflow-x-auto">
@@ -807,6 +961,17 @@ const SellerProfileTab: React.FC = () => {
 					<div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
 						{step === 0 && (
 							<>
+								{/* Step helper message */}
+								<div className="bg-blue-50 border-l-4 border-blue-400 p-3 mb-3">
+									<div className="flex items-start gap-2">
+										<span className="text-blue-600 text-lg">💡</span>
+										<div>
+											<p className="text-sm font-medium text-blue-900">Quick Tip</p>
+											<p className="text-xs text-blue-800 mt-1">Upload your BIR Form 2303 (Certificate of Registration). Our system will automatically read and fill in your TIN, RDO code, and other tax information to save you time!</p>
+										</div>
+									</div>
+								</div>
+								
 								<div className="flex items-center justify-between">
 									<div>
 										<div className="text-sm font-medium text-gray-900">Step 1: Upload & Review BIR 2303</div>
@@ -913,6 +1078,17 @@ const SellerProfileTab: React.FC = () => {
 							{/* Step 2 (index 1): Categories + Company & Address */}
 							{step === 1 && (
 								<>
+									{/* Step helper message */}
+									<div className="bg-purple-50 border-l-4 border-purple-400 p-3 mb-3">
+										<div className="flex items-start gap-2">
+											<span className="text-purple-600 text-lg">🏢</span>
+											<div>
+												<p className="text-sm font-medium text-purple-900">Company Information</p>
+												<p className="text-xs text-purple-800 mt-1">Select your product categories and provide your business details. Make sure your company name matches your official registration documents.</p>
+											</div>
+										</div>
+									</div>
+									
 									{/* Categories */}
 									<div>
 										<div className="text-xs font-medium text-gray-600 mb-1">Product Category</div>
@@ -1020,6 +1196,17 @@ const SellerProfileTab: React.FC = () => {
 							{/* Step 3 (index 2): Contacts & Documents */}
 							{step === 2 && (
 								<>
+									{/* Step helper message */}
+									<div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-3">
+										<div className="flex items-start gap-2">
+											<span className="text-amber-600 text-lg">📞</span>
+											<div>
+												<p className="text-sm font-medium text-amber-900">Contact & Documentation</p>
+												<p className="text-xs text-amber-800 mt-1">Provide accurate contact information and upload all required business documents. These will be used to verify your business and communicate with you about orders.</p>
+											</div>
+										</div>
+									</div>
+									
 									{/* Contacts */}
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 										<div>
