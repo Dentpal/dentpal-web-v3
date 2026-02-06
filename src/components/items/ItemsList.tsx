@@ -75,11 +75,10 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     description: string;
     categoryID: string;
     subCategoryID: string;
-    price: number;
+    price: number | string;
     specialPrice: number | '';
-    inStock: number;
+    inStock: number | string;
     suggestedThreshold: number;
-    lowestPrice: number | '';
     imageURL: string;
     imageFile?: File | null;
     imagePreview?: string | null;
@@ -93,14 +92,14 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       id?: string;
       name: string;
       SKU: string;
-      price: number;
-      stock: number;
+      price: number | string;
+      stock: number | string;
       imageURL: string;
       imageFile?: File | null;
       imagePreview?: string | null;
-      weight: number | '';
+      weight: number | string | '';
       weightUnit: string;
-      dimensions: { length: number | ''; width: number | ''; height: number | '' };
+      dimensions: { length: number | string | ''; width: number | string | ''; height: number | string | '' };
       dimensionsUnit: string;
       isFragile?: boolean;
       isNew?: boolean;
@@ -322,7 +321,6 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       specialPrice: product.specialPrice || '',
       inStock: product.inStock || 0,
       suggestedThreshold: product.suggestedThreshold || 5,
-      lowestPrice: product.lowestPrice || '',
       imageURL: product.imageUrl || '',
       imageFile: null,
       imagePreview: null,
@@ -376,7 +374,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         imageUrl = await getDownloadURL(sRef);
       }
 
-      // Update product details
+      // Update product details (price and lowestPrice are handled by updatePriceAndPromo)
       await ProductService.updateProduct(editingItem, {
         name: editForm.name,
         description: editForm.description,
@@ -384,7 +382,6 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         categoryID: editForm.categoryID || null,
         subCategoryID: editForm.subCategoryID || null,
         suggestedThreshold: editForm.suggestedThreshold,
-        lowestPrice: editForm.lowestPrice !== '' ? Number(editForm.lowestPrice) : null,
         status: editForm.status,
         dangerousGoods: editForm.dangerousGoods,
         warrantyType: editForm.warrantyType || null,
@@ -395,7 +392,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       await ProductService.updatePriceAndPromo(
         editingItem,
         {
-          price: editForm.price,
+          price: typeof editForm.price === 'string' ? (parseFloat(editForm.price) || 0) : editForm.price,
           specialPrice: editForm.specialPrice !== '' ? Number(editForm.specialPrice) : null,
           promoStart: editForm.promoStart,
           promoEnd: editForm.promoEnd,
@@ -425,8 +422,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           await ProductService.addVariations(editingItem, [{
             name: variation.name,
             sku: variation.SKU,
-            price: variation.price,
-            stock: variation.stock,
+            price: typeof variation.price === 'string' ? (parseFloat(variation.price) || 0) : variation.price,
+            stock: typeof variation.stock === 'string' ? (parseInt(variation.stock) || 0) : variation.stock,
             weight: variation.weight !== '' ? Number(variation.weight) : undefined,
             weightUnit: variation.weightUnit,
             dimensions: {
@@ -443,8 +440,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           await ProductService.updateVariation(editingItem, variation.id, {
             name: variation.name,
             SKU: variation.SKU,
-            price: variation.price,
-            stock: variation.stock,
+            price: typeof variation.price === 'string' ? (parseFloat(variation.price) || 0) : variation.price,
+            stock: typeof variation.stock === 'string' ? (parseInt(variation.stock) || 0) : variation.stock,
             weight: variation.weight !== '' ? Number(variation.weight) : undefined,
             weightUnit: variation.weightUnit,
             dimensions: {
@@ -458,6 +455,30 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           });
         }
       }
+
+      // Update local items state immediately to reflect changes
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === editingItem 
+            ? { 
+                ...item, 
+                name: editForm.name,
+                description: editForm.description,
+                imageUrl: imageUrl,
+                categoryID: editForm.categoryID || '',
+                category: editForm.categoryID || '',
+                subCategoryID: editForm.subCategoryID || '',
+                subcategory: editForm.subCategoryID || '',
+                price: typeof editForm.price === 'string' ? (parseFloat(editForm.price) || 0) : editForm.price,
+                specialPrice: editForm.specialPrice !== '' ? Number(editForm.specialPrice) : null,
+                inStock: typeof editForm.inStock === 'string' ? (parseInt(editForm.inStock) || 0) : editForm.inStock,
+                suggestedThreshold: editForm.suggestedThreshold,
+                status: editForm.status,
+                updatedAt: Date.now(),
+              } 
+            : item
+        )
+      );
 
       toast({ title: 'Success', description: 'Product updated successfully' });
       setShowEditModal(false);
@@ -577,7 +598,6 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           </thead>
           <tbody>
             {pagedItems.map((item) => {
-              const showSale = item.specialPrice != null && Number(item.specialPrice) > 0 && Number(item.specialPrice) < Number(item.price ?? Infinity);
               const status = (item.status ?? 'active');
               const isActive = status === 'active';
               const isDeleted = status === 'deleted';
@@ -612,14 +632,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   {/* Price */}
                   <td className="px-4 py-3 text-gray-700">
                     {item.price != null ? (
-                      showSale ? (
-                        <>
-                          <span className="font-semibold text-teal-700">₱{Number(item.specialPrice).toLocaleString()}</span>
-                          <span className="line-through text-gray-400 ml-1">₱{Number(item.price).toLocaleString()}</span>
-                        </>
-                      ) : (
-                        <span>₱{Number(item.price).toLocaleString()}</span>
-                      )
+                      <span>₱{Number(item.price).toLocaleString()}</span>
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
@@ -827,15 +840,20 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
                       value={editForm.price}
-                      onChange={(e) => setEditForm({...editForm, price: parseFloat(e.target.value) || 0})}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Allow empty or valid number
+                        if (value === '' || !isNaN(Number(value))) {
+                          setEditForm({...editForm, price: value});
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       placeholder="0.00"
                     />
                   </div>
-                  <div>
+                  {/* <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Special Price (₱)</label>
                     <input
                       type="number"
@@ -845,18 +863,24 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       placeholder="0.00"
                     />
-                  </div>
+                  </div> */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Stock</label>
                     <input
-                      type="number"
+                      type="text"
                       value={editForm.inStock}
-                      onChange={(e) => setEditForm({...editForm, inStock: parseInt(e.target.value) || 0})}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Allow empty or valid integer
+                        if (value === '' || /^\d+$/.test(value)) {
+                          setEditForm({...editForm, inStock: value});
+                        }
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       placeholder="0"
                     />
                   </div>
-                  <div>
+                  {/* <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Threshold</label>
                     <input
                       type="number"
@@ -865,7 +889,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       placeholder="5"
                     />
-                  </div>
+                  </div> */}
                 </div>
               </div>
 
@@ -889,8 +913,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                           {
                             name: '',
                             SKU: '',
-                            price: 0,
-                            stock: 0,
+                            price: '',
+                            stock: '',
                             imageURL: '',
                             imageFile: null,
                             imagePreview: null,
@@ -1034,13 +1058,16 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
                               <input
-                                type="number"
-                                step="0.01"
+                                type="text"
                                 value={variation.price}
                                 onChange={(e) => {
-                                  const updatedVariations = [...editForm.variations];
-                                  updatedVariations[index] = { ...variation, price: parseFloat(e.target.value) || 0 };
-                                  setEditForm({ ...editForm, variations: updatedVariations });
+                                  const value = e.target.value;
+                                  // Allow empty or valid number
+                                  if (value === '' || !isNaN(Number(value))) {
+                                    const updatedVariations = [...editForm.variations];
+                                    updatedVariations[index] = { ...variation, price: value };
+                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                  }
                                 }}
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 placeholder="0.00"
@@ -1051,12 +1078,16 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">Stock Quantity *</label>
                               <input
-                                type="number"
+                                type="text"
                                 value={variation.stock}
                                 onChange={(e) => {
-                                  const updatedVariations = [...editForm.variations];
-                                  updatedVariations[index] = { ...variation, stock: parseInt(e.target.value) || 0 };
-                                  setEditForm({ ...editForm, variations: updatedVariations });
+                                  const value = e.target.value;
+                                  // Allow empty or valid integer
+                                  if (value === '' || /^\d+$/.test(value)) {
+                                    const updatedVariations = [...editForm.variations];
+                                    updatedVariations[index] = { ...variation, stock: value };
+                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                  }
                                 }}
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 placeholder="0"
@@ -1068,13 +1099,16 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                               <label className="block text-sm font-medium text-gray-700 mb-2">Weight</label>
                               <div className="flex gap-2">
                                 <input
-                                  type="number"
-                                  step="0.01"
+                                  type="text"
                                   value={variation.weight}
                                   onChange={(e) => {
-                                    const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = { ...variation, weight: e.target.value === '' ? '' : parseFloat(e.target.value) };
-                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                    const value = e.target.value;
+                                    // Allow empty or valid number
+                                    if (value === '' || !isNaN(Number(value))) {
+                                      const updatedVariations = [...editForm.variations];
+                                      updatedVariations[index] = { ...variation, weight: value };
+                                      setEditForm({ ...editForm, variations: updatedVariations });
+                                    }
                                   }}
                                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                   placeholder="0.00"
@@ -1101,48 +1135,57 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                               <label className="block text-sm font-medium text-gray-700 mb-2">Dimensions (L × W × H)</label>
                               <div className="flex gap-2">
                                 <input
-                                  type="number"
-                                  step="0.01"
+                                  type="text"
                                   value={variation.dimensions.length}
                                   onChange={(e) => {
-                                    const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = {
-                                      ...variation,
-                                      dimensions: { ...variation.dimensions, length: e.target.value === '' ? '' : parseFloat(e.target.value) }
-                                    };
-                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                    const value = e.target.value;
+                                    // Allow empty or valid number
+                                    if (value === '' || !isNaN(Number(value))) {
+                                      const updatedVariations = [...editForm.variations];
+                                      updatedVariations[index] = {
+                                        ...variation,
+                                        dimensions: { ...variation.dimensions, length: value }
+                                      };
+                                      setEditForm({ ...editForm, variations: updatedVariations });
+                                    }
                                   }}
                                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                   placeholder="Length"
                                 />
                                 <span className="text-gray-400 flex items-center">×</span>
                                 <input
-                                  type="number"
-                                  step="0.01"
+                                  type="text"
                                   value={variation.dimensions.width}
                                   onChange={(e) => {
-                                    const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = {
-                                      ...variation,
-                                      dimensions: { ...variation.dimensions, width: e.target.value === '' ? '' : parseFloat(e.target.value) }
-                                    };
-                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                    const value = e.target.value;
+                                    // Allow empty or valid number
+                                    if (value === '' || !isNaN(Number(value))) {
+                                      const updatedVariations = [...editForm.variations];
+                                      updatedVariations[index] = {
+                                        ...variation,
+                                        dimensions: { ...variation.dimensions, width: value }
+                                      };
+                                      setEditForm({ ...editForm, variations: updatedVariations });
+                                    }
                                   }}
                                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                   placeholder="Width"
                                 />
                                 <span className="text-gray-400 flex items-center">×</span>
                                 <input
-                                  type="number"
-                                  step="0.01"
+                                  type="text"
                                   value={variation.dimensions.height}
                                   onChange={(e) => {
-                                    const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = {
-                                      ...variation,
-                                      dimensions: { ...variation.dimensions, height: e.target.value === '' ? '' : parseFloat(e.target.value) }
-                                    };
-                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                    const value = e.target.value;
+                                    // Allow empty or valid number
+                                    if (value === '' || !isNaN(Number(value))) {
+                                      const updatedVariations = [...editForm.variations];
+                                      updatedVariations[index] = {
+                                        ...variation,
+                                        dimensions: { ...variation.dimensions, height: value }
+                                      };
+                                      setEditForm({ ...editForm, variations: updatedVariations });
+                                    }
                                   }}
                                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                   placeholder="Height"
