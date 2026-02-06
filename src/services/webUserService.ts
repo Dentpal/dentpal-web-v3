@@ -5,6 +5,7 @@ import {
   getDoc, 
   setDoc, 
   updateDoc, 
+  deleteDoc,
   query, 
   where, 
   orderBy, 
@@ -186,5 +187,25 @@ export async function resendUserInvite(email: string): Promise<boolean> {
   } catch (error) {
     console.error('Error resending invite:', error);
     throw new Error('Failed to resend invitation');
+  }
+}
+
+export async function deleteWebUser(uid: string): Promise<boolean> {
+  try {
+    // Delete from both collections to handle legacy data
+    const sellerDoc = doc(db, SELLER_COLLECTION, uid);
+    await deleteDoc(sellerDoc);
+    
+    try {
+      const webUserDoc = doc(db, WEB_USERS_COLLECTION, uid);
+      await deleteDoc(webUserDoc);
+    } catch (legacyError) {
+      console.warn('Legacy collection delete failed (may not exist):', legacyError);
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw new Error('Failed to delete user');
   }
 }

@@ -62,15 +62,7 @@ const menuItems: MenuItem[] = [
   // Booking tab is now fully hidden for all users
   { id: 'seller-orders', label: 'Seller Orders', icon: Calendar },
   // { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { 
-    id: "inventory", 
-    label: "Inventory", 
-    icon: Package,
-    subItems: [
-      { id: "inventory-history", label: "History", icon: History },
-      { id: "stock-adjustment", label: "Stock Adjustment", icon: Edit },
-    ]
-  },
+  { id: "inventory", label: "Inventory", icon: Package },
   { id: "items", label: "Items", icon: PlusSquare },
   { id: "chats", label: "Chats", icon: MessageSquare },
   //{ id: "notifications", label: "Notifications", icon: Bell },

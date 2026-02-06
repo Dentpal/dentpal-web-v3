@@ -4058,15 +4058,15 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
           <UsersTab />
         );
       case "inventory":
-      case "inventory-all":
-        if (!isAllowed("inventory")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
-        return (
-          <InventoryTab activeView="all" />
-        );
       case "inventory-history":
         if (!isAllowed("inventory")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return (
           <InventoryTab activeView="history" />
+        );
+      case "inventory-all":
+        if (!isAllowed("inventory")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
+        return (
+          <InventoryTab activeView="all" />
         );
       case "stock-adjustment":
         if (!isAllowed("inventory")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;

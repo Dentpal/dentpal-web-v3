@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 // Replace backend partner provisioning with direct web user service (Firestore + password email)
-import { createWebUser, updateWebUserAccess, setWebUserStatus, getWebUsers, resendUserInvite, createSellerSubAccount } from '@/services/webUserService';
+import { createWebUser, updateWebUserAccess, setWebUserStatus, getWebUsers, resendUserInvite, createSellerSubAccount, deleteWebUser } from '@/services/webUserService';
 import SellersService from '@/services/sellers';
 import type { WebUserProfile } from '@/types/webUser';
 import { useAuth } from '@/hooks/use-auth';
@@ -219,6 +219,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<{id: string; username: string} | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -707,8 +709,27 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   };
 
   const handleDeleteUser = (userId: string) => {
-    if (window.confirm("Are you sure you want to delete this user? This action cannot be undone.")) {
-      setUsers(prev => prev.filter((user) => user.id !== userId));
+    const user = users.find(u => u.id === userId);
+    if (user) {
+      setUserToDelete({ id: userId, username: user.username });
+      setDeleteModalOpen(true);
+    }
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    try {
+      // Delete from Firestore
+      await deleteWebUser(userToDelete.id);
+      
+      // Update local state after successful deletion
+      setUsers(prev => prev.filter((user) => user.id !== userToDelete.id));
+      toast({ title: 'User deleted', description: `${userToDelete.username} has been removed.` });
+      setDeleteModalOpen(false);
+      setUserToDelete(null);
+    } catch (e: any) {
+      setError?.(e.message || 'Failed to delete user');
+      toast({ title: 'Failed to delete user', description: e.message || 'Please try again.' });
     }
   };
 
@@ -2029,6 +2050,37 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               className="bg-green-600 hover:bg-green-700 text-white"
             >
               {platformFeeSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold">Delete User</DialogTitle>
+            <DialogDescription className="text-gray-600 mt-2">
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{userToDelete?.username}</span>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter className="mt-6 gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setDeleteModalOpen(false);
+                setUserToDelete(null);
+              }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={confirmDeleteUser}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

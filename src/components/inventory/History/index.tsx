@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAllLogsHistory } from './useAllLogsHistory';
 
 type DateRange = { start: Date | null; end: Date | null };
@@ -6,6 +7,7 @@ import DateRangePicker from '@/components/ui/DateRangePicker';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose } from '@/components/ui/sheet';
 
 const History: React.FC = () => {
+	const navigate = useNavigate();
 	const { logs, loading } = useAllLogsHistory();
 	const [search, setSearch] = useState('');
 	const [dateRange, setDateRange] = useState<DateRange>({ start: null, end: null });
@@ -67,6 +69,13 @@ const History: React.FC = () => {
 				/>
 				
 				<DateRangePicker value={dateRange} onChange={setDateRange} label="Select date range" />
+				
+				<button
+					onClick={() => navigate('/?tab=stock-adjustment')}
+					className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors whitespace-nowrap"
+				>
+					Stock Adjustment
+				</button>
 			</div>
 			<div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
 				<table className="w-full text-base">

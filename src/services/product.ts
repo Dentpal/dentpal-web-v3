@@ -357,16 +357,11 @@ export const ProductService = {
         // Sum variation stocks
         let totalStock = 0;
         let variationCount = 0;
-        let derivedPrice: number | undefined = pd.lowestPrice != null ? Number(pd.lowestPrice) : undefined;
         try {
           const varSnap = await getDocs(collection(db, PRODUCT_COLLECTION, d.id, 'Variation'));
           const vars = varSnap.docs.map(vd => vd.data() as any);
           variationCount = vars.length;
           totalStock = vars.reduce((sum, v) => sum + (Number(v.stock ?? 0)), 0);
-          if (derivedPrice == null && vars.length > 0) {
-            const minVarPrice = Math.min(...vars.map(v => Number(v.price ?? 0) || 0));
-            derivedPrice = isFinite(minVarPrice) ? Number(minVarPrice) : undefined;
-          }
         } catch {}
         // Effective special price: only expose when within schedule or long-term
         let effectiveSpecial: number | undefined = undefined;
@@ -383,7 +378,7 @@ export const ProductService = {
           name: String(pd.name ?? ''),
           description: typeof pd.description === 'string' ? pd.description : '',
           imageUrl: pd.imageURL ? String(pd.imageURL) : undefined,
-          price: derivedPrice != null ? derivedPrice : (pd.price != null ? Number(pd.price) : undefined),
+          price: pd.price != null ? Number(pd.price) : undefined,
           specialPrice: effectiveSpecial,
           inStock: Number(totalStock || 0),
           status: s,
@@ -529,7 +524,7 @@ export const ProductService = {
     categoryID: string | null;
     subCategoryID: string | null;
     isActive: boolean;
-    lowestPrice: number | null;
+    price: number | null;
     status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
     suggestedThreshold: number | null;
     // Updated: warranty & compliance
@@ -546,7 +541,7 @@ export const ProductService = {
       ...(updates.categoryID !== undefined ? { categoryID: updates.categoryID } : {}),
       ...(updates.subCategoryID !== undefined ? { subCategoryID: updates.subCategoryID, subcategoryID: updates.subCategoryID } : {}),
       ...(updates.isActive !== undefined ? { isActive: !!updates.isActive } : {}),
-      ...(updates.lowestPrice !== undefined ? { lowestPrice: updates.lowestPrice } : {}),
+      ...(updates.price !== undefined ? { price: updates.price } : {}),
       ...(updates.status !== undefined ? { status: updates.status } : {}),
       ...(updates.suggestedThreshold !== undefined ? { suggestedThreshold: updates.suggestedThreshold } : {}),
       ...(updates.dangerousGoods !== undefined ? { dangerousGoods: updates.dangerousGoods } : {}),
@@ -576,15 +571,11 @@ export const ProductService = {
     const productName = currentData.name || 'Unknown Product';
     const sellerId = currentData.sellerId || '';
     
-    // Decide lowestPrice to aid list display
-    const lowest = [payload.price, payload.specialPrice].filter((x) => x != null).map(Number);
-    const nextLowest = lowest.length ? Math.min(...lowest) : null;
     await updateDoc(pRef, {
       price: payload.price ?? null,
       specialPrice: payload.specialPrice ?? null,
       promoStart: payload.promoStart ?? null,
       promoEnd: payload.promoEnd ?? null,
-      lowestPrice: nextLowest,
       updatedAt: serverTimestamp(),
     });
     
