@@ -82,7 +82,8 @@ const SellerProfileTab: React.FC = () => {
 		taxTypes: [] as string[],
 		lineOfBusiness: '',
 		dateOfRegistration: '', // YYYY-MM-DD
-		bankingInfo: '',
+		bankName: '',
+		bankAccountNumber: '',
 		bankBranchAddress: '',
 		merchantAgreement: null as File | null,
 		requirements: {
@@ -169,6 +170,7 @@ const SellerProfileTab: React.FC = () => {
 	// Wizard steps
 	const STEPS = ['Upload & Review', 'Company & Address', 'Contacts & Documents'];
 	const [step, setStep] = useState(0);
+	const [attemptedNext, setAttemptedNext] = useState(false); // Track if user tried to proceed
 
 	// Refs for jump-to-edit UX
 	const tinInputRef = useRef<HTMLInputElement>(null);
@@ -234,8 +236,10 @@ const SellerProfileTab: React.FC = () => {
 
 	// OCR compare when 2303 is uploaded
 	const [ocrLoading, setOcrLoading] = useState(false);
+	const [ocrFailed, setOcrFailed] = useState(false);
 	const runTinOcrCheck = async (file: File) => {
 		setOcrLoading(true);
+		setOcrFailed(false);
 		try {
 			const { data } = await Tesseract.recognize(file, 'eng', { logger: () => {} });
 			const text = (data.text || '').replace(/\s+/g, ' ').toUpperCase();
@@ -247,7 +251,10 @@ const SellerProfileTab: React.FC = () => {
 			const ok = unique.some(t => t === inputTin || (t.length === 12 && inputTin.length === 9 && t.startsWith(inputTin)));
 			setErrors(prev => ({ ...prev, tinOcr: ok ? '' : unique.length ? 'TIN in 2303 does not match the entered TIN.' : 'Could not detect a TIN in the uploaded 2303.' }));
 		} catch (e) {
-			setErrors(prev => ({ ...prev, tinOcr: 'OCR failed. Please ensure the document is clear.' }));
+			console.error('OCR failed:', e);
+			setOcrFailed(true);
+			// Non-blocking warning - allow user to proceed with manual entry
+			setErrors(prev => ({ ...prev, tinOcr: 'OCR failed to read the image. You can proceed with manual entry.' }));
 		} finally {
 			setOcrLoading(false);
 		}
@@ -271,22 +278,127 @@ const SellerProfileTab: React.FC = () => {
 	const blockingErrors = !!(errors.mobile || errors.email || errors.tin || errors.zip);
 	const addressReady = !!(vendor.address.street && vendor.address.municipality && vendor.address.province);
 
+	// Comprehensive field validation for each step
+	const step0Valid = useMemo(() => {
+		// Step 0: BIR 2303 upload and extracted data confirmation
+		return !!(
+			vendor.requirements.bir2303 && 
+			!extractionLoading && 
+			userConfirmed &&
+			vendor.tin && 
+			!errors.tin &&
+			vendor.companyName &&
+			vendor.rdoCode &&
+			vendor.lineOfBusiness &&
+			vendor.dateOfRegistration &&
+			vendor.taxTypes.length > 0 &&
+			vendor.address.street &&
+			vendor.address.municipality &&
+			vendor.address.province &&
+			vendor.address.zip &&
+			!errors.zip
+		);
+	}, [vendor, extractionLoading, userConfirmed, errors.tin, errors.zip]);
+
+	const step1Valid = useMemo(() => {
+		// Step 1: Company Info, and Address
+		return !!(
+			vendor.companyName &&
+			vendor.storeName &&
+			vendor.contactPerson &&
+			vendor.address.street &&
+			vendor.address.barangay &&
+			vendor.address.municipality &&
+			vendor.address.province &&
+			vendor.address.zip &&
+			!errors.zip
+		);
+	}, [vendor, errors.zip]);
+
+	const step2Valid = useMemo(() => {
+		// Step 2: Contacts, Banking, and Additional Documents
+		return !!(
+			vendor.mobile &&
+			!errors.mobile &&
+			vendor.email &&
+			!errors.email &&
+			vendor.bankName &&
+			vendor.bankAccountNumber &&
+			vendor.bankBranchAddress &&
+			vendor.requirements.secOrDti &&
+			vendor.requirements.fdaLto
+		);
+	}, [vendor, errors.mobile, errors.email]);
+
 	// Per-step validation gating
 	const canProceed = useMemo(() => {
 		switch (step) {
 			case 0:
-				// Must have uploaded 2303, extraction finished, user confirmed review, and TIN format has no error (OCR/date are warnings)
-				return !!vendor.requirements.bir2303 && !extractionLoading && !!userConfirmed && !errors.tin;
+				return step0Valid;
 			case 1:
-				return addressReady && !errors.zip;
+				return step1Valid;
 			case 2:
-				return !blockingErrors && !!vendor.requirements.bir2303 && !!userConfirmed;
+				return step2Valid;
 			default:
 				return true;
 		}
-	}, [step, vendor, extractionLoading, userConfirmed, errors.tin, errors.zip, addressReady, blockingErrors]);
-	const next = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
-	const back = () => setStep(s => Math.max(s - 1, 0));
+	}, [step, step0Valid, step1Valid, step2Valid]);
+	
+	const next = () => {
+		setAttemptedNext(true);
+		if (canProceed) {
+			setStep(s => Math.min(s + 1, STEPS.length - 1));
+			setAttemptedNext(false); // Reset for next step
+		}
+	};
+	
+	const back = () => {
+		setStep(s => Math.max(s - 1, 0));
+		setAttemptedNext(false); // Reset when going back
+	};
+
+	// Get list of missing required fields for current step
+	const getMissingFields = () => {
+		const missing: string[] = [];
+		
+		switch (step) {
+			case 0:
+				if (!vendor.requirements.bir2303) missing.push('BIR 2303 document');
+				if (!userConfirmed) missing.push('Confirmation of extracted details');
+				if (!vendor.tin || errors.tin) missing.push('Valid TIN');
+				if (!vendor.companyName) missing.push('Company Name');
+				if (!vendor.rdoCode) missing.push('RDO Code');
+				if (!vendor.lineOfBusiness) missing.push('Line of Business');
+				if (!vendor.dateOfRegistration) missing.push('Date of Registration');
+				if (!vendor.taxTypes.length) missing.push('At least one Tax Type');
+				if (!vendor.address.street) missing.push('Street Address');
+				if (!vendor.address.municipality) missing.push('Municipality/City');
+				if (!vendor.address.province) missing.push('Province');
+				if (!vendor.address.zip || errors.zip) missing.push('Valid ZIP Code');
+				break;
+			case 1:
+				if (!vendor.companyName) missing.push('Company Name');
+				if (!vendor.storeName) missing.push('Store Name');
+				if (!vendor.contactPerson) missing.push('Customer Service Contact Person');
+				if (!vendor.address.street) missing.push('Street Address');
+				if (!vendor.address.barangay) missing.push('Barangay');
+				if (!vendor.address.municipality) missing.push('Municipality/City');
+				if (!vendor.address.province) missing.push('Province');
+				if (!vendor.address.zip || errors.zip) missing.push('Valid ZIP Code');
+				break;
+			case 2:
+				if (!vendor.mobile || errors.mobile) missing.push('Valid Mobile Number');
+				if (!vendor.email || errors.email) missing.push('Valid Email Address');
+				if (!vendor.bankName) missing.push('Bank Name');
+				if (!vendor.bankAccountNumber) missing.push('Bank Account Number');
+				if (!vendor.bankBranchAddress) missing.push('Bank Branch Address');
+				if (!vendor.requirements.secOrDti) missing.push('SEC Certificate or DTI Registration');
+				if (!vendor.requirements.fdaLto) missing.push('FDA LTO Medical Device');
+				break;
+		}
+		
+		return missing;
+	};
 
 	const Title = useMemo(() => (
 		<div className="flex items-center justify-between">
@@ -420,6 +532,8 @@ const SellerProfileTab: React.FC = () => {
 	const setReqFile = (k: keyof typeof vendor.requirements, file: File | null) => {
 		setVendor(v => ({ ...v, requirements: { ...v.requirements, [k]: file } }));
 		if (k === 'bir2303' && file) {
+			// Reset OCR failure state
+			setOcrFailed(false);
 			// Run OCR check in background
 			runTinOcrCheck(file);
 			// Extract and prefill fields
@@ -555,16 +669,28 @@ const SellerProfileTab: React.FC = () => {
 					source = 'pdf-text';
 				} else {
 					// Render first page then OCR
-					const canvas = await canvasFromPdfFirstPage(data);
-					const dataUrl = canvas.toDataURL('image/png');
-					const { data: ocr } = await Tesseract.recognize(dataUrl, 'eng', { logger: () => {} });
-					text = ocr.text || '';
-					source = 'ocr-pdf-render';
+					try {
+						const canvas = await canvasFromPdfFirstPage(data);
+						const dataUrl = canvas.toDataURL('image/png');
+						const { data: ocr } = await Tesseract.recognize(dataUrl, 'eng', { logger: () => {} });
+						text = ocr.text || '';
+						source = 'ocr-pdf-render';
+					} catch (ocrError) {
+						console.error('OCR on PDF failed:', ocrError);
+						// Allow user to proceed without extracted data
+						source = 'unknown';
+					}
 				}
 			} else {
-				const { data: ocr } = await Tesseract.recognize(file, 'eng', { logger: () => {} });
-				text = ocr.text || '';
-				source = 'ocr-image';
+				try {
+					const { data: ocr } = await Tesseract.recognize(file, 'eng', { logger: () => {} });
+					text = ocr.text || '';
+					source = 'ocr-image';
+				} catch (ocrError) {
+					console.error('OCR on image failed:', ocrError);
+					// Allow user to proceed without extracted data
+					source = 'unknown';
+				}
 			}
 			const sug = parse2303Text(text);
 			sug.textSource = source;
@@ -584,7 +710,10 @@ const SellerProfileTab: React.FC = () => {
 			// Validate new fields
 			setErrors(prev => ({ ...prev, regDate: validateRegDate(sug.values.dateOfRegistration || '') }));
 		} catch (e) {
-			// no-op, suggestions remain null
+			console.error('Document extraction failed:', e);
+			// Set empty suggestions to allow manual entry
+			setSuggestions({ textSource: 'unknown', values: {}, confidence: {} });
+			setSuggestionsOpen(true);
 		} finally {
 			setExtractionLoading(false);
 		}
@@ -773,7 +902,8 @@ const SellerProfileTab: React.FC = () => {
 				dateOfRegistration: vendor.dateOfRegistration,
 				// Other details
 				website: vendor.website,
-				bankingInfo: vendor.bankingInfo,
+				bankName: vendor.bankName,
+				bankAccountNumber: vendor.bankAccountNumber,
 				bankBranchAddress: vendor.bankBranchAddress,
 				bir: birUpload,
 				documents,
@@ -835,7 +965,7 @@ const SellerProfileTab: React.FC = () => {
 								<div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-lg">2</div>
 								<div>
 									<h3 className="font-semibold text-gray-900 mb-1">Complete Company Information</h3>
-									<p className="text-sm text-gray-600">Fill in your company name, store name, and select the product categories you'll be selling (Consumables, Dental Equipment, etc.).</p>
+									<p className="text-sm text-gray-600">Fill in your company name, store name, and complete address details to proceed to the next step.</p>
 								</div>
 							</div>
 							
@@ -975,7 +1105,7 @@ const SellerProfileTab: React.FC = () => {
 								<div className="flex items-center justify-between">
 									<div>
 										<div className="text-sm font-medium text-gray-900">Step 1: Upload & Review BIR 2303</div>
-										<p className="text-xs text-gray-600">Upload a PDF or image. We will auto-extract your details for review.</p>
+										<p className="text-xs text-gray-600">Upload a PDF or image. We will auto-extract your details for review. If extraction fails, you can manually enter them.</p>
 									</div>
 									<div className="flex items-center gap-3">
 										<input
@@ -988,6 +1118,11 @@ const SellerProfileTab: React.FC = () => {
 										{vendor.requirements.bir2303 && !extractionLoading && (
 											<span className="text-xs text-gray-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-teal-600"/> {vendor.requirements.bir2303.name}</span>
 										)}
+										{ocrFailed && (
+											<span className="text-xs text-amber-700 inline-flex items-center gap-1">
+												<AlertCircle className="w-3 h-3"/> Manual entry required
+											</span>
+										)}
 									</div>
 								</div>
 
@@ -995,46 +1130,116 @@ const SellerProfileTab: React.FC = () => {
 								{suggestions && (
 									<div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
 										<div className="flex items-center justify-between">
-											<div className="text-sm font-medium text-gray-900">Review extracted details</div>
+											<div className="text-sm font-medium text-gray-900">
+												{Object.keys(suggestions.values).length > 0 ? 'Review extracted details' : 'Manual Entry Required'}
+											</div>
 											<button type="button" className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-white" onClick={()=> setSuggestionsOpen(s=>!s)}>{suggestionsOpen ? 'Hide' : 'Show'}</button>
 										</div>
 										{suggestionsOpen && (
-											<div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+											<>
+												{/* Show message when OCR failed or no data extracted */}
+												{Object.keys(suggestions.values).length === 0 && (
+													<div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+														<div className="flex gap-2">
+															<AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+															<div className="text-xs text-amber-800">
+																<p className="font-medium mb-1">Unable to extract data from document</p>
+																<p>The system couldn't read information from your uploaded BIR 2303. This can happen with low-quality scans or certain image formats. <strong>You can proceed by manually entering the details below.</strong></p>
+															</div>
+														</div>
+													</div>
+												)}
+												
+												{/* Show missing fields warning for Step 0 when user attempts to proceed */}
+												{step === 0 && attemptedNext && !canProceed && (
+													<div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+														<div className="flex items-start justify-between gap-3">
+															<div className="flex gap-2 flex-1">
+																<AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+																<div className="flex-1">
+																	<p className="text-xs font-medium text-red-900 mb-1">Please complete all required fields:</p>
+																	<ul className="text-xs text-red-800 list-disc list-inside space-y-0.5">
+																		{getMissingFields().map((field, idx) => (
+																			<li key={idx}>{field}</li>
+																		))}
+																	</ul>
+																</div>
+															</div>
+															<button
+																type="button"
+																onClick={() => setAttemptedNext(false)}
+																className="text-red-600 hover:text-red-800 flex-shrink-0"
+																aria-label="Dismiss"
+															>
+																<X className="w-4 h-4" />
+															</button>
+														</div>
+													</div>
+												)}
+												
+												<div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
 												{/* TIN */}
 												<div>
-													<label className="block text-xs font-medium text-gray-600 mb-1">TIN (from 2303) <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.tin||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														TIN (from 2303) <span className="text-red-500">*</span>
+														<span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.tin||0)*100)}%</span>
+													</label>
 													<input ref={tinInputRef} disabled={!isEditing} value={formattedTin} onChange={onTinChange} inputMode="numeric" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+													{errors.tin && <p className="mt-1 text-xs text-red-600">{errors.tin}</p>}
 												</div>
 												{/* Company Name */}
 												<div>
-													<label className="block text-xs font-medium text-gray-600 mb-1">Registered/Trade Name <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.companyName||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														Registered/Trade Name <span className="text-red-500">*</span>
+														<span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.companyName||0)*100)}%</span>
+													</label>
 													<input ref={companyNameRef} disabled={!isEditing} value={vendor.companyName} onChange={(e)=> setField('companyName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 												</div>
 												{/* Address quick fill */}
 												<div className="md:col-span-2">
-													<label className="block text-xs font-medium text-gray-600 mb-1">Address (split) <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.address||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														Address <span className="text-red-500">*</span>
+														{suggestions.confidence.address && suggestions.confidence.address > 0 && (
+															<span className="ml-1 text-[10px] text-gray-500">{Math.round(suggestions.confidence.address * 100)}%</span>
+														)}
+													</label>
 													<div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-														<input disabled={!isEditing} placeholder="Street" value={vendor.address.street} onChange={(e)=> setAddressField('street', e.target.value)} className="md:col-span-2 w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+														<input disabled={!isEditing} placeholder="Street *" value={vendor.address.street} onChange={(e)=> setAddressField('street', e.target.value)} className="md:col-span-2 w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 														<input disabled={!isEditing} placeholder="Barangay" value={vendor.address.barangay} onChange={(e)=> setAddressField('barangay', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-														<input disabled={!isEditing} placeholder="Municipality/City" value={vendor.address.municipality} onChange={(e)=> setAddressField('municipality', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-														<input disabled={!isEditing} placeholder="Province" value={vendor.address.province} onChange={(e)=> setAddressField('province', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-														<input disabled={!isEditing} placeholder="ZIP" value={vendor.address.zip} onChange={onZipChange} inputMode="numeric" maxLength={4} className={`w-full text-sm p-2 border rounded-lg disabled:bg-gray-50 ${errors.zip ? 'border-red-300' : 'border-gray-200'}`} />
+														<input disabled={!isEditing} placeholder="Municipality/City *" value={vendor.address.municipality} onChange={(e)=> setAddressField('municipality', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+														<input disabled={!isEditing} placeholder="Province *" value={vendor.address.province} onChange={(e)=> setAddressField('province', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+														<input disabled={!isEditing} placeholder="ZIP *" value={vendor.address.zip} onChange={onZipChange} inputMode="numeric" maxLength={4} className={`w-full text-sm p-2 border rounded-lg disabled:bg-gray-50 ${errors.zip ? 'border-red-300' : 'border-gray-200'}`} />
 													</div>
 													{errors.zip && <p className="mt-1 text-xs text-red-600">{errors.zip}</p>}
 												</div>
 												{/* RDO Code */}
 												<div>
-													<label className="block text-xs font-medium text-gray-600 mb-1">RDO Code <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.rdoCode||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														RDO Code <span className="text-red-500">*</span>
+														{suggestions.confidence.rdoCode && suggestions.confidence.rdoCode > 0 && (
+															<span className="ml-1 text-[10px] text-gray-500">{Math.round(suggestions.confidence.rdoCode * 100)}%</span>
+														)}
+													</label>
 													<input disabled={!isEditing} value={vendor.rdoCode} onChange={(e)=> setField('rdoCode', e.target.value.replace(/\D/g,''))} inputMode="numeric" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 												</div>
 												{/* Line of Business */}
 												<div>
-													<label className="block text-xs font-medium text-gray-600 mb-1">Line of Business <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.lineOfBusiness||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														Line of Business <span className="text-red-500">*</span>
+														{suggestions.confidence.lineOfBusiness && suggestions.confidence.lineOfBusiness > 0 && (
+															<span className="ml-1 text-[10px] text-gray-500">{Math.round(suggestions.confidence.lineOfBusiness * 100)}%</span>
+														)}
+													</label>
 													<input disabled={!isEditing} value={vendor.lineOfBusiness} onChange={(e)=> setField('lineOfBusiness', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 												</div>
 												{/* Date of Registration */}
 												<div>
-													<label className="block text-xs font-medium text-gray-600 mb-1">Date of Registration <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.dateOfRegistration||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														Date of Registration <span className="text-red-500">*</span>
+														{suggestions.confidence.dateOfRegistration && suggestions.confidence.dateOfRegistration > 0 && (
+															<span className="ml-1 text-[10px] text-gray-500">{Math.round(suggestions.confidence.dateOfRegistration * 100)}%</span>
+														)}
+													</label>
 													<input disabled={!isEditing} type="date" value={/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(vendor.dateOfRegistration) ? vendor.dateOfRegistration : ''} onChange={(e)=> { setField('dateOfRegistration', e.target.value); setErrors(prev=>({ ...prev, regDate: validateRegDate(e.target.value) })); }} className={`w-full text-sm p-2 border rounded-lg disabled:bg-gray-50 ${errors.regDate ? 'border-red-300' : 'border-gray-200'}`} />
 													{/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(vendor.dateOfRegistration) ? null : (vendor.dateOfRegistration && (
 														<p className="mt-1 text-xs text-amber-700">Unrecognized date format from document: {vendor.dateOfRegistration}. Please correct.</p>
@@ -1043,7 +1248,12 @@ const SellerProfileTab: React.FC = () => {
 												</div>
 												{/* Tax Types */}
 												<div className="md:col-span-2">
-													<label className="block text-xs font-medium text-gray-600 mb-1">Tax Types <span className="ml-1 text-[10px] text-gray-500">{Math.round((suggestions.confidence.taxTypes||0)*100)}%</span></label>
+													<label className="block text-xs font-medium text-gray-600 mb-1">
+														Tax Types <span className="text-red-500">*</span>
+														{suggestions.confidence.taxTypes && suggestions.confidence.taxTypes > 0 && (
+															<span className="ml-1 text-[10px] text-gray-500">{Math.round(suggestions.confidence.taxTypes * 100)}%</span>
+														)}
+													</label>
 													<div className="flex flex-wrap gap-2">
 														{Array.from(new Set([...(suggestions.values.taxTypes || []), ...vendor.taxTypes, ...TAX_TYPE_CATALOG]))
 															.filter(t => t && t !== 'VAT')
@@ -1058,13 +1268,16 @@ const SellerProfileTab: React.FC = () => {
 												</div>
 
 												<div className="md:col-span-2 flex items-center justify-between mt-1">
-													<div className="text-[11px] text-gray-500">Source: {suggestions.textSource.replace('-', ' ')}</div>
+													<div className="text-[11px] text-gray-500">
+														Source: {suggestions.textSource === 'unknown' ? 'Manual Input' : suggestions.textSource.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+													</div>
 													<label className="inline-flex items-center gap-2 text-xs text-gray-700">
 														<input type="checkbox" className="h-4 w-4" checked={userConfirmed} onChange={(e)=> setUserConfirmed(e.target.checked)} />
-														<span>I confirm the extracted details are correct.</span>
+														<span>I confirm that the details provided are correct.</span>
 													</label>
 												</div>
 											</div>
+											</>
 										)}
 									</div>
 								)}
@@ -1084,46 +1297,62 @@ const SellerProfileTab: React.FC = () => {
 											<span className="text-purple-600 text-lg">🏢</span>
 											<div>
 												<p className="text-sm font-medium text-purple-900">Company Information</p>
-												<p className="text-xs text-purple-800 mt-1">Select your product categories and provide your business details. Make sure your company name matches your official registration documents.</p>
+												<p className="text-xs text-purple-800 mt-1">Provide your business details and complete address. Make sure your company name matches your official registration documents.</p>
 											</div>
 										</div>
 									</div>
 									
-									{/* Categories */}
-									<div>
-										<div className="text-xs font-medium text-gray-600 mb-1">Product Category</div>
-										<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-											{CATEGORY_OPTIONS.map(cat => (
-												<label key={cat} className={`flex items-center gap-2 p-2 rounded-lg border ${vendor.categories.includes(cat) ? 'border-teal-300 bg-teal-50' : 'border-gray-200'}`}>
-													<input
-														type="checkbox"
-														disabled={!isEditing}
-														checked={vendor.categories.includes(cat)}
-														onChange={() => toggleCategory(cat)}
-														className="h-4 w-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 disabled:opacity-50"
-													/>
-													<span className="text-sm text-gray-800">{cat}</span>
-												</label>
-											))}
+									{/* Show missing fields warning for Step 1 when user attempts to proceed */}
+									{attemptedNext && !canProceed && (
+										<div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+											<div className="flex items-start justify-between gap-3">
+												<div className="flex gap-2 flex-1">
+													<AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+													<div className="flex-1">
+														<p className="text-xs font-medium text-red-900 mb-1">Please complete all required fields:</p>
+														<ul className="text-xs text-red-800 list-disc list-inside space-y-0.5">
+															{getMissingFields().map((field, idx) => (
+																<li key={idx}>{field}</li>
+															))}
+														</ul>
+													</div>
+												</div>
+												<button
+													type="button"
+													onClick={() => setAttemptedNext(false)}
+													className="text-red-600 hover:text-red-800 flex-shrink-0"
+													aria-label="Dismiss"
+												>
+													<X className="w-4 h-4" />
+												</button>
+											</div>
 										</div>
-									</div>
-
+									)}
+									
 									{/* Company Info & Address */}
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Company Name</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Company Name <span className="text-red-500">*</span>
+											</label>
 											<input ref={companyNameRef} disabled={!isEditing} value={vendor.companyName} onChange={(e)=> setField('companyName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Store Name</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Store Name <span className="text-red-500">*</span>
+											</label>
 											<input ref={storeNameRef} disabled={!isEditing} value={vendor.storeName} onChange={(e)=> setField('storeName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Customer Service Contact Person</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Customer Service Contact Person <span className="text-red-500">*</span>
+											</label>
 											<input ref={contactPersonRef} disabled={!isEditing} value={vendor.contactPerson} onChange={(e)=> setField('contactPerson', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div className="md:col-span-2">
-											<label className="block text-xs font-medium text-gray-600 mb-1">Street</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Street <span className="text-red-500">*</span>
+											</label>
 											<input ref={streetRef} disabled={!isEditing} value={vendor.address.street} onChange={(e)=> setAddressField('street', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div>
@@ -1134,28 +1363,36 @@ const SellerProfileTab: React.FC = () => {
 											</select>
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Province</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Province <span className="text-red-500">*</span>
+											</label>
 											<select ref={provinceRef} disabled={!isEditing} value={selectedProvince} onChange={(e)=> onProvinceSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
 												<option value="">Select province</option>
 												{(selectedRegion ? provinces : allProvinces).map(p => (<option key={p.code} value={p.code}>{p.name}</option>))}
 											</select>
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Municipality / City</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Municipality / City <span className="text-red-500">*</span>
+											</label>
 											<select ref={cityRef} disabled={!isEditing || !selectedProvince} value={selectedCity} onChange={(e)=> onCitySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
 												<option value="">Select city/municipality</option>
 												{cities.map(c => (<option key={c.code} value={c.code}>{c.name}</option>))}
 											</select>
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Barangay</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Barangay <span className="text-red-500">*</span>
+											</label>
 											<select ref={barangayRef} disabled={!isEditing || !selectedCity} value={selectedBarangay} onChange={(e)=> onBarangaySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
 												<option value="">Select barangay</option>
 												{barangays.map(b => (<option key={b.code} value={b.code}>{b.name}</option>))}
 											</select>
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">ZIP Code</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												ZIP Code <span className="text-red-500">*</span>
+											</label>
 											<input ref={zipRef} disabled={!isEditing} value={vendor.address.zip} onChange={onZipChange} inputMode="numeric" maxLength={4} placeholder="e.g. 1000" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 											{zipLoading && <p className="mt-1 text-xs text-gray-500">Auto-filling ZIP…</p>}
 											{errors.zip && <p className="mt-1 text-xs text-red-600">{errors.zip}</p>}
@@ -1207,14 +1444,43 @@ const SellerProfileTab: React.FC = () => {
 										</div>
 									</div>
 									
+									{/* Show missing fields warning for Step 2 when user attempts to proceed */}
+									{attemptedNext && !canProceed && (
+										<div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+											<div className="flex items-start justify-between gap-3">
+												<div className="flex gap-2 flex-1">
+													<AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+													<div className="flex-1">
+														<p className="text-xs font-medium text-red-900 mb-1">Please complete all required fields:</p>
+														<ul className="text-xs text-red-800 list-disc list-inside space-y-0.5">
+															{getMissingFields().map((field, idx) => (
+																<li key={idx}>{field}</li>
+															))}
+														</ul>
+													</div>
+												</div>
+												<button
+													type="button"
+													onClick={() => setAttemptedNext(false)}
+													className="text-red-600 hover:text-red-800 flex-shrink-0"
+													aria-label="Dismiss"
+												>
+													<X className="w-4 h-4" />
+												</button>
+											</div>
+										</div>
+									)}
+									
 									{/* Contacts */}
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Landline No</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">Landline No (Optional)</label>
 											<input disabled={!isEditing} value={vendor.landline} onChange={(e)=> setField('landline', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Mobile No</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Mobile No <span className="text-red-500">*</span>
+											</label>
 											<input
 												ref={mobileRef}
 												disabled={!isEditing}
@@ -1229,7 +1495,9 @@ const SellerProfileTab: React.FC = () => {
 											{errors.mobile && <p className="mt-1 text-xs text-red-600">{errors.mobile}</p>}
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Email Address</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Email Address <span className="text-red-500">*</span>
+											</label>
 											<input
 												ref={emailRef}
 												disabled={!isEditing}
@@ -1243,31 +1511,41 @@ const SellerProfileTab: React.FC = () => {
 											{errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Website</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">Website (Optional)</label>
 											<input ref={websiteRef} disabled={!isEditing} value={vendor.website} onChange={(e)=> setField('website', e.target.value)} placeholder="https://" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 									</div>
 
 									{/* Documents & Banking */}
-									<div className="grid grid-cols-1 gap-4 mt-4">
+									<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Payment / Banking Information</label>
-											<textarea ref={bankingRef} disabled={!isEditing} rows={3} value={vendor.bankingInfo} onChange={(e)=> setField('bankingInfo', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" placeholder="Bank name, account name/number" />
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Bank Name <span className="text-red-500">*</span>
+											</label>
+											<input disabled={!isEditing} value={vendor.bankName} onChange={(e)=> setField('bankName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" placeholder="e.g., BDO, BPI, Metrobank" />
 										</div>
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Bank Branch Address</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Bank Account Number <span className="text-red-500">*</span>
+											</label>
+											<input disabled={!isEditing} value={vendor.bankAccountNumber} onChange={(e)=> setField('bankAccountNumber', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" placeholder="Account number" />
+										</div>
+										<div className="md:col-span-2">
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Bank Branch Address <span className="text-red-500">*</span>
+											</label>
 											<input ref={bankBranchRef} disabled={!isEditing} value={vendor.bankBranchAddress} onChange={(e)=> setField('bankBranchAddress', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 									</div>
 
 									<div>
-										<label className="block text-xs font-medium text-gray-600 mb-2">Requirements</label>
+										<label className="block text-xs font-medium text-gray-600 mb-2">
+											Requirements <span className="text-red-500">*</span>
+										</label>
 										<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 											{[
-												{ key: 'secOrDti', label: 'SEC Certificate or DTI Registration' },
-												{ key: 'fdaLto', label: 'FDA LTO Medical Device' },
-												{ key: 'catalogue', label: 'Catalogue / Product Lists' },
-												{ key: 'warrantyPolicy', label: 'Warranty / After Sales Policy' },
+												{ key: 'secOrDti', label: 'SEC Certificate or DTI Registration *' },
+												{ key: 'fdaLto', label: 'FDA LTO Medical Device *' },
 											].map(({ key, label }) => (
 												<div key={key} className="p-3 border border-gray-200 rounded-lg">
 													<div className="text-xs text-gray-700 mb-2">{label}</div>
@@ -1287,21 +1565,25 @@ const SellerProfileTab: React.FC = () => {
 					)}
 
 					{/* Sticky Footer Nav */}
-					<div className="sticky bottom-0 bg-white/80 backdrop-blur border-t border-gray-200 px-4 py-3 flex items-center justify-between rounded-b-lg">
-						<span className="text-xs text-gray-600">Step {step + 1} of {STEPS.length}</span>
-						<div className="flex items-center gap-2">
-							<button type="button" onClick={back} disabled={step === 0} className="px-3 py-2 text-xs rounded-lg border border-gray-200 disabled:opacity-40">Back</button>
-							{step < STEPS.length - 1 ? (
-								<button type="button" onClick={next} disabled={!canProceed} className="px-3 py-2 text-xs rounded-lg bg-teal-600 text-white disabled:opacity-40">Next</button>
-							) : (
-								<button
-									disabled={!canProceed || submitLoading}
-									onClick={() => setReviewOpen(true)}
-									className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
-								>
-									{submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Review & Submit
-								</button>
-							)}
+					<div className="sticky bottom-0 bg-white/80 backdrop-blur border-t border-gray-200 px-4 py-3 rounded-b-lg">
+						<div className="flex items-center justify-between">
+							<span className="text-xs text-gray-600">Step {step + 1} of {STEPS.length}</span>
+							<div className="flex items-center gap-2">
+								<button type="button" onClick={back} disabled={step === 0} className="px-3 py-2 text-xs rounded-lg border border-gray-200 disabled:opacity-40">Back</button>
+								{step < STEPS.length - 1 ? (
+									<button type="button" onClick={next} className="px-3 py-2 text-xs rounded-lg bg-teal-600 text-white hover:bg-teal-700">Next</button>
+								) : (
+									<button
+										onClick={() => {
+											setAttemptedNext(true);
+											if (canProceed) setReviewOpen(true);
+										}}
+										className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700"
+									>
+										<Upload className="w-4 h-4" /> Review & Submit
+									</button>
+								)}
+							</div>
 						</div>
 					</div>
 
@@ -1403,11 +1685,18 @@ const SellerProfileTab: React.FC = () => {
 											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2, websiteRef as any)}>Edit</button>
 										</div>
 									</div>
-									<div className="p-3 border border-gray-200 rounded-lg md:col-span-2">
-										<div className="text-xs text-gray-500">Banking Information</div>
+									<div className="p-3 border border-gray-200 rounded-lg">
+										<div className="text-xs text-gray-500">Bank Name</div>
 										<div className="flex items-center justify-between gap-2">
-											<div className="text-sm text-gray-900 whitespace-pre-wrap">{vendor.bankingInfo || '—'}</div>
-											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2, bankingRef as any)}>Edit</button>
+											<div className="text-sm text-gray-900">{vendor.bankName || '—'}</div>
+											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2)}>Edit</button>
+										</div>
+									</div>
+									<div className="p-3 border border-gray-200 rounded-lg">
+										<div className="text-xs text-gray-500">Bank Account Number</div>
+										<div className="flex items-center justify-between gap-2">
+											<div className="text-sm text-gray-900">{vendor.bankAccountNumber || '—'}</div>
+											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2)}>Edit</button>
 										</div>
 									</div>
 									<div className="p-3 border border-gray-200 rounded-lg md:col-span-2">
@@ -1426,8 +1715,6 @@ const SellerProfileTab: React.FC = () => {
 										<li className="flex items-center justify-between"><span>BIR 2303</span><span className="text-gray-700">{vendor.requirements.bir2303 ? (vendor.requirements.bir2303 as File).name : '—'}</span></li>
 										<li className="flex items-center justify-between"><span>SEC/DTI</span><span className="text-gray-700">{vendor.requirements.secOrDti ? (vendor.requirements.secOrDti as File).name : '—'}</span></li>
 										<li className="flex items-center justify-between"><span>FDA LTO</span><span className="text-gray-700">{vendor.requirements.fdaLto ? (vendor.requirements.fdaLto as File).name : '—'}</span></li>
-										<li className="flex items-center justify-between"><span>Catalogue</span><span className="text-gray-700">{vendor.requirements.catalogue ? (vendor.requirements.catalogue as File).name : '—'}</span></li>
-										<li className="flex items-center justify-between"><span>Warranty Policy</span><span className="text-gray-700">{vendor.requirements.warrantyPolicy ? (vendor.requirements.warrantyPolicy as File).name : '—'}</span></li>
 									</ul>
 									<div className="mt-2"><button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2)}>Edit documents</button></div>
 								</div>
