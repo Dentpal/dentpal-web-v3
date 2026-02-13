@@ -136,6 +136,22 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     chats: 'chats',
   };
 
+  // Map child tabs to their parent menu items
+  const parentMenuMap: Record<string, string> = {
+    'inventory-all': 'inventory',
+    'inventory-history': 'inventory',
+    'stock-adjustment': 'inventory',
+    'item-management': 'inventory',
+    'items-all': 'items',
+    'items-list': 'items',
+    'items-add': 'items',
+    'dashboard-summary': 'dashboard',
+    'dashboard-item': 'dashboard',
+    'dashboard-category': 'dashboard',
+    'dashboard-payment': 'dashboard',
+    'dashboard-receipts': 'dashboard',
+  };
+
   const toggleMenu = (menuId: string) => {
     setExpandedMenus(prev => {
       const next = new Set(prev);
@@ -240,7 +256,10 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         <nav className="space-y-1">
           {visibleMenuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeItem === item.id || item.subItems?.some(sub => sub.id === activeItem);
+            // Check if this menu item is active - either directly or if activeItem is a child of this menu
+            const isActive = activeItem === item.id || 
+                           item.subItems?.some(sub => sub.id === activeItem) ||
+                           parentMenuMap[activeItem] === item.id;
             const isExpanded = expandedMenus.has(item.id);
             const hasSubItems = item.subItems && item.subItems.length > 0;
             

@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/use-auth';
 import useProductSearch from '@/hooks/useProductSearch';
 import useProductVariations from '@/hooks/useProductVariations';
 import { batchAdjustMultipleProducts, generateBatchId, BatchAdjustmentItem } from '@/services/stockAdjustment';
 import { logBatchStockAdjustment } from '../../../services/logAdjustment';
+import { ArrowLeft } from 'lucide-react';
 
 // Interface for adjustment items in the table
 interface AdjustmentItem {
@@ -19,6 +21,7 @@ interface AdjustmentItem {
 }
 
 const StockAdjustment: React.FC = () => {
+	const navigate = useNavigate();
 	const { uid, role } = useAuth();
   const [search, setSearch] = useState('');
   const [reason, setReason] = useState('Receive items');
@@ -225,6 +228,41 @@ const StockAdjustment: React.FC = () => {
           appearance: textfield;
         }
       `}</style>
+
+      {/* Header with Back Button */}
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <button
+          onClick={() => navigate('/?tab=inventory')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 16px',
+            background: '#fff',
+            border: '1px solid #d1d5db',
+            borderRadius: 8,
+            color: '#374151',
+            fontSize: 14,
+            fontWeight: 500,
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#f9fafb';
+            e.currentTarget.style.borderColor = '#9ca3af';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#fff';
+            e.currentTarget.style.borderColor = '#d1d5db';
+          }}
+        >
+          <ArrowLeft size={18} />
+          Back to Inventory
+        </button>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>
+          Stock Adjustment
+        </h1>
+      </div>
 
       {/* Single Column Layout */}
       <div style={{ 

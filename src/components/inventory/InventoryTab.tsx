@@ -9,8 +9,8 @@ interface InventoryTabProps {
 }
 
 const InventoryTab: React.FC<InventoryTabProps> = ({ activeView }) => {
-	if (activeView === 'all' || activeView === 'stock-adjustment') return <StockAdjustment />;
-	if (activeView === 'history') return <History />;
+	if (activeView === 'stock-adjustment') return <StockAdjustment />;
+	if (activeView === 'history' || activeView === 'all') return <History />;
 	return <div>Invalid inventory section</div>;
 };
 

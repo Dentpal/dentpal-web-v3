@@ -500,19 +500,18 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   }, [location.search]);
 
 
-  const lastSyncedTab = useRef<string | null>(null);
   useEffect(() => {
     try {
       if (!activeItem) return;
       const params = new URLSearchParams(location.search);
       const current = params.get('tab');
-      if (current !== activeItem && lastSyncedTab.current !== activeItem) {
-        lastSyncedTab.current = activeItem;
+      // Only navigate if URL doesn't match activeItem
+      if (current !== activeItem) {
         params.set('tab', activeItem);
         navigate({ pathname: location.pathname || '/', search: params.toString() }, { replace: true });
       }
     } catch {}
-  }, [activeItem, location.pathname, location.search, navigate]);
+  }, [activeItem]);
 
   useEffect(() => {
     const onNavigate = (e: Event) => {
