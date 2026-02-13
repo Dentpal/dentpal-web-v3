@@ -3,6 +3,7 @@ import { collection, getDocs, query, orderBy, collectionGroup } from 'firebase/f
 import SellersService, { SellerProfile } from '@/services/sellers';
 import { getFirestore } from 'firebase/firestore';
 import firebaseApp from '@/lib/firebase';
+import { useAuth } from '@/hooks/use-auth';
 
 const db = getFirestore(firebaseApp);
 
@@ -31,14 +32,27 @@ export interface LogHistoryRow {
 export function useAllLogsHistory() {
   const [logs, setLogs] = useState<LogHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const { uid, parentId, isSubAccount } = useAuth();
 
   useEffect(() => {
     const fetchLogs = async () => {
       try {
         setLoading(true);
-        console.log('=== Fetching batch adjustments from Firebase ===');
         
-        // Query inventory_adjustments collection for batch adjustments
+        // Don't fetch if no user is authenticated
+        if (!uid) {
+          console.log('No authenticated user, skipping fetch');
+          setLogs([]);
+          setLoading(false);
+          return;
+        }
+        
+        // Use parent ID if this is a sub-account, otherwise use current user's ID
+        const accountId = isSubAccount && parentId ? parentId : uid;
+        console.log('=== Fetching batch adjustments from Firebase ===');
+        console.log('Will filter by account ID:', accountId);
+        
+        // Query inventory_adjustments collection for all batch adjustments
         const adjustmentsRef = collection(db, 'inventory_adjustments');
         console.log('Collection reference created:', adjustmentsRef.path);
         
@@ -65,8 +79,12 @@ export function useAllLogsHistory() {
         console.log('Total documents processed:', docsData.length);
         console.log('First doc sample:', JSON.stringify(docsData[0], null, 2));
         
+        // Filter data by accountId (current user or parent account)
+        const filteredData = docsData.filter(d => d.userId === accountId);
+        console.log(`Filtered to ${filteredData.length} adjustments for account ${accountId}`);
+        
         // Fetch seller names for all unique userIds
-        const userIds = Array.from(new Set(docsData.map(d => d.userId).filter(Boolean)));
+        const userIds = Array.from(new Set(filteredData.map(d => d.userId).filter(Boolean)));
         console.log('Fetching seller profiles for userIds:', userIds);
         
         const userProfiles: Record<string, any> = {};
@@ -83,7 +101,7 @@ export function useAllLogsHistory() {
         });
         
         // Process all batch adjustments
-        const batchRows: LogHistoryRow[] = docsData.map(d => {
+        const batchRows: LogHistoryRow[] = filteredData.map(d => {
           let dateObj: Date | null = null;
           let timestampRaw: string | number = '';
           
@@ -146,7 +164,7 @@ export function useAllLogsHistory() {
     };
     
     fetchLogs();
-  }, []);
+  }, [uid, parentId, isSubAccount]);
 
   return { logs, loading };
 }

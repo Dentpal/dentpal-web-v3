@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { ProductService } from '@/services/product';
 import CategoryService from '@/services/category';
-import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle } from 'lucide-react';
+import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Archive, RotateCcw } from 'lucide-react';
 import { storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs } from 'firebase/firestore';
@@ -61,7 +61,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   const [filterName, setFilterName] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [sortBy, setSortBy] = useState<'name' | 'stock' | 'updatedAt'>('name');
-  const [catalogTab, setCatalogTab] = useState<'all' | 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted'>('all');
+  const [catalogTab, setCatalogTab] = useState<'all' | 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'archive'>('all');
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -82,7 +82,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     imageURL: string;
     imageFile?: File | null;
     imagePreview?: string | null;
-    status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
+    status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'archive';
     dangerousGoods: 'none' | 'dangerous';
     warrantyType: string;
     warrantyDuration: string;
@@ -198,7 +198,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
 
   // Status counts
   const statusCounts = useMemo(() => {
-    const acc = { active: 0, inactive: 0, draft: 0, pending_qc: 0, violation: 0, deleted: 0 };
+    const acc = { active: 0, inactive: 0, draft: 0, pending_qc: 0, violation: 0, archive: 0 };
     items.forEach((i) => {
       const s = (i.status ?? 'active') as keyof typeof acc;
       if (s in acc) acc[s] += 1;
@@ -214,6 +214,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         const status = (i.status ?? 'active');
         if (catalogTab === 'all') return true;
         if (catalogTab === 'pending_qc') return status === 'pending_qc';
+        if (catalogTab === 'archive') return status === 'archive';
         return status === catalogTab;
       })
       .filter(i => {
@@ -247,6 +248,46 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     const start = (page - 1) * pageSize;
     return filteredItems.slice(start, start + pageSize);
   }, [filteredItems, page]);
+
+  // Archive handler
+  const handleArchiveItem = async (productId: string) => {
+    try {
+      setItems(prev => prev.map(i => i.id === productId ? ({...i, status: 'archive'}) : i));
+      await ProductService.updateProduct(productId, { status: 'archive' });
+      toast({ 
+        title: 'Success', 
+        description: 'Product archived successfully' 
+      });
+    } catch (error) {
+      console.error('Failed to archive product:', error);
+      setItems(prev => prev.map(i => i.id === productId ? ({...i, status: 'inactive'}) : i));
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to archive product', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  // Restore handler
+  const handleRestoreItem = async (productId: string) => {
+    try {
+      setItems(prev => prev.map(i => i.id === productId ? ({...i, status: 'inactive'}) : i));
+      await ProductService.updateProduct(productId, { status: 'inactive' });
+      toast({ 
+        title: 'Success', 
+        description: 'Product restored to inactive successfully' 
+      });
+    } catch (error) {
+      console.error('Failed to restore product:', error);
+      setItems(prev => prev.map(i => i.id === productId ? ({...i, status: 'archive'}) : i));
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to restore product', 
+        variant: 'destructive' 
+      });
+    }
+  };
 
   // Toggle active status
   const handleToggleActive = async (productId: string, nextActive: boolean) => {
@@ -511,7 +552,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           { key: 'draft', label: 'Draft' },
           { key: 'pending_qc', label: 'Pending QC' },
           { key: 'violation', label: 'Violation' },
-          { key: 'deleted', label: 'Archive' },
+          { key: 'archive', label: 'Archive' },
         ].map(t => (
           <button
             key={t.key}
@@ -590,10 +631,19 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
             <tr className="text-left">
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRODUCT NAME</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
-              <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide"></th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">EDIT ITEM</th>
+              {catalogTab !== 'archive' && (
+                <>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
+                </>
+              )}
+              {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
+                <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide"></th>
+              )}
+              {catalogTab === 'inactive' && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ARCHIVE</th>
+              )}
+              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">{catalogTab === 'archive' ? 'RESTORE' : 'EDIT ITEM'}</th>
             </tr>
           </thead>
           <tbody>
@@ -601,6 +651,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               const status = (item.status ?? 'active');
               const isActive = status === 'active';
               const isDeleted = status === 'deleted';
+              const isArchived = status === 'archive';
               // Get category name from subcategory mapping if available
               let displayCategory = item.categoryName || 'Uncategorized';
               if (item.subCategoryID && subcategoryToCategory[item.subCategoryID]) {
@@ -610,7 +661,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 <tr
                   key={item.id}
                   className="border-b last:border-0 hover:bg-gray-50 cursor-pointer group"
-                  onClick={() => !isDeleted && handleEditItem(item)}
+                  onClick={() => !isDeleted && !isArchived && handleEditItem(item)}
                 >
                   {/* Product Name */}
                   <td className="px-4 py-3">
@@ -629,18 +680,21 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   </td>
                   {/* Category */}
                   <td className="px-4 py-3 text-gray-700">{displayCategory}</td>
-                  {/* Price */}
-                  <td className="px-4 py-3 text-gray-700">
-                    {item.price != null ? (
-                      <span>₱{Number(item.price).toLocaleString()}</span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  {/* Stock */}
-                  <td className="px-4 py-3 text-gray-700">{item.inStock}</td>
+                  {/* Price and Stock - hidden in archive tab */}
+                  {catalogTab !== 'archive' && (
+                    <>
+                      <td className="px-4 py-3 text-gray-700">
+                        {item.price != null ? (
+                          <span>₱{Number(item.price).toLocaleString()}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{item.inStock}</td>
+                    </>
+                  )}
                   {/* Active Toggle */}
-                  {catalogTab !== 'pending_qc' && (
+                  {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
                     <td className="px-4 py-3">
                       <label className={`inline-flex items-center select-none ${isDeleted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input
@@ -658,19 +712,39 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       </label>
                     </td>
                   )}
-                  {/* Edit Item Button */}
-                  <td className="px-4 py-3" onClick={e => { e.stopPropagation(); handleEditItem(item); }}>
-                    <button
-                      disabled={isDeleted}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition
-                        ${isDeleted 
-                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
-                          : 'bg-green-600 text-white hover:bg-green-700'
-                        }`}
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      Edit Item
-                    </button>
+                  {/* Archive Button - only in inactive tab */}
+                  {catalogTab === 'inactive' && (
+                    <td className="px-4 py-3" onClick={e => { e.stopPropagation(); handleArchiveItem(item.id); }}>
+                      <button
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-orange-600 text-white hover:bg-orange-700"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                        Archive
+                      </button>
+                    </td>
+                  )}
+                  {/* Edit Item or Restore Button */}
+                  <td className="px-4 py-3" onClick={e => { e.stopPropagation(); catalogTab === 'archive' ? handleRestoreItem(item.id) : handleEditItem(item); }}>
+                    {catalogTab === 'archive' ? (
+                      <button
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Restore
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isDeleted}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition
+                          ${isDeleted 
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
+                            : 'bg-green-600 text-white hover:bg-green-700'
+                          }`}
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Edit Item
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
@@ -864,22 +938,6 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       placeholder="0.00"
                     />
                   </div> */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Stock</label>
-                    <input
-                      type="text"
-                      value={editForm.inStock}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Allow empty or valid integer
-                        if (value === '' || /^\d+$/.test(value)) {
-                          setEditForm({...editForm, inStock: value});
-                        }
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="0"
-                    />
-                  </div>
                   {/* <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Threshold</label>
                     <input
