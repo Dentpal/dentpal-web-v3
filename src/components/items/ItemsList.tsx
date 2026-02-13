@@ -570,6 +570,21 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 {statusCounts.inactive}
               </span>
             )}
+            {t.key === 'pending_qc' && statusCounts.pending_qc > 0 && (
+              <span className="absolute -top-2 -right-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-yellow-500 text-white text-[10px] leading-none shadow ring-2 ring-white">
+                {statusCounts.pending_qc}
+              </span>
+            )}
+            {t.key === 'violation' && statusCounts.violation > 0 && (
+              <span className="absolute -top-2 -right-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] leading-none shadow ring-2 ring-white">
+                {statusCounts.violation}
+              </span>
+            )}
+            {t.key === 'archive' && statusCounts.archive > 0 && (
+              <span className="absolute -top-2 -right-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] leading-none shadow ring-2 ring-white">
+                {statusCounts.archive}
+              </span>
+            )}
           </button>
         ))}
       </div>
