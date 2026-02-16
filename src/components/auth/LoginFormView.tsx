@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, EyeOff, Mail, Lock, AlertCircle, XCircle } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, AlertCircle, XCircle, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,11 +60,22 @@ export default function LoginFormView({
             value={email}
             onChange={(e) => onEmail(e.target.value)}
             disabled={loading}
-            className={`pl-12 h-14 bg-gray-50 rounded-xl text-gray-700 placeholder-gray-400 focus:bg-white transition-colors duration-200 ${
+            autoComplete="username"
+            className={`pl-12 ${email ? 'pr-12' : ''} h-14 bg-gray-50 rounded-xl text-gray-700 placeholder-gray-400 focus:bg-white transition-colors duration-200 ${
               error ? "border-red-300 focus:border-red-500 focus:ring-red-500" : "border-gray-200 focus:border-teal-500 focus:ring-teal-500"
             }`}
             required
           />
+          {email && !loading && (
+            <button
+              type="button"
+              onClick={() => onEmail('')}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              title="Clear email"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         <div className="relative">
@@ -76,6 +87,7 @@ export default function LoginFormView({
             value={password}
             onChange={(e) => onPassword(e.target.value)}
             disabled={loading}
+            autoComplete="current-password"
             className={`pl-12 pr-12 h-14 bg-gray-50 rounded-xl text-gray-700 placeholder-gray-400 focus:bg-white transition-colors duration-200 ${
               error ? "border-red-300 focus:border-red-500 focus:ring-red-500" : "border-gray-200 focus:border-teal-500 focus:ring-teal-500"
             }`}

@@ -254,7 +254,23 @@ export async function resendUserInvite(email: string): Promise<boolean> {
 
 export async function deleteWebUser(uid: string): Promise<boolean> {
   try {
-    // Delete from both collections to handle legacy data
+    // Get user data before deleting to check remembered email
+    let userEmail: string | null = null;
+    try {
+      const sellerDoc = await getDoc(doc(db, SELLER_COLLECTION, uid));
+      if (sellerDoc.exists()) {
+        userEmail = sellerDoc.data()?.email || null;
+      } else {
+        const legacyDoc = await getDoc(doc(db, WEB_USERS_COLLECTION, uid));
+        if (legacyDoc.exists()) {
+          userEmail = legacyDoc.data()?.email || null;
+        }
+      }
+    } catch (error) {
+      console.warn('Could not fetch user email before deletion:', error);
+    }
+    
+    // Delete from both Firestore collections first
     const sellerDoc = doc(db, SELLER_COLLECTION, uid);
     await deleteDoc(sellerDoc);
     
@@ -263,6 +279,46 @@ export async function deleteWebUser(uid: string): Promise<boolean> {
       await deleteDoc(webUserDoc);
     } catch (legacyError) {
       console.warn('Legacy collection delete failed (may not exist):', legacyError);
+    }
+    
+    // Clear from localStorage if this was the remembered email
+    if (userEmail) {
+      const rememberedEmail = localStorage.getItem('dentpal_remember_email');
+      if (rememberedEmail === userEmail) {
+        localStorage.removeItem('dentpal_remember_email');
+        console.log('Cleared remembered email for deleted user');
+      }
+    }
+    
+    // Now delete from Firebase Authentication via Cloud Function
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('No authenticated user');
+      }
+      
+      const idToken = await currentUser.getIdToken();
+      const functionUrl = import.meta.env.VITE_FIREBASE_FUNCTION_URL || 
+                         `https://asia-southeast1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net`;
+      
+      const response = await fetch(`${functionUrl}/deleteUserAccount`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ uid }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Failed to delete user from Authentication:', errorData);
+        // Don't throw here - Firestore data is already deleted
+        // This prevents the UI from showing an error when auth deletion fails
+      }
+    } catch (authError) {
+      console.error('Error deleting user from Authentication:', authError);
+      // Don't throw - Firestore data is already deleted
     }
     
     return true;

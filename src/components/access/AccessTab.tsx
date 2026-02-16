@@ -357,6 +357,11 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [subPerms, setSubPerms] = useState<User['permissions']>(maskPerms(roleBundles[subBundle], sellerPerms));
   useEffect(() => { setSubPerms(maskPerms(roleBundles[subBundle], sellerPerms)); }, [subBundle, sellerPermsRaw]);
   const [subLoading, setSubLoading] = useState(false);
+  
+  // Success dialog state for sub-account creation
+  const [subSuccessOpen, setSubSuccessOpen] = useState(false);
+  const [invitedSubName, setInvitedSubName] = useState('');
+  const [invitedSubEmail, setInvitedSubEmail] = useState('');
 
   // Allow seller (not admin/sub) to create sub-accounts
   const canCreateSub = isSeller && !isAdmin && !isSubAccount;
@@ -399,10 +404,21 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         console.warn('Auth creation failed; invite record saved only:', authErr);
       }
       setSubOpen(false);
+      
+      // Store invited user details and show success dialog
+      setInvitedSubName(subName);
+      setInvitedSubEmail(subEmail);
+      setSubSuccessOpen(true);
+      
+      // Reset form
       setSubName(''); setSubEmail(''); setSubBundle('ops');
-      toast({ title: 'Invite sent', description: `Sub-account invite saved for ${subEmail}` });
     } catch (e: any) {
       setError?.(e.message || 'Failed to create sub-account');
+      toast({ 
+        title: 'Error', 
+        description: e.message || 'Failed to create sub-account',
+        variant: 'destructive'
+      });
     } finally { setSubLoading(false); }
   };
 
@@ -590,6 +606,14 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load sub-accounts for seller view
+  useEffect(() => {
+    if (canCreateSub) {
+      loadMembers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCreateSub]);
 
   // Email validation function with proper TLD checking
   const validateEmail = (email: string): { isValid: boolean; error?: string } => {
@@ -1445,9 +1469,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               <h3 className="text-sm font-semibold">Seller Sub-accounts</h3>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => { setManageOpen(true); loadMembers(); }}>
+              {/* <Button size="sm" variant="outline" onClick={() => { setManageOpen(true); loadMembers(); }}>
                 View Sub Account
-              </Button>
+              </Button> */}
               <Button size="sm" onClick={() => setSubOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white"><UserPlus className="w-4 h-4 mr-1"/> New Sub-account</Button>
             </div>
           </div>
@@ -1517,8 +1541,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                   <div className="grid grid-cols-2 gap-2">
                     {Object.keys(sellerPerms).filter(k => {
                       const key = k as keyof typeof sellerPerms;
-                      // Filter out bookings and notifications from display
-                      if (k === 'bookings' || k === 'notifications') return false;
+                      // Filter out bookings, notifications, reports, profile, and access from display
+                      if (k === 'bookings' || k === 'notifications' || k === 'reports' || k === 'profile' || k === 'access') return false;
                       return sellerPerms[key];
                     }).map((k) => (
                       <label key={k} className="flex items-center gap-2 text-xs">
@@ -1593,9 +1617,100 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
           </DialogContent>
         </Dialog>
 
-        {/* Placeholder for listing existing sub-accounts (future) */}
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-600">Sub-account list coming soon.</div>
+        {/* Sub-accounts List */}
+        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Sub-accounts</h3>
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={loadMembers}
+                disabled={membersLoading}
+              >
+                {membersLoading ? 'Loading...' : 'Refresh'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            {membersLoading ? (
+              <div className="px-6 py-8 text-center text-sm text-gray-500">
+                Loading sub-accounts...
+              </div>
+            ) : members.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-gray-500">
+                No sub-accounts created yet. Click "New Sub-account" to invite team members.
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Email
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Permissions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {members.map((member) => {
+                    const permissions = member.permissions || {};
+                    const activePermissions = Object.keys(permissions)
+                      .filter(key => {
+                        // Remove profile from display in permissions column
+                        if (key === 'profile') return false;
+                        return permissions[key] === true;
+                      })
+                      .map(key => getPermissionLabel(key));
+
+                    return (
+                      <tr 
+                        key={member.id} 
+                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                        onClick={() => {
+                          setEditing(member);
+                          setViewOnly(false);
+                        }}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {member.name || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">
+                            {member.email}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1">
+                            {activePermissions.length > 0 ? (
+                              activePermissions.map((perm) => (
+                                <Badge 
+                                  key={perm} 
+                                  variant="outline" 
+                                  className="text-xs bg-teal-50 text-teal-700 border-teal-200"
+                                >
+                                  {perm}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-400">No permissions</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -2108,6 +2223,41 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               {subLoading ? 'Sending…' : 'Create & Send Invite'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sub-account Success Dialog */}
+      <Dialog open={subSuccessOpen} onOpenChange={setSubSuccessOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden rounded-3xl border border-gray-100 shadow-xl bg-white">
+          <div className="p-7 text-center flex flex-col items-center">
+            {/* Icon wrapper */}
+            <div className="h-16 w-16 rounded-2xl bg-green-50 flex items-center justify-center shadow-inner mb-5">
+              <CheckCircle className="h-10 w-10 text-green-500" />
+            </div>
+
+            {/* Header */}
+            <DialogHeader className="space-y-1">
+              <DialogTitle className="text-[20px] font-semibold text-gray-900 tracking-wide">
+                Sub-account Invited!
+              </DialogTitle>
+              <DialogDescription className="text-sm text-gray-600 mt-2">
+                You invited <span className="font-semibold text-gray-900">{invitedSubName}</span> with email <span className="font-semibold text-gray-900">{invitedSubEmail}</span>
+              </DialogDescription>
+              <p className="text-xs text-gray-500 mt-3">
+                A password reset email has been sent to set up their account.
+              </p>
+            </DialogHeader>
+
+            {/* Footer */}
+            <DialogFooter className="w-full mt-6">
+              <Button 
+                onClick={() => setSubSuccessOpen(false)} 
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-xl"
+              >
+                Done
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

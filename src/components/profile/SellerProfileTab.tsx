@@ -866,12 +866,10 @@ const SellerProfileTab: React.FC = () => {
 		autoFillZipFromNames(vendor.address.municipality, vendor.address.province, name);
 	};
 
-	// NEW: Extracted submit logic to reuse from review dialog
 	const submitEnrollment = async () => {
 		setSubmitLoading(true);
 		try {
 			if (!uid) { throw new Error('Not signed in'); }
-			// 1) Upload documents to Storage (SellerImages/<uid>/...)
 			let birUpload: { url: string; path: string } | null = null;
 			if (vendor.requirements.bir2303) {
 				birUpload = await SellersService.uploadImage(uid, vendor.requirements.bir2303, 'SellerImages');
@@ -1337,17 +1335,11 @@ const SellerProfileTab: React.FC = () => {
 											</label>
 											<input ref={companyNameRef} disabled={!isEditing} value={vendor.companyName} onChange={(e)=> setField('companyName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
-										<div>
+										<div className="md:col-span-2">
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												Store Name <span className="text-red-500">*</span>
 											</label>
 											<input ref={storeNameRef} disabled={!isEditing} value={vendor.storeName} onChange={(e)=> setField('storeName', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-										</div>
-										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">
-												Customer Service Contact Person <span className="text-red-500">*</span>
-											</label>
-											<input ref={contactPersonRef} disabled={!isEditing} value={vendor.contactPerson} onChange={(e)=> setField('contactPerson', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div className="md:col-span-2">
 											<label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1474,7 +1466,7 @@ const SellerProfileTab: React.FC = () => {
 									{/* Contacts */}
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Landline No (Optional)</label>
+											<label className="block text-xs font-medium text-gray-600 mb-1">Customer Service Contact Person <span className="text-red-500">*</span></label>
 											<input disabled={!isEditing} value={vendor.landline} onChange={(e)=> setField('landline', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
 										<div>
@@ -1494,7 +1486,7 @@ const SellerProfileTab: React.FC = () => {
 											/>
 											{errors.mobile && <p className="mt-1 text-xs text-red-600">{errors.mobile}</p>}
 										</div>
-										<div>
+										{/* <div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												Email Address <span className="text-red-500">*</span>
 											</label>
@@ -1509,11 +1501,11 @@ const SellerProfileTab: React.FC = () => {
 												className={`w-full text-sm p-2 border rounded-lg disabled:bg-gray-50 ${errors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-200'}`}
 											/>
 											{errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
-										</div>
-										<div>
+										</div> */}
+										{/* <div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">Website (Optional)</label>
 											<input ref={websiteRef} disabled={!isEditing} value={vendor.website} onChange={(e)=> setField('website', e.target.value)} placeholder="https://" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-										</div>
+										</div> */}
 									</div>
 
 									{/* Documents & Banking */}
@@ -1532,7 +1524,7 @@ const SellerProfileTab: React.FC = () => {
 										</div>
 										<div className="md:col-span-2">
 											<label className="block text-xs font-medium text-gray-600 mb-1">
-												Bank Branch Address <span className="text-red-500">*</span>
+												Bank Account Name <span className="text-red-500">*</span>
 											</label>
 											<input ref={bankBranchRef} disabled={!isEditing} value={vendor.bankBranchAddress} onChange={(e)=> setField('bankBranchAddress', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 										</div>
