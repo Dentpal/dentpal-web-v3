@@ -224,6 +224,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [successUserData, setSuccessUserData] = useState<{username: string; email: string} | null>(null);
+  const [addUserLoading, setAddUserLoading] = useState(false);
   
   // Form states
   const [newUser, setNewUser] = useState<Partial<User>>({
@@ -362,6 +365,19 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const handleCreateSub = async () => {
     if (!canCreateSub) return;
     if (!subName || !subEmail) { setError?.('Name and email are required'); return; }
+    
+    // Validate email with TLD check
+    const emailValidation = validateEmail(subEmail);
+    if (!emailValidation.isValid) {
+      setError?.(emailValidation.error || "Invalid email address");
+      toast({ 
+        title: 'Invalid Email', 
+        description: emailValidation.error || "Please enter a valid email address",
+        variant: 'destructive'
+      });
+      return;
+    }
+    
     try {
       setSubLoading(true);
       const finalPerms = maskPerms(subPerms, sellerPerms);
@@ -575,12 +591,81 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleAddUser = async () => {
+  // Email validation function with proper TLD checking
+  const validateEmail = (email: string): { isValid: boolean; error?: string } => {
+    if (!email) {
+      return { isValid: false, error: "Email is required" };
+    }
+
+    // Basic email format check
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return { isValid: false, error: "Please enter a valid email address" };
+    }
+
+    // Extract TLD (Top Level Domain)
+    const tldMatch = email.match(/\.([a-zA-Z]{2,})$/);
+    if (!tldMatch) {
+      return { isValid: false, error: "Invalid email format" };
+    }
+
+    const tld = tldMatch[1].toLowerCase();
+
+    // List of common and legitimate TLDs
+    const validTLDs = [
+      // Generic TLDs
+      'com', 'net', 'org', 'edu', 'gov', 'mil', 'int', 'info', 'biz', 'name', 'pro',
+      // New generic TLDs
+      'email', 'online', 'site', 'tech', 'store', 'app', 'dev', 'web', 'cloud',
+      // Country code TLDs (common ones)
+      'ph', 'us', 'uk', 'ca', 'au', 'de', 'fr', 'jp', 'cn', 'in', 'br', 'mx', 'es', 'it',
+      'nl', 'se', 'no', 'dk', 'fi', 'be', 'ch', 'at', 'nz', 'sg', 'hk', 'tw', 'kr', 'th',
+      'my', 'id', 'vn', 'ae', 'sa', 'za', 'eg', 'ng', 'ke', 'ru', 'pl', 'cz', 'hu', 'ro',
+      // Other common TLDs
+      'io', 'co', 'me', 'tv', 'cc', 'ws', 'mobi', 'tel', 'asia', 'jobs', 'travel',
+      'museum', 'coop', 'aero', 'xxx', 'xyz', 'top', 'wang', 'club', 'icu', 'shop'
+    ];
+
+    if (!validTLDs.includes(tld)) {
+      return { 
+        isValid: false, 
+        error: `Invalid domain extension '.${tld}'. Please use a legitimate top-level domain (e.g., .com, .net, .org, .ph)` 
+      };
+    }
+
+    return { isValid: true };
+  };
+
+  const handleAddUser = async (e?: React.MouseEvent) => {
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
     if (!newUser.username || !newUser.email) {
       setError?.("Please fill in all required fields");
+      toast({ 
+        title: 'Missing Fields', 
+        description: "Please fill in all required fields",
+        variant: 'destructive'
+      });
       return;
     }
 
+    // Validate email with TLD check
+    const emailValidation = validateEmail(newUser.email);
+    if (!emailValidation.isValid) {
+      setError?.(emailValidation.error || "Invalid email address");
+      toast({ 
+        title: 'Invalid Email', 
+        description: emailValidation.error || "Please enter a valid email address",
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setAddUserLoading(true);
     try {
       // Create Auth user + profile in Firestore and send password setup link via email
       const created = await createWebUser(
@@ -614,18 +699,19 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       };
 
       setUsers(prev => [...prev, user]);
-      // Open Vendor Enrollment wizard for this seller
-      setVendorSellerId(created.uid);
-      setVendorForm(prev => ({
-        ...prev,
-        contacts: { ...(prev.contacts || {}), name: newUser.username || '', email: newUser.email || '', phone: '' },
-      }));
-      setVendorStep('upload');
-      setVendorWizardOpen(true);
+      
+      // Store success data for dialog
+      setSuccessUserData({
+        username: newUser.username!,
+        email: newUser.email!
+      });
+      
       // Optionally refresh from Firestore to reflect authoritative data
       try {
         await refreshUserList();
       } catch {}
+      
+      // Reset form and show success dialog
       setNewUser({
         username: "",
         email: "",
@@ -635,8 +721,17 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       });
       setShowAddForm(false);
       setError?.(null);
+      setSuccessDialogOpen(true);
     } catch (e: any) {
+      console.error('Failed to create user:', e);
       setError?.(e.message || 'Failed to create user');
+      toast({ 
+        title: 'Failed to create user', 
+        description: e.message || 'An error occurred while creating the user. Please try again.',
+        variant: 'destructive'
+      });
+    } finally {
+      setAddUserLoading(false);
     }
   };
 
@@ -672,6 +767,21 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
   const handleUpdateUser = async () => {
     if (!editingUser) return;
+    
+    // Validate email with TLD check
+    if (editingUser.email) {
+      const emailValidation = validateEmail(editingUser.email);
+      if (!emailValidation.isValid) {
+        setError?.(emailValidation.error || "Invalid email address");
+        toast({ 
+          title: 'Invalid Email', 
+          description: emailValidation.error || "Please enter a valid email address",
+          variant: 'destructive'
+        });
+        return;
+      }
+    }
+    
     try {
       // Update role and permissions in Firestore (no RBAC enforcement yet)
       await updateWebUserAccess(
@@ -1148,11 +1258,20 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               Cancel
             </Button>
             <Button
-              onClick={isEditing ? handleUpdateUser : handleAddUser}
-              disabled={loading}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isEditing) {
+                  handleUpdateUser();
+                } else {
+                  handleAddUser(e);
+                }
+              }}
+              disabled={addUserLoading}
               className="bg-green-600 hover:bg-green-700 text-white"
             >
-              {loading ? "Processing..." : isEditing ? "Update User" : "Invite User"}
+              {addUserLoading ? "Processing..." : isEditing ? "Update User" : "Invite User"}
             </Button>
           </div>
         </div>
@@ -2081,6 +2200,47 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               className="flex-1 bg-red-600 hover:bg-red-700 text-white"
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog */}
+      <Dialog open={successDialogOpen} onOpenChange={setSuccessDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <div className="text-center py-6">
+            <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+              <CheckCircle className="h-10 w-10 text-green-600" />
+            </div>
+            <DialogHeader>
+              <DialogTitle className="text-xl font-semibold text-gray-900 text-center">
+                Successfully Sent Invite
+              </DialogTitle>
+            </DialogHeader>
+            {successUserData && (
+              <div className="mt-4 space-y-2 text-center">
+                <p className="text-gray-700">
+                  Invitation has been sent to:
+                </p>
+                <p className="font-semibold text-gray-900 text-lg">
+                  {successUserData.username}
+                </p>
+                <p className="text-sm text-gray-600">
+                  with email: <span className="font-medium text-gray-900">{successUserData.email}</span>
+                </p>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter className="mt-4">
+            <Button 
+              onClick={() => {
+                setSuccessDialogOpen(false);
+                setSuccessUserData(null);
+              }}
+              className="w-full bg-green-600 hover:bg-green-700 text-white"
+            >
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

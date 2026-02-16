@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { auth } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { WebUserPermissions, WebUserRole, WebUserProfile } from '@/types/webUser';
 
@@ -131,10 +131,31 @@ export function useAuth(): UseAuthResult {
         }
 
         if (userData) {
+          // If user is logging in and isActive is false, activate them automatically
+          // This happens when they successfully log in after receiving their invite email
+          if (userData.isActive === false) {
+            try {
+              // Update both Seller and legacy collections
+              await updateDoc(doc(db, 'Seller', user.uid), { 
+                isActive: true, 
+                lastLogin: serverTimestamp() 
+              });
+              try {
+                await updateDoc(doc(db, 'web_users', user.uid), { 
+                  isActive: true, 
+                  lastLogin: serverTimestamp() 
+                });
+              } catch {}
+              userData.isActive = true;
+            } catch (err) {
+              console.error('Failed to activate user:', err);
+            }
+          }
+
           if (userData.isActive === false) {
             setRole(null);
             setPermissions(null);
-            setError('Your account has been disabled');
+            setError('Your account is pending activation. Please try logging in again.');
           } else {
             const roleVal = (userData.role as WebUserRole) || 'seller';
             setRole(roleVal);

@@ -16,6 +16,8 @@ import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTri
 import { storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs } from 'firebase/firestore';
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 const CATEGORY_OPTIONS = ['Consumables', 'Dental Equipment', 'Disposables', 'Equipment'] as const;
 
@@ -110,6 +112,14 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   const editImageInputRef = useRef<HTMLInputElement | null>(null);
   const variationImageInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const currentSubcategoryUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Status dialog states
+  const [statusDialog, setStatusDialog] = useState<{
+    open: boolean;
+    productName: string;
+    status: 'archive' | 'violation' | 'pending_qc' | null;
+    productId: string;
+  }>({ open: false, productName: '', status: null, productId: '' });
 
   const categoriesList = useMemo(() => {
     return Object.entries(categoryMap)
@@ -315,6 +325,30 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       toast({ 
         title: 'Error', 
         description: 'Failed to update product status', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  // Handle dialog confirm for setting archived product to active
+  const handleSetArchiveToActive = async () => {
+    try {
+      setStatusDialog({ open: false, productName: '', status: null, productId: '' });
+      await ProductService.toggleActive(statusDialog.productId, true);
+      setItems(prev => prev.map(i => i.id === statusDialog.productId ? ({
+        ...i,
+        isActive: true,
+        status: 'active'
+      }) : i));
+      toast({ 
+        title: 'Success', 
+        description: `${statusDialog.productName} has been set to active` 
+      });
+    } catch (error) {
+      console.error('Failed to activate product:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to activate product', 
         variant: 'destructive' 
       });
     }
@@ -652,8 +686,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
                 </>
               )}
+              {catalogTab === 'all' && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STATUS</th>
+              )}
               {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
-                <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide"></th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide">ACTIVE</th>
               )}
               {catalogTab === 'inactive' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ARCHIVE</th>
@@ -708,21 +745,50 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       <td className="px-4 py-3 text-gray-700">{item.inStock}</td>
                     </>
                   )}
+                  {/* Status Badge - only in "all" tab */}
+                  {catalogTab === 'all' && (
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium capitalize
+                        ${status === 'active' ? 'bg-green-100 text-green-800' : ''}
+                        ${status === 'inactive' ? 'bg-gray-100 text-gray-800' : ''}
+                        ${status === 'draft' ? 'bg-blue-100 text-blue-800' : ''}
+                        ${status === 'pending_qc' ? 'bg-yellow-100 text-yellow-800' : ''}
+                        ${status === 'violation' ? 'bg-red-100 text-red-800' : ''}
+                        ${status === 'archive' ? 'bg-orange-100 text-orange-800' : ''}
+                      `}>
+                        {status === 'pending_qc' ? 'Pending QC' : status}
+                      </span>
+                    </td>
+                  )}
                   {/* Active Toggle */}
                   {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
-                    <td className="px-4 py-3">
-                      <label className={`inline-flex items-center select-none ${isDeleted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <label className={`inline-flex items-center select-none ${isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input
                           type="checkbox"
                           className="sr-only peer"
                           checked={isActive}
-                          onChange={(e) => !isDeleted && handleToggleActive(item.id, e.target.checked)}
-                          disabled={isDeleted}
+                          onChange={(e) => {
+                            // Show dialog for archive, violation, pending_qc statuses in "all" tab
+                            if (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) {
+                              setStatusDialog({
+                                open: true,
+                                productName: item.name,
+                                status: status as 'archive' | 'violation' | 'pending_qc',
+                                productId: item.id
+                              });
+                              return;
+                            }
+                            if (!isDeleted) {
+                              handleToggleActive(item.id, e.target.checked);
+                            }
+                          }}
+                          disabled={isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc'))}
                         />
                         <div
-                          className={`relative w-11 h-6 rounded-full ${isDeleted ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted ? 'peer-checked:bg-teal-600' : ''}
+                          className={`relative w-11 h-6 rounded-full ${isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted && !(catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'peer-checked:bg-teal-600' : ''}
                                        after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow
-                                       after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted ? 'peer-checked:after:translate-x-5' : ''}`}
+                                       after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted && !(catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'peer-checked:after:translate-x-5' : ''}`}
                         />
                       </label>
                     </td>
@@ -1335,6 +1401,60 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           </div>
         </div>
       )}
+
+      {/* Status Dialog for Archive/Violation/Pending QC */}
+      <Dialog open={statusDialog.open} onOpenChange={(open) => !open && setStatusDialog({ open: false, productName: '', status: null, productId: '' })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {statusDialog.status === 'archive' ? 'Activate Archived Product' : 
+               statusDialog.status === 'violation' ? 'Product Violation' : 
+               'Product Under Review'}
+            </DialogTitle>
+            <DialogDescription>
+              {statusDialog.status === 'archive' ? (
+                <span>
+                  <strong>{statusDialog.productName}</strong> is archived. Do you want to set it to active?
+                </span>
+              ) : statusDialog.status === 'violation' ? (
+                <span>
+                  Please edit your item to be sent again in Pending QC for review.
+                </span>
+              ) : (
+                <span>
+                  Your product is still under review. Please wait for the moment.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-4">
+            {statusDialog.status === 'archive' ? (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setStatusDialog({ open: false, productName: '', status: null, productId: '' })}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleSetArchiveToActive}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  Set to Active
+                </Button>
+              </>
+            ) : (
+              <Button 
+                onClick={() => setStatusDialog({ open: false, productName: '', status: null, productId: '' })}
+                className="w-full"
+              >
+                OK
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

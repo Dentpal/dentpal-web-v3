@@ -15,7 +15,36 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import type { WebUserProfile, WebUserPermissions, WebUserRole } from '@/types/webUser';
-import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification, getAuth } from 'firebase/auth';
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+
+// Create a secondary Firebase app instance for user creation
+// This prevents logging out the current admin when creating new users
+let secondaryApp: any = null;
+let secondaryAuth: any = null;
+
+function getSecondaryAuth() {
+  if (!secondaryAuth) {
+    try {
+      // Initialize secondary app with same config
+      secondaryApp = initializeApp({
+        apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+        storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+        appId: import.meta.env.VITE_FIREBASE_APP_ID,
+      }, 'Secondary');
+      secondaryAuth = getAuth(secondaryApp);
+    } catch (error) {
+      console.error('Failed to initialize secondary auth:', error);
+      // Fallback to primary auth if secondary fails
+      secondaryAuth = auth;
+    }
+  }
+  return secondaryAuth;
+}
 
 // Collections
 const SELLER_COLLECTION = 'Seller';
@@ -71,8 +100,10 @@ export async function getWebUser(uid: string): Promise<WebUserProfile | null> {
  */
 export async function createWebUser(email: string, name: string, role: WebUserRole, permissions: WebUserPermissions): Promise<WebUserProfile> {
   try {
+    // Use secondary auth to prevent logging out the current admin
+    const secondaryAuth = getSecondaryAuth();
     const tempPassword = `Temp${Math.random().toString(36).slice(-8)}#${Math.floor(Math.random() * 100)}`;
-    const userCredential = await createUserWithEmailAndPassword(auth, email, tempPassword);
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, tempPassword);
     const { user } = userCredential;
 
     const userData: Omit<WebUserProfile, 'uid'> = {
@@ -90,9 +121,20 @@ export async function createWebUser(email: string, name: string, role: WebUserRo
     try { await setDoc(doc(db, WEB_USERS_COLLECTION, user.uid), userData); } catch {}
 
     try {
-      await sendPasswordResetEmail(auth, email, { url: `${window.location.origin}/auth`, handleCodeInApp: true });
+      // Send password reset email so user can set their own password
+      await sendPasswordResetEmail(auth, email, { 
+        url: `${window.location.origin}/auth`, 
+        handleCodeInApp: true 
+      });
     } catch (emailError) {
-      console.warn('Failed to send invite email:', emailError);
+      console.warn('Failed to send password reset email:', emailError);
+    }
+
+    // Sign out the newly created user from secondary auth
+    try {
+      await secondaryAuth.signOut();
+    } catch (signOutError) {
+      console.warn('Failed to sign out secondary user:', signOutError);
     }
 
     return { uid: user.uid, ...userData } as WebUserProfile;
@@ -104,8 +146,10 @@ export async function createWebUser(email: string, name: string, role: WebUserRo
 
 export async function createSellerSubAccount(parentSellerId: string, email: string, name: string, permissions: WebUserPermissions): Promise<WebUserProfile> {
   try {
+    // Use secondary auth to prevent logging out the current user
+    const secondaryAuth = getSecondaryAuth();
     const tempPassword = `Temp${Math.random().toString(36).slice(-8)}#${Math.floor(Math.random() * 100)}`;
-    const cred = await createUserWithEmailAndPassword(auth, email, tempPassword);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, tempPassword);
     const { user } = cred;
 
     const profile: Omit<WebUserProfile, 'uid'> = {
@@ -135,9 +179,21 @@ export async function createSellerSubAccount(parentSellerId: string, email: stri
     } catch {}
 
     try {
-      await sendPasswordResetEmail(auth, email, { url: `${window.location.origin}/auth`, handleCodeInApp: true });
+      // Send password reset email so user can set their own password
+      await sendPasswordResetEmail(auth, email, { 
+        url: `${window.location.origin}/auth`, 
+        handleCodeInApp: true 
+      });
     } catch (emailError) {
-      console.warn('Failed to send invite email:', emailError);
+      console.warn('Failed to send password reset email:', emailError);
+    }
+
+    // Sign out the newly created user from secondary auth
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      await secondaryAuth.signOut();
+    } catch (signOutError) {
+      console.warn('Failed to sign out secondary user:', signOutError);
     }
 
     return { uid: user.uid, ...profile } as WebUserProfile;
@@ -182,7 +238,13 @@ export async function updateWebUserProfile(
 
 export async function resendUserInvite(email: string): Promise<boolean> {
   try {
-    await sendPasswordResetEmail(auth, email, { url: `${window.location.origin}/auth`, handleCodeInApp: true });
+    // Send both email verification and password reset
+    // Email verification confirms email ownership
+    // Password reset allows them to set their password
+    await sendPasswordResetEmail(auth, email, { 
+      url: `${window.location.origin}/auth`, 
+      handleCodeInApp: true 
+    });
     return true;
   } catch (error) {
     console.error('Error resending invite:', error);
