@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -92,9 +92,9 @@ const fetchSellerData = async (sellerId) => {
 const calculateShipmentItems = (orderItems) => {
     // Default dimensions if not provided in order items
     const defaultDimensions = {
-        length: 20,
-        width: 15,
-        height: 10,
+        length: 20, // cm
+        width: 15, // cm
+        height: 10, // cm
         weight: 0.5, // kg
     };
     return orderItems.map((item) => {
@@ -125,7 +125,7 @@ const createSellerPayoutAdjustment = async (params) => {
             orderId: params.orderId,
             sellerId: params.sellerId,
             type: 'shipping_charge',
-            amount: -params.shippingCharge,
+            amount: -params.shippingCharge, // Negative amount for deduction
             description: `Shipping charge deduction for order ${params.orderId}`,
             shippingReference: params.shippingReferenceNo,
             trackingId: params.trackingId || null,
@@ -755,7 +755,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 try {
                     payoutAdjustmentId = await createSellerPayoutAdjustment({
                         orderId: payload.orderId,
-                        sellerId: orderData.sellerIds[0],
+                        sellerId: orderData.sellerIds[0], // Use primary seller
                         shippingCharge: sellerShippingCharge,
                         shippingReferenceNo,
                         trackingId: (_27 = responseData.ShippingRequestEntityDto) === null || _27 === void 0 ? void 0 : _27.TrackingId,
@@ -1178,7 +1178,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
                 shipmentDescription: shipmentDescription,
                 remarks: payload.remarks || `RETURN SHIPMENT - Order #${payload.orderId} - Reason: ${returnRequestData.reason}`,
                 specialInstruction: "RETURN ITEM - Please handle with care",
-                codAmountToCollect: 0,
+                codAmountToCollect: 0, // No COD for returns
                 shippingReferenceNo: returnShippingReferenceNo,
             },
         };
@@ -1551,7 +1551,7 @@ exports.processWithdrawal = (0, https_1.onRequest)({
             paymongoTransferId: transactionData.attributes.transfer_id,
             paymongoStatus: transactionData.attributes.status,
             paymongoProvider: transactionData.attributes.provider,
-            paymongoNetAmount: transactionData.attributes.net_amount / 100,
+            paymongoNetAmount: transactionData.attributes.net_amount / 100, // Convert back to PHP
             paymongoBatchId: transactionData.attributes.batch_transaction_id,
             paymongoCreatedAt: transactionData.attributes.created_at,
             updatedAt: new Date().toISOString(),
@@ -1871,6 +1871,65 @@ exports.listPaymongoTransactions = (0, https_1.onRequest)({
             error.message ||
             "Failed to list transactions";
         res.status(((_f = error.response) === null || _f === void 0 ? void 0 : _f.status) || 500).json({
+            success: false,
+            error: errorMessage
+        });
+    }
+});
+/**
+ * Delete a user from Firebase Authentication
+ * Admin-only access required
+ * This is called after deleting Firestore data to ensure complete user removal
+ */
+exports.deleteUserAccount = (0, https_1.onRequest)({
+    cors: true,
+    region: "asia-southeast1",
+}, async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+    }
+    try {
+        // Verify authentication
+        const decodedToken = await verifyAuthToken(req.headers.authorization);
+        const adminUid = decodedToken.uid;
+        // Verify admin role
+        await verifyAdminAccess(adminUid, "delete user account");
+        const { uid } = req.body;
+        if (!uid || typeof uid !== "string") {
+            res.status(400).json({ error: "Invalid user ID provided" });
+            return;
+        }
+        // Prevent admin from deleting themselves
+        if (uid === adminUid) {
+            res.status(400).json({ error: "Cannot delete your own account" });
+            return;
+        }
+        // Delete the user from Firebase Authentication
+        await auth.deleteUser(uid);
+        logger.info("User account deleted successfully", {
+            deletedUid: uid,
+            deletedBy: adminUid,
+        });
+        res.status(200).json({
+            success: true,
+            message: "User account deleted successfully"
+        });
+    }
+    catch (error) {
+        // Handle admin access errors with 403
+        if (error instanceof AdminAccessError) {
+            res.status(403).json({ error: error.message });
+            return;
+        }
+        logger.error("Error deleting user account", {
+            error: error.message,
+            code: error.code,
+        });
+        const errorMessage = error.code === "auth/user-not-found"
+            ? "User not found in authentication system"
+            : error.message || "Failed to delete user account";
+        res.status(error.code === "auth/user-not-found" ? 404 : 500).json({
             success: false,
             error: errorMessage
         });

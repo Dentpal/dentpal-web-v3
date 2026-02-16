@@ -2268,3 +2268,74 @@ export const listPaymongoTransactions = onRequest({
     });
   }
 });
+
+/**
+ * Delete a user from Firebase Authentication
+ * Admin-only access required
+ * This is called after deleting Firestore data to ensure complete user removal
+ */
+export const deleteUserAccount = onRequest({
+  cors: true,
+  region: "asia-southeast1",
+}, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    // Verify authentication
+    const decodedToken = await verifyAuthToken(req.headers.authorization);
+    const adminUid = decodedToken.uid;
+
+    // Verify admin role
+    await verifyAdminAccess(adminUid, "delete user account");
+
+    const { uid } = req.body;
+
+    if (!uid || typeof uid !== "string") {
+      res.status(400).json({ error: "Invalid user ID provided" });
+      return;
+    }
+
+    // Prevent admin from deleting themselves
+    if (uid === adminUid) {
+      res.status(400).json({ error: "Cannot delete your own account" });
+      return;
+    }
+
+    // Delete the user from Firebase Authentication
+    await auth.deleteUser(uid);
+
+    logger.info("User account deleted successfully", {
+      deletedUid: uid,
+      deletedBy: adminUid,
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: "User account deleted successfully" 
+    });
+
+  } catch (error: any) {
+    // Handle admin access errors with 403
+    if (error instanceof AdminAccessError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
+
+    logger.error("Error deleting user account", {
+      error: error.message,
+      code: error.code,
+    });
+
+    const errorMessage = error.code === "auth/user-not-found"
+      ? "User not found in authentication system"
+      : error.message || "Failed to delete user account";
+    
+    res.status(error.code === "auth/user-not-found" ? 404 : 500).json({ 
+      success: false, 
+      error: errorMessage 
+    });
+  }
+});

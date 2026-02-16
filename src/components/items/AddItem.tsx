@@ -36,7 +36,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     subCategoryID: '',
     price: 0,
     specialPrice: '' as number | '',
-    inStock: 0,
     lowestPrice: '' as number | '',
     imageURL: '',
     imageFile: null as File | null,
@@ -49,7 +48,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       name: string;
       SKU: string;
       price: number;
-      stock: number;
       imageURL: string;
       imageFile?: File | null;
       imagePreview?: string | null;
@@ -105,10 +103,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                       toast({ title: 'Error', description: `Variation ${i + 1} price is required`, variant: 'destructive' });
                       return;
                     }
-                    if (!variation.stock || isNaN(Number(variation.stock)) || Number(variation.stock) <= 0) {
-                      toast({ title: 'Error', description: `Variation ${i + 1} stock is required`, variant: 'destructive' });
-                      return;
-                    }
                     if (!variation.weight || isNaN(Number(variation.weight)) || Number(variation.weight) <= 0) {
                       toast({ title: 'Error', description: `Variation ${i + 1} weight is required`, variant: 'destructive' });
                       return;
@@ -127,10 +121,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                     }
                   }
                 }
-            if (!form.inStock || isNaN(Number(form.inStock)) || Number(form.inStock) <= 0) {
-              toast({ title: 'Error', description: 'Stock is required', variant: 'destructive' });
-              return;
-            }
         if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) {
           toast({ title: 'Error', description: 'Price is required', variant: 'destructive' });
           return;
@@ -214,7 +204,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         status: 'pending_qc' as const, // Always pending QC first
         price: form.price || 0,
         specialPrice: form.specialPrice || null,
-        inStock: form.inStock || 0,
         lowestPrice: form.lowestPrice || form.price || null,
         // Save dangerousGoods as string
         dangerousGoods: form.dangerousGoods || 'none',
@@ -249,9 +238,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               name: variation.name,
               sku: variation.SKU,
               price: variation.price !== undefined ? Number(parseFloat(variation.price)) : 0,
-              stock: variation.stock !== undefined
-                ? Number.parseFloat(String(variation.stock)) || 0
-                : 0,
               imageURL: varImageURL,
               weight: weightInGrams,
               weightUnit: 'g',
@@ -290,8 +276,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         subCategoryID: '',
         price: 0,
         specialPrice: '',
-        inStock: 0,
-        // suggestedThreshold removed
         lowestPrice: '',
         imageURL: '',
         imageFile: null,
@@ -299,6 +283,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         dangerousGoods: 'none',
         warrantyType: '',
         warrantyDuration: '',
+        warrantyPolicy: '',
         variations: [],
       });
     } catch (error: any) {
@@ -463,21 +448,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                     placeholder="0.00"
                   />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Stock <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={form.inStock}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/[^0-9]/g, '');
-                      setForm({...form, inStock: val === '' ? 0 : parseInt(val)});
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                    placeholder="0"
-                  />
-              </div>
               {/* Threshold field removed from UI */}
             </div>
           </div>
@@ -503,7 +473,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                         name: '',
                         SKU: '',
                         price: 0,
-                        stock: 0,
                         imageURL: '',
                         imageFile: null,
                         imagePreview: null,
@@ -652,27 +621,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           placeholder="0.00"
-                        />
-                      </div>
-
-                      {/* Stock */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stock <span className="text-red-500">*</span></label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          pattern="[0-9.]*"
-                          value={variation.stock}
-                          onChange={(e) => {
-                            let val = e.target.value.replace(/[^0-9.]/g, '');
-                            const parts = val.split('.');
-                            if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                            const updatedVariations = [...form.variations];
-                            updatedVariations[index] = { ...variation, stock: val };
-                            setForm({ ...form, variations: updatedVariations });
-                          }}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="0"
                         />
                       </div>
 
@@ -989,8 +937,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               subCategoryID: '',
               price: 0,
               specialPrice: '',
-              inStock: 0,
-              // suggestedThreshold removed
               lowestPrice: '',
               imageURL: '',
               imageFile: null,
@@ -998,6 +944,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               dangerousGoods: 'none',
               warrantyType: '',
               warrantyDuration: '',
+              warrantyPolicy: '',
               variations: [],
             })}
             disabled={submitting}
