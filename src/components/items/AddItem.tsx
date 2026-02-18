@@ -40,7 +40,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     imageURL: '',
     imageFile: null as File | null,
     imagePreview: null as string | null,
-    dangerousGoods: 'none' as 'none' | 'battery' | 'flammable' | 'liquid',
+    dangerousGoods: '' as '' | 'none' | 'battery' | 'flammable' | 'liquid',
     warrantyType: '',
     warrantyDuration: '',
     warrantyPolicy: '',
@@ -80,8 +80,13 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   }, [form.categoryID]);
 
   const handleSave = async () => {
-                    // Require warranty duration and policy if dangerous goods is not 'none'
-                    if (form.dangerousGoods !== 'none') {
+                    // Require at least one product variation
+                    if (form.variations.length === 0) {
+                      toast({ title: 'Error', description: 'At least one product variation is required', variant: 'destructive' });
+                      return;
+                    }
+                    // Require warranty duration and policy if dangerous goods is not 'none' or empty
+                    if (form.dangerousGoods && form.dangerousGoods !== 'none') {
                       if (!form.warrantyDuration || isNaN(Number(form.warrantyDuration.split(' ')[0])) || Number(form.warrantyDuration.split(' ')[0]) <= 0) {
                         toast({ title: 'Error', description: 'Warranty duration is required for dangerous goods', variant: 'destructive' });
                         return;
@@ -121,10 +126,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                     }
                   }
                 }
-        if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) {
-          toast({ title: 'Error', description: 'Price is required', variant: 'destructive' });
-          return;
-        }
+
     if (!effectiveSellerId) {
       toast({ title: 'Error', description: 'No seller ID found', variant: 'destructive' });
       return;
@@ -406,58 +408,13 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
             </div>
           </div>
 
-          {/* Pricing Section */}
-          <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Price (₱) <span className="text-red-500">*</span>
-                          <span className="ml-2 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold align-middle">include VAT</span>
-                        </label>                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9.]*"
-                    value={form.price}
-                    onChange={(e) => {
-                      let val = e.target.value.replace(/[^0-9.]/g, '');
-                      // Only allow one decimal point
-                      const parts = val.split('.');
-                      if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                      setForm({...form, price: val});
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                    placeholder="0.00"
-                  />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Special Price (₱)</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9.]*"
-                    value={form.specialPrice}
-                    onChange={(e) => {
-                      let val = e.target.value.replace(/[^0-9.]/g, '');
-                      // Only allow one decimal point
-                      const parts = val.split('.');
-                      if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                      setForm({...form, specialPrice: val});
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                    placeholder="0.00"
-                  />
-              </div>
-              {/* Threshold field removed from UI */}
-            </div>
-          </div>
-
           {/* Product Variations Section */}
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-5 border-2 border-blue-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Boxes className="w-5 h-5 text-blue-600" />
                 Product Variations
+                <span className="text-red-500 ml-1">*</span>
                 <span className="ml-2 px-2 py-0.5 bg-blue-600 text-white text-xs font-bold rounded-full">
                   {form.variations.length}
                 </span>
@@ -836,6 +793,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                   onChange={(e) => setForm({...form, dangerousGoods: e.target.value as any})}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                 >
+                  <option value="">Select dangerous goods type</option>
                   <option value="none">None</option>
                   <option value="battery">Contains Battery</option>
                   <option value="flammable">Flammable</option>
