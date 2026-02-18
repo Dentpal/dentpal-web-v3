@@ -428,6 +428,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [membersLoading, setMembersLoading] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [viewOnly, setViewOnly] = useState(false);
+  const [subAccountToDelete, setSubAccountToDelete] = useState<any | null>(null);
 
   // Platform fee edit state
   const [platformFeeModalOpen, setPlatformFeeModalOpen] = useState(false);
@@ -486,8 +487,28 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       await SellersService.deleteSubAccount(uid, m.id);
       toast({ title: 'Deleted', description: `${m.email} removed.` });
       await loadMembers();
+      setSubAccountToDelete(null);
+      setEditing(null);
     } catch (e: any) {
       toast({ title: 'Delete failed', description: e.message || 'Please try again', variant: 'destructive' });
+    }
+  };
+
+  const handleReinviteSubAccount = async (email: string) => {
+    try {
+      await resendUserInvite(email);
+      toast({ title: 'Invite sent', description: `Invitation email sent to ${email}` });
+    } catch (e: any) {
+      toast({ title: 'Failed to send invite', description: e.message || 'Please try again', variant: 'destructive' });
+    }
+  };
+
+  const handleResetPasswordSubAccount = async (email: string) => {
+    try {
+      await resendUserInvite(email);
+      toast({ title: 'Password reset sent', description: `Password reset email sent to ${email}` });
+    } catch (e: any) {
+      toast({ title: 'Failed to send reset', description: e.message || 'Please try again', variant: 'destructive' });
     }
   };
 
@@ -1559,11 +1580,80 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 </div>
               </div>
             )}
+            <div className="space-y-3 border-t pt-3">
+              <p className="text-xs text-gray-600">Account Actions</p>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => editing && handleReinviteSubAccount(editing.email)}
+                  className="flex-1"
+                >
+                  Reinvite
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => editing && handleResetPasswordSubAccount(editing.email)}
+                  className="flex-1"
+                >
+                  Reset Password
+                </Button>
+              </div>
+            </div>
+            <DialogFooter className="flex justify-between">
+              <div>
+                {!viewOnly && editing && (
+                  <Button 
+                    variant="destructive" 
+                    onClick={() => {
+                      setSubAccountToDelete(editing);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={()=> { setEditing(null); setViewOnly(false); }}>Close</Button>
+                {!viewOnly && (
+                  <Button onClick={handleUpdateMember} className="bg-teal-600 hover:bg-teal-700 text-white">Save changes</Button>
+                )}
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Sub-account Delete Confirmation Dialog */}
+        <Dialog open={!!subAccountToDelete} onOpenChange={(o) => { if (!o) setSubAccountToDelete(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete Sub-account</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this sub-account?
+              </DialogDescription>
+            </DialogHeader>
+            {subAccountToDelete && (
+              <div className="space-y-2 py-4">
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-sm font-medium">{subAccountToDelete.name || 'Sub-account'}</p>
+                  <p className="text-xs text-gray-600">{subAccountToDelete.email}</p>
+                </div>
+                <p className="text-sm text-gray-700">
+                  This action cannot be undone. The sub-account will lose access to the system immediately.
+                </p>
+              </div>
+            )}
             <DialogFooter>
-              <Button variant="outline" onClick={()=> { setEditing(null); setViewOnly(false); }}>Close</Button>
-              {!viewOnly && (
-                <Button onClick={handleUpdateMember} className="bg-teal-600 hover:bg-teal-700 text-white">Save changes</Button>
-              )}
+              <Button variant="outline" onClick={() => setSubAccountToDelete(null)}>
+                Cancel
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={() => subAccountToDelete && handleDeleteMember(subAccountToDelete)}
+              >
+                Delete Account
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -5,6 +5,7 @@ import { Pencil, Save, X, Loader2, Upload, Paperclip, CheckCircle2, AlertCircle 
 import Tesseract from 'tesseract.js';
 import SellersService from '@/services/sellers';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { useProfileCompletion } from '@/hooks/useProfileCompletion';
 
 // Add known tax type catalog for matching from 2303 text
@@ -63,6 +64,11 @@ const SellerProfileTab: React.FC = () => {
 	const [saving, setSaving] = useState(false);
 	const [submitLoading, setSubmitLoading] = useState(false);
 
+	// Section-specific editing states
+	const [editingBIR, setEditingBIR] = useState(false);
+	const [editingCompany, setEditingCompany] = useState(false);
+	const [editingContact, setEditingContact] = useState(false);
+
 	// Only keep Vendor Enrollment state
 	// Use the same category set as Inventory/Add Product
 	const CATEGORY_OPTIONS = ['Consumables', 'Dental Equipment', 'Disposables', 'Equipment'];
@@ -95,6 +101,18 @@ const SellerProfileTab: React.FC = () => {
 		},
 	});
 
+	// Store original vendor data to reset on cancel
+	const [originalVendor, setOriginalVendor] = useState(vendor);
+
+	// Track existing uploaded documents from Firebase
+	const [existingDocs, setExistingDocs] = useState<{
+		bir?: { url: string; path: string };
+		secOrDti?: { url: string; path: string };
+		fdaLto?: { url: string; path: string };
+		catalogue?: { url: string; path: string };
+		warrantyPolicy?: { url: string; path: string };
+	}>({});
+
 	// Prefill vendor form from Firestore (Seller.vendor) if available
 	useEffect(() => {
 		let mounted = true;
@@ -107,9 +125,20 @@ const SellerProfileTab: React.FC = () => {
 				const v: any = (doc as any)?.vendor || null;
 				if (!v) {
 					return;
-				}				
-				setVendor(prev => ({
-					...prev,
+				}
+				
+				// Load existing document URLs
+				if (v.bir || v.documents) {
+					setExistingDocs({
+						bir: v.bir || undefined,
+						secOrDti: v.documents?.secOrDti || undefined,
+						fdaLto: v.documents?.fdaLto || undefined,
+						catalogue: v.documents?.catalogue || undefined,
+						warrantyPolicy: v.documents?.warrantyPolicy || undefined,
+					});
+				}
+				
+				const loadedVendorData = {
 					categories: Array.isArray(v.categories) ? v.categories : [],
 					companyName: v.company?.name || '',
 					storeName: v.company?.storeName || '',
@@ -121,6 +150,7 @@ const SellerProfileTab: React.FC = () => {
 						zip: v.company?.address?.zip || '',
 					},
 					contactPerson: v.contacts?.name || '',
+					landline: v.contacts?.landline || '',
 					mobile: v.contacts?.phone || '',
 					email: v.contacts?.email || '',
 					website: v.website || '',
@@ -129,9 +159,26 @@ const SellerProfileTab: React.FC = () => {
 					taxTypes: Array.isArray(v.taxTypes) ? v.taxTypes : [],
 					lineOfBusiness: v.lineOfBusiness || '',
 					dateOfRegistration: v.dateOfRegistration || '',
-					bankingInfo: v.bankingInfo || '',
+					bankName: v.bankName || '',
+					bankAccountNumber: v.bankAccountNumber || '',
 					bankBranchAddress: v.bankBranchAddress || '',
+					merchantAgreement: null as File | null,
+					requirements: {
+						secOrDti: null as File | null,
+						bir2303: null as File | null,
+						fdaLto: null as File | null,
+						catalogue: null as File | null,
+						warrantyPolicy: null as File | null,
+					},
+				};
+				
+				setVendor(prev => ({
+					...prev,
+					...loadedVendorData,
 				}));
+				
+				// Store as original data for reset on cancel
+				setOriginalVendor(loadedVendorData);
 			} catch (err) {
 				console.error('Error loading vendor profile:', err);
 			}
@@ -363,7 +410,7 @@ const SellerProfileTab: React.FC = () => {
 		
 		switch (step) {
 			case 0:
-				if (!vendor.requirements.bir2303) missing.push('BIR 2303 document');
+				if (!vendor.requirements.bir2303 && !existingDocs.bir) missing.push('BIR 2303 document');
 				if (!userConfirmed) missing.push('Confirmation of extracted details');
 				if (!vendor.tin || errors.tin) missing.push('Valid TIN');
 				if (!vendor.companyName) missing.push('Company Name');
@@ -392,8 +439,8 @@ const SellerProfileTab: React.FC = () => {
 				if (!vendor.bankName) missing.push('Bank Name');
 				if (!vendor.bankAccountNumber) missing.push('Bank Account Number');
 				if (!vendor.bankBranchAddress) missing.push('Bank Branch Address');
-				if (!vendor.requirements.secOrDti) missing.push('SEC Certificate or DTI Registration');
-				if (!vendor.requirements.fdaLto) missing.push('FDA LTO Medical Device');
+				if (!vendor.requirements.secOrDti && !existingDocs.secOrDti) missing.push('SEC Certificate or DTI Registration');
+				if (!vendor.requirements.fdaLto && !existingDocs.fdaLto) missing.push('FDA LTO Medical Device');
 				break;
 		}
 		
@@ -423,7 +470,14 @@ const SellerProfileTab: React.FC = () => {
 					</button>
 				) : vendorProfileComplete && isEditing ? (
 					<>
-						<button onClick={() => setIsEditing(false)} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50">
+						<button onClick={() => {
+							// Reset to original vendor data
+							setVendor(originalVendor);
+							// Clear any validation errors
+							setErrors({ mobile: '', email: '', tin: '', tinOcr: '' });
+							// Exit editing mode
+							setIsEditing(false);
+						}} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50">
 							<X className="w-4 h-4" /> Cancel
 						</button>
 						<button
@@ -431,10 +485,46 @@ const SellerProfileTab: React.FC = () => {
 							onClick={async () => {
 								setSaving(true);
 								try {
-									// TODO: save draft to backend
-									await new Promise(r => setTimeout(r, 800));
+									if (!uid) return;
+									// Save the updated vendor profile to Firestore
+									await SellersService.saveVendorProfile(uid, {
+										categories: vendor.categories,
+										tin: vendor.tin,
+										rdoCode: vendor.rdoCode,
+										taxTypes: vendor.taxTypes,
+										lineOfBusiness: vendor.lineOfBusiness,
+										dateOfRegistration: vendor.dateOfRegistration,
+										company: {
+											name: vendor.companyName,
+											storeName: vendor.storeName,
+											address: {
+												line1: vendor.address.street,
+												line2: vendor.address.barangay,
+												city: vendor.address.municipality,
+												province: vendor.address.province,
+												zip: vendor.address.zip,
+											},
+										},
+										contacts: {
+											name: vendor.contactPerson,
+											phone: vendor.mobile,
+											email: vendor.email,
+											landline: vendor.landline,
+										},
+										website: vendor.website,
+										bankName: vendor.bankName,
+										bankAccountNumber: vendor.bankAccountNumber,
+										bankBranchAddress: vendor.bankBranchAddress,
+									} as any);
+									// Update original vendor after successful save
+									setOriginalVendor(vendor);
 									setIsEditing(false);
-								} finally { setSaving(false); }
+								} catch (error: any) {
+									console.error('Failed to save profile:', error);
+									alert('Failed to save profile: ' + (error.message || 'Unknown error'));
+								} finally { 
+									setSaving(false); 
+								}
 							}}
 							className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
 						>
@@ -447,66 +537,602 @@ const SellerProfileTab: React.FC = () => {
 	), [isEditing, saving, vendorProfileComplete]);
 
 	// Completed summary view (read-only)
-	const renderCompletedSummary = () => (
+	const renderCompletedSummary = () => {
+		// Compute the region name from the selected region code
+		const selectedRegionName = regions.find(r => r.code === selectedRegion)?.name || '';
+		
+		return (
 		<div className="space-y-4">
-			<div className="bg-white rounded-lg border border-gray-200 p-4">
-				<div className="flex items-center justify-between">
-					<div className="text-sm font-semibold text-gray-900">Vendor Profile</div>
-					<span className="inline-flex items-center text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded">Completed</span>
-				</div>
-				<div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-					<div>
-						<div className="text-gray-500 text-xs">Company</div>
-						<div className="text-gray-900">{vendor.companyName || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">Store</div>
-						<div className="text-gray-900">{vendor.storeName || '-'}</div>
-					</div>
-					<div className="md:col-span-2">
-						<div className="text-gray-500 text-xs">Address</div>
-						<div className="text-gray-900">{fullAddress || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">Contact</div>
-						<div className="text-gray-900">{vendor.contactPerson || '-'} • {vendor.mobile || vendor.landline || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">Email</div>
-						<div className="text-gray-900">{vendor.email || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">Website</div>
-						<div className="text-gray-900">{vendor.website || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">TIN</div>
-						<div className="text-gray-900">{formatTin(vendor.tin) || '-'}</div>
-					</div>
-					<div>
-						<div className="text-gray-500 text-xs">RDO Code</div>
-						<div className="text-gray-900">{vendor.rdoCode || '-'}</div>
-					</div>
-					<div className="md:col-span-2">
-						<div className="text-gray-500 text-xs">Tax Types</div>
-						<div className="text-gray-900">{(vendor.taxTypes || []).join(', ') || '-'}</div>
+			<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+				{/* Header with Action Buttons */}
+				<div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4">
+					<div className="flex items-center justify-between">
+						<div>
+							<div className="text-white font-semibold text-lg">Vendor Profile</div>
+							<div className="text-teal-100 text-xs mt-0.5">Complete enrollment information</div>
+						</div>
+						<div className="flex gap-2">
+							<button
+								className="px-4 py-2 bg-white text-teal-700 font-medium rounded-lg hover:bg-teal-50 transition shadow-sm text-sm"
+								onClick={() => setProfileUploadOpen(true)}
+							>
+								Submit Profile
+							</button>
+							<button
+								className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm text-sm"
+								onClick={() => setCoverUploadOpen(true)}
+							>
+								Submit Cover Image
+							</button>
+						</div>
 					</div>
 				</div>
-				{/* Action buttons below profile info */}
-				<div className="mt-6 flex gap-3">
-					<button
-						className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition"
-						onClick={() => setProfileUploadOpen(true)}
-					>
-						Submit Profile
-					</button>
-					<button
-						className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-						onClick={() => setCoverUploadOpen(true)}
-					>
-						Submit Cover Image
-					</button>
+
+				<div className="p-6 space-y-6">
+					{/* Section 1: BIR Information */}
+					<div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-2">
+								<div className="w-8 h-8 bg-teal-100 rounded-lg flex items-center justify-center">
+									<span className="text-teal-700 font-semibold text-sm">1</span>
+								</div>
+								<h3 className="font-semibold text-gray-900">BIR Information</h3>
+							</div>
+							{!editingBIR ? (
+								<button 
+									onClick={() => setEditingBIR(true)}
+									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+								>
+									<Pencil className="w-3.5 h-3.5" /> Edit
+								</button>
+							) : (
+								<div className="flex gap-2">
+									<button 
+										onClick={() => {
+											setVendor(originalVendor);
+											setEditingBIR(false);
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+									>
+										<X className="w-3.5 h-3.5" /> Cancel
+									</button>
+									<button 
+										disabled={saving}
+										onClick={async () => {
+											setSaving(true);
+											try {
+												if (!uid) return;
+												await SellersService.saveVendorProfile(uid, {
+													tin: vendor.tin,
+													rdoCode: vendor.rdoCode,
+													taxTypes: vendor.taxTypes,
+													lineOfBusiness: vendor.lineOfBusiness,
+													dateOfRegistration: vendor.dateOfRegistration,
+													company: {
+														name: vendor.companyName,
+													},
+												} as any);
+												setOriginalVendor(vendor);
+												setEditingBIR(false);
+											} catch (error: any) {
+												alert('Failed to save: ' + (error.message || 'Unknown error'));
+											} finally { 
+												setSaving(false); 
+											}
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+									>
+										{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+									</button>
+								</div>
+							)}
+						</div>
+						<div className="bg-white rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">BIR Document</div>
+								{editingBIR ? (
+									<div className="space-y-2">
+										{existingDocs.bir && (
+											<div className="text-xs text-gray-600">
+												Current: {existingDocs.bir.path?.split('/').pop() || 'bir2303.pdf'}
+											</div>
+										)}
+										<Input
+											type="file"
+											accept=".pdf,.jpg,.jpeg,.png"
+											onChange={(e) => {
+												const file = e.target.files?.[0];
+												if (file) {
+													setVendor(v => ({ ...v, requirements: { ...v.requirements, bir2303: file } }));
+												}
+											}}
+											className="h-8 text-xs"
+										/>
+									</div>
+								) : (
+									<div className="text-sm text-gray-900 flex items-center gap-2">
+										{existingDocs.bir ? (
+											<>
+												<span className="inline-flex items-center gap-1 text-teal-700">
+													<CheckCircle2 className="w-4 h-4" />
+													{existingDocs.bir.path?.split('/').pop() || 'bir2303.pdf'}
+												</span>
+											</>
+										) : (
+											<span className="text-gray-400">No file uploaded</span>
+										)}
+									</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">TIN</div>
+								{editingBIR ? (
+									<Input 
+										value={formatTin(vendor.tin)} 
+										onChange={(e) => setField('tin', normalizeTin(e.target.value))}
+										className="h-8 text-sm font-mono"
+										placeholder="000-000-000-000"
+									/>
+								) : (
+									<div className="text-sm text-gray-900 font-mono">{formatTin(vendor.tin) || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Registered Trade Name</div>
+								{editingBIR ? (
+									<Input 
+										value={vendor.companyName} 
+										onChange={(e) => setField('companyName', e.target.value)}
+										className="h-8 text-sm"
+										placeholder="Company Name"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.companyName || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Date of Registration</div>
+								{editingBIR ? (
+									<Input 
+										type="date"
+										value={vendor.dateOfRegistration} 
+										onChange={(e) => setField('dateOfRegistration', e.target.value)}
+										className="h-8 text-sm"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.dateOfRegistration || '-'}</div>
+								)}
+							</div>
+							<div className="md:col-span-2">
+								<div className="text-xs font-medium text-gray-500 mb-1">Tax Type</div>
+								{editingBIR ? (
+									<div className="space-y-2">
+										<div className="flex flex-wrap gap-1">
+											{(vendor.taxTypes || []).map(tax => (
+												<span key={tax} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+													{tax}
+													<button
+														type="button"
+														onClick={() => setVendor(v => ({ ...v, taxTypes: v.taxTypes.filter(t => t !== tax) }))}
+														className="hover:text-blue-900"
+													>
+														<X className="w-3 h-3" />
+													</button>
+												</span>
+											))}
+											{(!vendor.taxTypes || vendor.taxTypes.length === 0) && <span className="text-xs text-gray-400">No tax types selected</span>}
+										</div>
+										<select
+											value=""
+											onChange={(e) => {
+												if (e.target.value && !vendor.taxTypes.includes(e.target.value)) {
+													setVendor(v => ({ ...v, taxTypes: [...v.taxTypes, e.target.value] }));
+												}
+											}}
+											className="w-full h-8 text-xs border border-gray-300 rounded-md px-2"
+										>
+											<option value="">+ Add Tax Type</option>
+											{TAX_TYPE_CATALOG.map(tax => (
+												<option key={tax} value={tax} disabled={vendor.taxTypes.includes(tax)}>
+													{tax}
+												</option>
+											))}
+										</select>
+									</div>
+								) : (
+									<div className="flex flex-wrap gap-1">
+										{(vendor.taxTypes || []).map(tax => (
+											<span key={tax} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+												{tax}
+											</span>
+										))}
+										{(!vendor.taxTypes || vendor.taxTypes.length === 0) && <span className="text-sm text-gray-400">-</span>}
+									</div>
+								)}
+							</div>
+						</div>
+					</div>
+
+					{/* Section 2: Company Information */}
+					<div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-2">
+								<div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+									<span className="text-purple-700 font-semibold text-sm">2</span>
+								</div>
+								<h3 className="font-semibold text-gray-900">Company Information</h3>
+							</div>
+							{!editingCompany ? (
+								<button 
+									onClick={() => setEditingCompany(true)}
+									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+								>
+									<Pencil className="w-3.5 h-3.5" /> Edit
+								</button>
+							) : (
+								<div className="flex gap-2">
+									<button 
+										onClick={() => {
+											setVendor(originalVendor);
+											setEditingCompany(false);
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+									>
+										<X className="w-3.5 h-3.5" /> Cancel
+									</button>
+									<button 
+										disabled={saving}
+										onClick={async () => {
+											setSaving(true);
+											try {
+												if (!uid) return;
+												await SellersService.saveVendorProfile(uid, {
+													company: {
+														name: vendor.companyName,
+														storeName: vendor.storeName,
+														address: {
+															line1: vendor.address.street,
+															line2: vendor.address.barangay,
+															city: vendor.address.municipality,
+															province: vendor.address.province,
+															zip: vendor.address.zip,
+														},
+													},
+												} as any);
+												setOriginalVendor(vendor);
+												setEditingCompany(false);
+											} catch (error: any) {
+												alert('Failed to save: ' + (error.message || 'Unknown error'));
+											} finally { 
+												setSaving(false); 
+											}
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+									>
+										{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+									</button>
+								</div>
+							)}
+						</div>
+						<div className="bg-white rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Company Name</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.companyName} 
+										onChange={(e) => setField('companyName', e.target.value)}
+										className="h-8 text-sm"
+										placeholder="Company Name"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.companyName || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Store Name</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.storeName} 
+										onChange={(e) => setField('storeName', e.target.value)}
+										className="h-8 text-sm"
+										placeholder="Store Name"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.storeName || '-'}</div>
+								)}
+							</div>
+							<div className="md:col-span-2">
+								<div className="text-xs font-medium text-gray-500 mb-1">Street</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.address.street} 
+										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, street: e.target.value } }))}
+										className="h-8 text-sm"
+										placeholder="Street Address"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.street || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Region</div>
+								{editingCompany ? (
+									<Input 
+										value={selectedRegionName} 
+										onChange={(e) => {
+											// For manual input - you may want to integrate with region selection
+										}}
+										className="h-8 text-sm"
+										placeholder="Region"
+										readOnly
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{selectedRegionName || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Province</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.address.province} 
+										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, province: e.target.value } }))}
+										className="h-8 text-sm"
+										placeholder="Province"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.province || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Municipality/City</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.address.municipality} 
+										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, municipality: e.target.value } }))}
+										className="h-8 text-sm"
+										placeholder="Municipality/City"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.municipality || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Barangay</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.address.barangay} 
+										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, barangay: e.target.value } }))}
+										className="h-8 text-sm"
+										placeholder="Barangay"
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.barangay || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">ZIP Code</div>
+								{editingCompany ? (
+									<Input 
+										value={vendor.address.zip} 
+										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, zip: e.target.value } }))}
+										className="h-8 text-sm"
+										placeholder="0000"
+										maxLength={4}
+									/>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.zip || '-'}</div>
+								)}
+							</div>
+						</div>
+					</div>
+
+					{/* Section 3: Contact & Documents */}
+					<div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-2">
+								<div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+									<span className="text-blue-700 font-semibold text-sm">3</span>
+								</div>
+								<h3 className="font-semibold text-gray-900">Contact & Documents</h3>
+							</div>
+							{!editingContact ? (
+								<button 
+									onClick={() => setEditingContact(true)}
+									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+								>
+									<Pencil className="w-3.5 h-3.5" /> Edit
+								</button>
+							) : (
+								<div className="flex gap-2">
+									<button 
+										onClick={() => {
+											setVendor(originalVendor);
+											setEditingContact(false);
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+									>
+										<X className="w-3.5 h-3.5" /> Cancel
+									</button>
+									<button 
+										disabled={saving}
+										onClick={async () => {
+											setSaving(true);
+											try {
+												if (!uid) return;
+												await SellersService.saveVendorProfile(uid, {
+													contacts: {
+														name: vendor.contactPerson,
+														phone: vendor.mobile,
+														email: vendor.email,
+														landline: vendor.landline,
+													},
+													website: vendor.website,
+													bankName: vendor.bankName,
+													bankAccountNumber: vendor.bankAccountNumber,
+													bankBranchAddress: vendor.bankBranchAddress,
+												} as any);
+												setOriginalVendor(vendor);
+												setEditingContact(false);
+											} catch (error: any) {
+												alert('Failed to save: ' + (error.message || 'Unknown error'));
+											} finally { 
+												setSaving(false); 
+											}
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+									>
+										{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+									</button>
+								</div>
+							)}
+						</div>
+						<div className="bg-white rounded-lg p-4 space-y-4">
+							{/* Contact Information */}
+							<div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-100">
+								<div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Customer Service Contact Person</div>
+									{editingContact ? (
+										<Input 
+											value={vendor.contactPerson} 
+											onChange={(e) => setField('contactPerson', e.target.value)}
+											className="h-8 text-sm"
+											placeholder="Contact Person Name"
+										/>
+									) : (
+										<div className="text-sm text-gray-900">{vendor.contactPerson || '-'}</div>
+									)}
+								</div>
+								<div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Mobile No</div>
+									{editingContact ? (
+										<Input 
+											value={formatMobile(vendor.mobile)} 
+											onChange={onMobileChange}
+											className="h-8 text-sm font-mono"
+											placeholder="09XX XXX XXXX"
+										/>
+									) : (
+										<div className="text-sm text-gray-900 font-mono">{vendor.mobile || '-'}</div>
+									)}
+								</div>
+							</div>
+							
+							{/* Banking Information */}
+							<div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-4 border-b border-gray-100">
+								<div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Bank Name</div>
+									{editingContact ? (
+										<Input 
+											value={vendor.bankName} 
+											onChange={(e) => setField('bankName', e.target.value)}
+											className="h-8 text-sm"
+											placeholder="Bank Name"
+										/>
+									) : (
+										<div className="text-sm text-gray-900">{vendor.bankName || '-'}</div>
+									)}
+								</div>
+								<div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Bank Account Number</div>
+									{editingContact ? (
+										<Input 
+											value={vendor.bankAccountNumber} 
+											onChange={(e) => setField('bankAccountNumber', e.target.value)}
+											className="h-8 text-sm font-mono"
+											placeholder="Account Number"
+										/>
+									) : (
+										<div className="text-sm text-gray-900 font-mono">{vendor.bankAccountNumber || '-'}</div>
+									)}
+								</div>
+								<div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Bank Account Name</div>
+									{editingContact ? (
+										<Input 
+											value={vendor.bankBranchAddress} 
+											onChange={(e) => setField('bankBranchAddress', e.target.value)}
+											className="h-8 text-sm"
+											placeholder="Account Name"
+										/>
+									) : (
+										<div className="text-sm text-gray-900">{vendor.bankBranchAddress || '-'}</div>
+									)}
+								</div>
+							</div>
+							
+							{/* Required Documents */}
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-3">Required Documents</div>
+								{editingContact ? (
+									<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+										{/* SEC/DTI Document */}
+										<div className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+											<div className="text-xs font-medium text-gray-700">SEC Certificate / DTI Registration</div>
+											{existingDocs.secOrDti && (
+												<div className="text-xs text-gray-600">
+													Current: {existingDocs.secOrDti.path?.split('/').pop() || 'sec-dti.pdf'}
+												</div>
+											)}
+											<Input
+												type="file"
+												accept=".pdf,.jpg,.jpeg,.png"
+												onChange={(e) => {
+													const file = e.target.files?.[0];
+													if (file) {
+														setVendor(v => ({ ...v, requirements: { ...v.requirements, secOrDti: file } }));
+													}
+												}}
+												className="h-8 text-xs"
+											/>
+										</div>
+										{/* FDA LTO Document */}
+										<div className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+											<div className="text-xs font-medium text-gray-700">FDA LTO Medical Device</div>
+											{existingDocs.fdaLto && (
+												<div className="text-xs text-gray-600">
+													Current: {existingDocs.fdaLto.path?.split('/').pop() || 'fda-lto.pdf'}
+												</div>
+											)}
+											<Input
+												type="file"
+												accept=".pdf,.jpg,.jpeg,.png"
+												onChange={(e) => {
+													const file = e.target.files?.[0];
+													if (file) {
+														setVendor(v => ({ ...v, requirements: { ...v.requirements, fdaLto: file } }));
+													}
+												}}
+												className="h-8 text-xs"
+											/>
+										</div>
+									</div>
+								) : (
+									<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+										<div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+											<CheckCircle2 className="w-5 h-5 text-teal-600 flex-shrink-0" />
+											<div className="flex-1 min-w-0">
+												<div className="text-xs text-gray-500">SEC Certificate / DTI Registration</div>
+												<div className="text-sm text-gray-900 truncate">
+													{existingDocs.secOrDti ? existingDocs.secOrDti.path?.split('/').pop() || 'sec-dti.pdf' : '-'}
+												</div>
+											</div>
+										</div>
+										<div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+											<CheckCircle2 className="w-5 h-5 text-teal-600 flex-shrink-0" />
+											<div className="flex-1 min-w-0">
+												<div className="text-xs text-gray-500">FDA LTO Medical Device</div>
+												<div className="text-sm text-gray-900 truncate">
+													{existingDocs.fdaLto ? existingDocs.fdaLto.path?.split('/').pop() || 'fda-lto.pdf' : '-'}
+												</div>
+											</div>
+										</div>
+									</div>
+								)}
+							</div>
+						</div>
+					</div>
 				</div>
+
 				{/* ProfileUpload modals */}
 				<ProfileUpload
 					open={profileUploadOpen}
@@ -522,7 +1148,8 @@ const SellerProfileTab: React.FC = () => {
 				/>
 			</div>
 		</div>
-	);
+		);
+	};
 
 	// Helpers
 	const toggleCategory = (cat: string) => {
@@ -890,7 +1517,7 @@ const SellerProfileTab: React.FC = () => {
 			// 2) Build vendor payload and persist to Firestore (Seller collection)
 			const payload: any = {
 				categories: vendor.categories,
-				company: { name: vendor.companyName, storeName: vendor.storeName, address: { line1: vendor.address.street, line2: '', city: vendor.address.municipality, province: vendor.address.province, zip: vendor.address.zip } },
+				company: { name: vendor.companyName, storeName: vendor.storeName, address: { line1: vendor.address.street, line2: vendor.address.barangay, city: vendor.address.municipality, province: vendor.address.province, zip: vendor.address.zip } },
 				contacts: { name: vendor.contactPerson, email: vendor.email, phone: vendor.mobile },
 				// 2303-derived
 				tin: vendor.tin,
@@ -1116,6 +1743,9 @@ const SellerProfileTab: React.FC = () => {
 										{vendor.requirements.bir2303 && !extractionLoading && (
 											<span className="text-xs text-gray-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-teal-600"/> {vendor.requirements.bir2303.name}</span>
 										)}
+										{!vendor.requirements.bir2303 && existingDocs.bir && (
+											<span className="text-xs text-teal-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-teal-600"/> Previously uploaded</span>
+										)}
 										{ocrFailed && (
 											<span className="text-xs text-amber-700 inline-flex items-center gap-1">
 												<AlertCircle className="w-3 h-3"/> Manual entry required
@@ -1126,8 +1756,8 @@ const SellerProfileTab: React.FC = () => {
 
 								{/* Review suggestions (merged into Step 1) */}
 								{suggestions && (
-									<div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
-										<div className="flex items-center justify-between">
+									<div className="mt-4">
+										<div className="flex items-center justify-between mb-2">
 											<div className="text-sm font-medium text-gray-900">
 												{Object.keys(suggestions.values).length > 0 ? 'Review extracted details' : 'Manual Entry Required'}
 											</div>
@@ -1544,7 +2174,9 @@ const SellerProfileTab: React.FC = () => {
 													<div className="flex items-center justify-between gap-2">
 														<input disabled={!isEditing} type="file" accept="application/pdf,image/*" onChange={(e)=> setReqFile(key as any, e.target.files?.[0] || null)} />
 														<div className="text-[11px] text-gray-600 inline-flex items-center gap-1">
-															{(vendor.requirements as any)[key] ? <><CheckCircle2 className="w-3 h-3 text-teal-600" /> Uploaded</> : <><AlertCircle className="w-3 h-3 text-amber-600" /> Required</>}
+															{(vendor.requirements as any)[key] ? <><CheckCircle2 className="w-3 h-3 text-teal-600" /> Uploaded</> : 
+															(existingDocs as any)[key] ? <><CheckCircle2 className="w-3 h-3 text-teal-600" /> Previously uploaded</> :
+															<><AlertCircle className="w-3 h-3 text-amber-600" /> Required</>}
 														</div>
 													</div>
 												</div>
