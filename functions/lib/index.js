@@ -1,6 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+<<<<<<< Updated upstream
 exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+=======
+exports.testCreateJRSShipping = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+>>>>>>> Stashed changes
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -64,6 +68,85 @@ const verifyAdminAccess = async (adminUid, actionDescription) => {
         throw new AdminAccessError("Unauthorized. Admin access required.");
     }
 };
+/**
+ * Determine the JRS product name (packaging type) based on shipment weight and dimensions.
+ *
+ * Rules are checked in order from smallest to largest package.
+ * Weight thresholds are MAXIMUM capacities (the item must weigh at or below the limit).
+ * Dimension checks are orientation-independent (item can be rotated to fit).
+ * If no rule matches, returns undefined so the JRS API determines the product automatically.
+ *
+ * All dimensions are in centimeters, all weights are in grams.
+ */
+function determineProductName(shipmentItems) {
+    if (!shipmentItems || shipmentItems.length === 0) {
+        return undefined;
+    }
+    const totalWeight = shipmentItems.reduce((sum, item) => sum + item.weight, 0);
+    // Get the maximum dimensions across all items
+    // For each item, sort its 2D footprint (width × length) so the larger is always "long" and smaller is "short"
+    // This makes the check orientation-independent
+    let maxShort = 0;
+    let maxLong = 0;
+    let maxHeight = 0;
+    for (const item of shipmentItems) {
+        const dim1 = item.width || 0;
+        const dim2 = item.length || 0;
+        const short = Math.min(dim1, dim2);
+        const long = Math.max(dim1, dim2);
+        const h = item.height || 0;
+        maxShort = Math.max(maxShort, short);
+        maxLong = Math.max(maxLong, long);
+        maxHeight = Math.max(maxHeight, h);
+    }
+    logger.info("📐 determineProductName input:", {
+        totalWeight, maxShort, maxLong, maxHeight,
+        itemCount: shipmentItems.length,
+    });
+    // Helper: check if items fit in a 2D envelope/pouch (orientation-independent)
+    const fitsIn2D = (pkgDim1, pkgDim2) => {
+        const pkgShort = Math.min(pkgDim1, pkgDim2);
+        const pkgLong = Math.max(pkgDim1, pkgDim2);
+        return maxShort <= pkgShort && maxLong <= pkgLong;
+    };
+    // Helper: check if items fit in a 3D box (orientation-independent)
+    const fitsIn3D = (pkgDim1, pkgDim2, pkgDim3) => {
+        const pkgDims = [pkgDim1, pkgDim2, pkgDim3].sort((a, b) => a - b);
+        const itemDims = [maxShort, maxLong, maxHeight].sort((a, b) => a - b);
+        return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
+    };
+    // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 cm)
+    if (totalWeight <= 100 && fitsIn2D(24.13, 16.00)) {
+        logger.info("📦 Matched: Express Letter");
+        return "Express Letter";
+    }
+    // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 cm)
+    if (totalWeight <= 500 && fitsIn2D(38.10, 27.94)) {
+        logger.info("📦 Matched: 1 Pounder");
+        return "1 Pounder";
+    }
+    // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 cm)
+    if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56)) {
+        logger.info("📦 Matched: 3 Pounder");
+        return "3 Pounder";
+    }
+    // Rule 4: Bulilit Box — checked BEFORE 5 Pounder (specialized small box)
+    // (max 2500g, fits 20.32 × 29.21 × 10.16 cm)
+    if (totalWeight <= 2500 && fitsIn3D(20.32, 29.21, 10.16)) {
+        logger.info("📦 Matched: Bulilit Box");
+        return "Bulilit Box";
+    }
+    // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 cm)
+    if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56)) {
+        logger.info("📦 Matched: 5 Pounder");
+        return "5 Pounder";
+    }
+    // No rule matched — let the JRS API determine automatically
+    logger.info("📦 No manual rule matched — API will determine productName automatically", {
+        totalWeight, maxShort, maxLong, maxHeight,
+    });
+    return undefined;
+}
 // Helper functions
 const fetchOrderData = async (orderId) => {
     const collections = ["Order", "orders"];
@@ -625,12 +708,18 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 : "FRAGILE ITEMS - Handle with care";
         }
         // Prepare JRS API request
+        // Determine the best JRS packaging type based on item dimensions and weight
+        const resolvedProductName = determineProductName(shipmentItems);
+        logger.info(`📦 JRS packaging for order ${payload.orderId}: ${resolvedProductName !== null && resolvedProductName !== void 0 ? resolvedProductName : "auto (API determines)"}`, {
+            itemCount: shipmentItems.length,
+        });
         const jrsRequest = {
             requestType: "shipfromecom",
             apiShippingRequest: {
                 express: true,
                 insurance: true,
                 valuation: true,
+                ...(resolvedProductName ? { productName: resolvedProductName } : {}),
                 createdByUserEmail: payload.createdByUserEmail || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) || "admin@dentpal.ph",
                 shipmentItems: shipmentItems,
                 recipientEmail: recipientInfo.email,
@@ -1876,6 +1965,7 @@ exports.listPaymongoTransactions = (0, https_1.onRequest)({
         });
     }
 });
+<<<<<<< Updated upstream
 /**
  * Delete a user from Firebase Authentication
  * Admin-only access required
@@ -1935,4 +2025,11 @@ exports.deleteUserAccount = (0, https_1.onRequest)({
         });
     }
 });
+=======
+// ============================================
+// Test JRS Shipping Function (QA API)
+// ============================================
+var testJRSShipping_1 = require("./testJRSShipping");
+Object.defineProperty(exports, "testCreateJRSShipping", { enumerable: true, get: function () { return testJRSShipping_1.testCreateJRSShipping; } });
+>>>>>>> Stashed changes
 //# sourceMappingURL=index.js.map
