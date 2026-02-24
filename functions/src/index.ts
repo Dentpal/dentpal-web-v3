@@ -132,6 +132,27 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
     return undefined;
   }
 
+  // Validate that every item has positive dimensions and weight.
+  // If any item is missing data we cannot reliably choose a package,
+  // so return undefined and let the JRS API auto-select.
+  for (const item of shipmentItems) {
+    if (
+      item.width == null || item.width <= 0 ||
+      item.length == null || item.length <= 0 ||
+      item.height == null || item.height <= 0 ||
+      item.weight == null || item.weight <= 0
+    ) {
+      logger.info("📦 Skipping manual packaging — item has missing/invalid dimensions", {
+        width: item.width,
+        length: item.length,
+        height: item.height,
+        weight: item.weight,
+        itemCount: shipmentItems.length,
+      });
+      return undefined;
+    }
+  }
+
   const totalWeight = shipmentItems.reduce((sum, item) => sum + item.weight, 0);
 
   // Get the aggregate dimensions across all items
@@ -144,15 +165,12 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
   let totalHeight = 0;
 
   for (const item of shipmentItems) {
-    const dim1 = item.width || 0;
-    const dim2 = item.length || 0;
-    const short = Math.min(dim1, dim2);
-    const long = Math.max(dim1, dim2);
-    const h = item.height || 0;
+    const short = Math.min(item.width, item.length);
+    const long = Math.max(item.width, item.length);
 
     maxShort = Math.max(maxShort, short);
     maxLong = Math.max(maxLong, long);
-    totalHeight += h;
+    totalHeight += item.height;
   }
 
   logger.info("📐 determineProductName input:", {

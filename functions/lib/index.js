@@ -1,10 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-<<<<<<< Updated upstream
-exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
-=======
-exports.testCreateJRSShipping = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
->>>>>>> Stashed changes
+exports.testCreateJRSShipping = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -82,25 +78,42 @@ function determineProductName(shipmentItems) {
     if (!shipmentItems || shipmentItems.length === 0) {
         return undefined;
     }
+    // Validate that every item has positive dimensions and weight.
+    // If any item is missing data we cannot reliably choose a package,
+    // so return undefined and let the JRS API auto-select.
+    for (const item of shipmentItems) {
+        if (item.width == null || item.width <= 0 ||
+            item.length == null || item.length <= 0 ||
+            item.height == null || item.height <= 0 ||
+            item.weight == null || item.weight <= 0) {
+            logger.info("📦 Skipping manual packaging — item has missing/invalid dimensions", {
+                width: item.width,
+                length: item.length,
+                height: item.height,
+                weight: item.weight,
+                itemCount: shipmentItems.length,
+            });
+            return undefined;
+        }
+    }
     const totalWeight = shipmentItems.reduce((sum, item) => sum + item.weight, 0);
-    // Get the maximum dimensions across all items
+    // Get the aggregate dimensions across all items
     // For each item, sort its 2D footprint (width × length) so the larger is always "long" and smaller is "short"
     // This makes the check orientation-independent
+    // Footprint (maxShort/maxLong) = largest single-item footprint (items share the same base)
+    // Height (totalHeight) = sum of all item heights (items stack on top of each other)
     let maxShort = 0;
     let maxLong = 0;
-    let maxHeight = 0;
+    let totalHeight = 0;
     for (const item of shipmentItems) {
-        const dim1 = item.width || 0;
-        const dim2 = item.length || 0;
-        const short = Math.min(dim1, dim2);
-        const long = Math.max(dim1, dim2);
-        const h = item.height || 0;
+        const short = Math.min(item.width, item.length);
+        const long = Math.max(item.width, item.length);
         maxShort = Math.max(maxShort, short);
         maxLong = Math.max(maxLong, long);
-        maxHeight = Math.max(maxHeight, h);
+        totalHeight += item.height;
     }
     logger.info("📐 determineProductName input:", {
-        totalWeight, maxShort, maxLong, maxHeight,
+        totalWeight, maxShort, maxLong, totalHeight,
         itemCount: shipmentItems.length,
     });
     // Helper: check if items fit in a 2D envelope/pouch (orientation-independent)
@@ -112,7 +125,7 @@ function determineProductName(shipmentItems) {
     // Helper: check if items fit in a 3D box (orientation-independent)
     const fitsIn3D = (pkgDim1, pkgDim2, pkgDim3) => {
         const pkgDims = [pkgDim1, pkgDim2, pkgDim3].sort((a, b) => a - b);
-        const itemDims = [maxShort, maxLong, maxHeight].sort((a, b) => a - b);
+        const itemDims = [maxShort, maxLong, totalHeight].sort((a, b) => a - b);
         return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
     };
     // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 cm)
@@ -143,7 +156,7 @@ function determineProductName(shipmentItems) {
     }
     // No rule matched — let the JRS API determine automatically
     logger.info("📦 No manual rule matched — API will determine productName automatically", {
-        totalWeight, maxShort, maxLong, maxHeight,
+        totalWeight, maxShort, maxLong, totalHeight,
     });
     return undefined;
 }
@@ -173,29 +186,39 @@ const fetchSellerData = async (sellerId) => {
     return null;
 };
 const calculateShipmentItems = (orderItems) => {
+    var _a, _b, _c, _d;
     // Default dimensions if not provided in order items
+    // Dimensions in cm, weight in kg (converted to grams below)
     const defaultDimensions = {
-        length: 20, // cm
-        width: 15, // cm
-        height: 10, // cm
+        length: 20,
+        width: 15,
+        height: 10,
         weight: 0.5, // kg
     };
-    return orderItems.map((item) => {
-        var _a, _b, _c, _d;
+    const items = [];
+    for (const item of orderItems) {
         const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
         const length = ((_a = item.dimensions) === null || _a === void 0 ? void 0 : _a.length) || defaultDimensions.length;
         const width = ((_b = item.dimensions) === null || _b === void 0 ? void 0 : _b.width) || defaultDimensions.width;
         const height = ((_c = item.dimensions) === null || _c === void 0 ? void 0 : _c.height) || defaultDimensions.height;
-        const unitWeight = ((_d = item.dimensions) === null || _d === void 0 ? void 0 : _d.weight) || defaultDimensions.weight;
+        // Weight from order data is in kg; convert to grams for determineProductName
+        const unitWeightKg = ((_d = item.dimensions) === null || _d === void 0 ? void 0 : _d.weight) || defaultDimensions.weight;
+        const unitWeightGrams = unitWeightKg * 1000;
         const unitDeclaredValue = item.price || 100;
-        return {
-            length,
-            width,
-            height,
-            weight: unitWeight * quantity,
-            declaredValue: unitDeclaredValue * quantity,
-        };
-    });
+        // Expand each order line into per-unit ShipmentItem entries so that
+        // determineProductName correctly sums totalHeight (stacked items) and
+        // totalWeight across all physical units.
+        for (let i = 0; i < quantity; i++) {
+            items.push({
+                length,
+                width,
+                height,
+                weight: unitWeightGrams,
+                declaredValue: unitDeclaredValue,
+            });
+        }
+    }
+    return items;
 };
 const generateShipmentDescription = (items) => {
     const productNames = items.map(item => item.name || item.productName || "Dental Supply").join(", ");
@@ -208,7 +231,7 @@ const createSellerPayoutAdjustment = async (params) => {
             orderId: params.orderId,
             sellerId: params.sellerId,
             type: 'shipping_charge',
-            amount: -params.shippingCharge, // Negative amount for deduction
+            amount: -params.shippingCharge,
             description: `Shipping charge deduction for order ${params.orderId}`,
             shippingReference: params.shippingReferenceNo,
             trackingId: params.trackingId || null,
@@ -844,7 +867,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 try {
                     payoutAdjustmentId = await createSellerPayoutAdjustment({
                         orderId: payload.orderId,
-                        sellerId: orderData.sellerIds[0], // Use primary seller
+                        sellerId: orderData.sellerIds[0],
                         shippingCharge: sellerShippingCharge,
                         shippingReferenceNo,
                         trackingId: (_27 = responseData.ShippingRequestEntityDto) === null || _27 === void 0 ? void 0 : _27.TrackingId,
@@ -1267,7 +1290,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
                 shipmentDescription: shipmentDescription,
                 remarks: payload.remarks || `RETURN SHIPMENT - Order #${payload.orderId} - Reason: ${returnRequestData.reason}`,
                 specialInstruction: "RETURN ITEM - Please handle with care",
-                codAmountToCollect: 0, // No COD for returns
+                codAmountToCollect: 0,
                 shippingReferenceNo: returnShippingReferenceNo,
             },
         };
@@ -1640,7 +1663,7 @@ exports.processWithdrawal = (0, https_1.onRequest)({
             paymongoTransferId: transactionData.attributes.transfer_id,
             paymongoStatus: transactionData.attributes.status,
             paymongoProvider: transactionData.attributes.provider,
-            paymongoNetAmount: transactionData.attributes.net_amount / 100, // Convert back to PHP
+            paymongoNetAmount: transactionData.attributes.net_amount / 100,
             paymongoBatchId: transactionData.attributes.batch_transaction_id,
             paymongoCreatedAt: transactionData.attributes.created_at,
             updatedAt: new Date().toISOString(),
@@ -1965,7 +1988,6 @@ exports.listPaymongoTransactions = (0, https_1.onRequest)({
         });
     }
 });
-<<<<<<< Updated upstream
 /**
  * Delete a user from Firebase Authentication
  * Admin-only access required
@@ -2025,11 +2047,9 @@ exports.deleteUserAccount = (0, https_1.onRequest)({
         });
     }
 });
-=======
 // ============================================
 // Test JRS Shipping Function (QA API)
 // ============================================
 var testJRSShipping_1 = require("./testJRSShipping");
 Object.defineProperty(exports, "testCreateJRSShipping", { enumerable: true, get: function () { return testJRSShipping_1.testCreateJRSShipping; } });
->>>>>>> Stashed changes
 //# sourceMappingURL=index.js.map
