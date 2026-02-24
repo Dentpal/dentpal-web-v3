@@ -77,7 +77,7 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
   let maxShort = 0;
   let maxLong = 0;
-  let maxHeight = 0;
+  let totalHeight = 0;
 
   for (const item of shipmentItems) {
     const dim1 = item.width || 0;
@@ -88,11 +88,11 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
     maxShort = Math.max(maxShort, short);
     maxLong = Math.max(maxLong, long);
-    maxHeight = Math.max(maxHeight, h);
+    totalHeight += h;
   }
 
   logger.info("determineProductName input:", {
-    totalWeight, maxShort, maxLong, maxHeight,
+    totalWeight, maxShort, maxLong, totalHeight,
     itemCount: shipmentItems.length,
   });
 
@@ -104,7 +104,7 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
   const fitsIn3D = (pkgDim1: number, pkgDim2: number, pkgDim3: number): boolean => {
     const pkgDims = [pkgDim1, pkgDim2, pkgDim3].sort((a, b) => a - b);
-    const itemDims = [maxShort, maxLong, maxHeight].sort((a, b) => a - b);
+    const itemDims = [maxShort, maxLong, totalHeight].sort((a, b) => a - b);
     return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
   };
 
@@ -134,7 +134,7 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
   }
 
   logger.info("No manual rule matched, API will determine productName automatically", {
-    totalWeight, maxShort, maxLong, maxHeight,
+    totalWeight, maxShort, maxLong, totalHeight,
   });
   return undefined;
 }
@@ -471,7 +471,6 @@ export const testCreateJRSShipping = onRequest({
     res.status(200).json({
       testMode: true,
       note: "Bulk JRS API test with 6 packaging types. NO Firestore writes.",
-      apiUrl: JRS_TEST_API_URL,
       summary: {
         total: finalResults.length,
         success: successCount,

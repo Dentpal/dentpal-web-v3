@@ -134,12 +134,14 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
   const totalWeight = shipmentItems.reduce((sum, item) => sum + item.weight, 0);
 
-  // Get the maximum dimensions across all items
+  // Get the aggregate dimensions across all items
   // For each item, sort its 2D footprint (width × length) so the larger is always "long" and smaller is "short"
   // This makes the check orientation-independent
+  // Footprint (maxShort/maxLong) = largest single-item footprint (items share the same base)
+  // Height (totalHeight) = sum of all item heights (items stack on top of each other)
   let maxShort = 0;
   let maxLong = 0;
-  let maxHeight = 0;
+  let totalHeight = 0;
 
   for (const item of shipmentItems) {
     const dim1 = item.width || 0;
@@ -150,11 +152,11 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
     maxShort = Math.max(maxShort, short);
     maxLong = Math.max(maxLong, long);
-    maxHeight = Math.max(maxHeight, h);
+    totalHeight += h;
   }
 
   logger.info("📐 determineProductName input:", {
-    totalWeight, maxShort, maxLong, maxHeight,
+    totalWeight, maxShort, maxLong, totalHeight,
     itemCount: shipmentItems.length,
   });
 
@@ -168,7 +170,7 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
   // Helper: check if items fit in a 3D box (orientation-independent)
   const fitsIn3D = (pkgDim1: number, pkgDim2: number, pkgDim3: number): boolean => {
     const pkgDims = [pkgDim1, pkgDim2, pkgDim3].sort((a, b) => a - b);
-    const itemDims = [maxShort, maxLong, maxHeight].sort((a, b) => a - b);
+    const itemDims = [maxShort, maxLong, totalHeight].sort((a, b) => a - b);
     return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
   };
 
@@ -205,7 +207,7 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
 
   // No rule matched — let the JRS API determine automatically
   logger.info("📦 No manual rule matched — API will determine productName automatically", {
-    totalWeight, maxShort, maxLong, maxHeight,
+    totalWeight, maxShort, maxLong, totalHeight,
   });
   return undefined;
 }
@@ -2370,7 +2372,6 @@ export const listPaymongoTransactions = onRequest({
   }
 });
 
-<<<<<<< Updated upstream
 /**
  * Delete a user from Firebase Authentication
  * Admin-only access required
@@ -2441,9 +2442,7 @@ export const deleteUserAccount = onRequest({
     });
   }
 });
-=======
 // ============================================
 // Test JRS Shipping Function (QA API)
 // ============================================
 export {testCreateJRSShipping} from "./testJRSShipping";
->>>>>>> Stashed changes
