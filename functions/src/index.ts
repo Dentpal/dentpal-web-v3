@@ -284,6 +284,7 @@ const fetchSellerData = async (sellerId: string) => {
 
 const calculateShipmentItems = (orderItems: any[]): ShipmentItem[] => {
   // Default dimensions if not provided in order items
+  // Dimensions in cm, weight in kg (converted to grams below)
   const defaultDimensions = {
     length: 20, // cm
     width: 15,  // cm
@@ -291,22 +292,33 @@ const calculateShipmentItems = (orderItems: any[]): ShipmentItem[] => {
     weight: 0.5, // kg
   };
 
-  return orderItems.map((item) => {
+  const items: ShipmentItem[] = [];
+
+  for (const item of orderItems) {
     const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
     const length = item.dimensions?.length || defaultDimensions.length;
     const width = item.dimensions?.width || defaultDimensions.width;
     const height = item.dimensions?.height || defaultDimensions.height;
-    const unitWeight = item.dimensions?.weight || defaultDimensions.weight;
+    // Weight from order data is in kg; convert to grams for determineProductName
+    const unitWeightKg = item.dimensions?.weight || defaultDimensions.weight;
+    const unitWeightGrams = unitWeightKg * 1000;
     const unitDeclaredValue = item.price || 100;
 
-    return {
-      length,
-      width,
-      height,
-      weight: unitWeight * quantity,
-      declaredValue: unitDeclaredValue * quantity,
-    };
-  });
+    // Expand each order line into per-unit ShipmentItem entries so that
+    // determineProductName correctly sums totalHeight (stacked items) and
+    // totalWeight across all physical units.
+    for (let i = 0; i < quantity; i++) {
+      items.push({
+        length,
+        width,
+        height,
+        weight: unitWeightGrams,
+        declaredValue: unitDeclaredValue,
+      });
+    }
+  }
+
+  return items;
 };
 
 const generateShipmentDescription = (items: any[]): string => {
