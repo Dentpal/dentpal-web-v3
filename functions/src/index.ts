@@ -178,11 +178,18 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
     itemCount: shipmentItems.length,
   });
 
+
+  // Named constants for thickness limits (cm) per JRS docs
+  const EXPRESS_LETTER_MAX_THICK = 0.5; // 0.5 cm
+  const ONE_POUNDER_MAX_THICK = 2.0;    // 2.0 cm
+  const THREE_POUNDER_MAX_THICK = 3.0;  // 3.0 cm
+  const FIVE_POUNDER_MAX_THICK = 5.0;   // 5.0 cm
+
   // Helper: check if items fit in a 2D envelope/pouch (orientation-independent)
-  const fitsIn2D = (pkgDim1: number, pkgDim2: number): boolean => {
+  const fitsIn2D = (pkgDim1: number, pkgDim2: number, pkgMaxThickness: number): boolean => {
     const pkgShort = Math.min(pkgDim1, pkgDim2);
     const pkgLong = Math.max(pkgDim1, pkgDim2);
-    return maxShort <= pkgShort && maxLong <= pkgLong;
+    return maxShort <= pkgShort && maxLong <= pkgLong && totalHeight <= pkgMaxThickness;
   };
 
   // Helper: check if items fit in a 3D box (orientation-independent)
@@ -192,20 +199,21 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
     return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
   };
 
-  // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 cm)
-  if (totalWeight <= 100 && fitsIn2D(24.13, 16.00)) {
+
+  // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 × 0.5 cm)
+  if (totalWeight <= 100 && fitsIn2D(24.13, 16.00, EXPRESS_LETTER_MAX_THICK)) {
     logger.info("📦 Matched: Express Letter");
     return "Express Letter";
   }
 
-  // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 cm)
-  if (totalWeight <= 500 && fitsIn2D(38.10, 27.94)) {
+  // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 × 2.0 cm)
+  if (totalWeight <= 500 && fitsIn2D(38.10, 27.94, ONE_POUNDER_MAX_THICK)) {
     logger.info("📦 Matched: 1 Pounder");
     return "1 Pounder";
   }
 
-  // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 cm)
-  if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56)) {
+  // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 × 3.0 cm)
+  if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56, THREE_POUNDER_MAX_THICK)) {
     logger.info("📦 Matched: 3 Pounder");
     return "3 Pounder";
   }
@@ -217,8 +225,8 @@ function determineProductName(shipmentItems: ShipmentItem[]): string | undefined
     return "Bulilit Box";
   }
 
-  // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 cm)
-  if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56)) {
+  // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 × 5.0 cm)
+  if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56, FIVE_POUNDER_MAX_THICK)) {
     logger.info("📦 Matched: 5 Pounder");
     return "5 Pounder";
   }
@@ -301,26 +309,32 @@ const fetchSellerData = async (sellerId: string) => {
 };
 
 const calculateShipmentItems = (orderItems: any[]): ShipmentItem[] => {
-  // Default dimensions if not provided in order items
-  // Dimensions in cm, weight in kg (converted to grams below)
-  const defaultDimensions = {
-    length: 20, // cm
-    width: 15,  // cm
-    height: 10, // cm
-    weight: 0.5, // kg
-  };
+  // No defaultDimensions: missing values are set to -1 (invalid) to trigger determineProductName's guard
 
   const items: ShipmentItem[] = [];
 
   for (const item of orderItems) {
     const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
-    const length = item.dimensions?.length || defaultDimensions.length;
-    const width = item.dimensions?.width || defaultDimensions.width;
-    const height = item.dimensions?.height || defaultDimensions.height;
-    // Weight from order data is in kg; convert to grams for determineProductName
-    const unitWeightKg = item.dimensions?.weight || defaultDimensions.weight;
-    const unitWeightGrams = unitWeightKg * 1000;
+    let length: number = -1;
+    let width: number = -1;
+    let height: number = -1;
+    let unitWeightGrams: number = -1;
     const unitDeclaredValue = item.price || 100;
+
+    if (item.dimensions) {
+      length = typeof item.dimensions.length === "number" ? item.dimensions.length : -1;
+      width = typeof item.dimensions.width === "number" ? item.dimensions.width : -1;
+      height = typeof item.dimensions.height === "number" ? item.dimensions.height : -1;
+      unitWeightGrams = typeof item.dimensions.weight === "number" ? item.dimensions.weight * 1000 : -1;
+    } else {
+      // Log warning if dimensions are missing
+      logger.warn("Order item missing dimensions, applying -1 for determineProductName auto-selection", {
+        orderId: item.orderId || "unknown",
+        itemId: item.productId || item.id || "unknown",
+        itemName: item.name || item.productName || "unknown",
+      });
+      // All fields remain -1
+    }
 
     // Expand each order line into per-unit ShipmentItem entries so that
     // determineProductName correctly sums totalHeight (stacked items) and
