@@ -429,6 +429,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [editing, setEditing] = useState<any | null>(null);
   const [viewOnly, setViewOnly] = useState(false);
   const [subAccountToDelete, setSubAccountToDelete] = useState<any | null>(null);
+  const [sendingInvite, setSendingInvite] = useState(false);
 
   // Platform fee edit state
   const [platformFeeModalOpen, setPlatformFeeModalOpen] = useState(false);
@@ -494,21 +495,21 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     }
   };
 
-  const handleReinviteSubAccount = async (email: string) => {
+  const handleSendInvite = async (email: string, action: 'reinvite' | 'reset') => {
+    if (sendingInvite) return;
     try {
+      setSendingInvite(true);
       await resendUserInvite(email);
-      toast({ title: 'Invite sent', description: `Invitation email sent to ${email}` });
+      const title = action === 'reinvite' ? 'Invite sent' : 'Password reset sent';
+      const description = action === 'reinvite' 
+        ? `Invitation email sent to ${email}`
+        : `Password reset email sent to ${email}`;
+      toast({ title, description });
     } catch (e: any) {
-      toast({ title: 'Failed to send invite', description: e.message || 'Please try again', variant: 'destructive' });
-    }
-  };
-
-  const handleResetPasswordSubAccount = async (email: string) => {
-    try {
-      await resendUserInvite(email);
-      toast({ title: 'Password reset sent', description: `Password reset email sent to ${email}` });
-    } catch (e: any) {
-      toast({ title: 'Failed to send reset', description: e.message || 'Please try again', variant: 'destructive' });
+      const title = action === 'reinvite' ? 'Failed to send invite' : 'Failed to send reset';
+      toast({ title, description: e.message || 'Please try again', variant: 'destructive' });
+    } finally {
+      setSendingInvite(false);
     }
   };
 
@@ -633,8 +634,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     if (canCreateSub) {
       loadMembers();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canCreateSub]);
+  }, [canCreateSub, uid]);
 
   // Email validation function with proper TLD checking
   const validateEmail = (email: string): { isValid: boolean; error?: string } => {
@@ -1586,7 +1586,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => editing && handleReinviteSubAccount(editing.email)}
+                  onClick={() => editing && handleSendInvite(editing.email, 'reinvite')}
+                  disabled={sendingInvite}
                   className="flex-1"
                 >
                   Reinvite
@@ -1594,7 +1595,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => editing && handleResetPasswordSubAccount(editing.email)}
+                  onClick={() => editing && handleSendInvite(editing.email, 'reset')}
+                  disabled={sendingInvite}
                   className="flex-1"
                 >
                   Reset Password
@@ -2299,7 +2301,13 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
             {/* Permissions grid (for custom tweak) */}
             <div className="grid grid-cols-2 gap-2">
-              {Object.keys(subPerms).filter(k => k !== 'withdrawal').map((k) => (
+              {Object.keys(subPerms).filter(k => {
+                // Match the filtering logic from the other dialog
+                if ([
+                  'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile', 'withdrawal'
+                ].includes(k)) return false;
+                return true;
+              }).map((k) => (
                 <label key={k} className="flex items-center gap-2 text-xs">
                   <input type="checkbox" checked={(subPerms as any)[k]} onChange={(e)=> setSubPerms(p=>({ ...(p as any), [k]: e.target.checked }))} disabled={subBundle!=='custom'} />
                   <span className="capitalize">{k.replace('seller-orders','orders').replace('-', ' ')}</span>
