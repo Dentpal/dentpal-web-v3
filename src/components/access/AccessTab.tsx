@@ -1685,9 +1685,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               {/* Permissions grid (for custom tweak) */}
               <div className="grid grid-cols-2 gap-2">
                 {Object.keys({ ...subPerms, chat: (subPerms as any).chat ?? false }).filter(k => {
-                  // Hide bookings, notifications, confirmation, access, users, images, profile
+                  // Hide bookings, notifications, confirmation, access, users, images, profile, withdrawal
                   if ([
-                    'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile'
+                    'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile', 'withdrawal'
                   ].includes(k)) return false;
                   return true;
                 }).map((k) => (
@@ -2299,7 +2299,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
             {/* Permissions grid (for custom tweak) */}
             <div className="grid grid-cols-2 gap-2">
-              {Object.keys(subPerms).map((k) => (
+              {Object.keys(subPerms).filter(k => k !== 'withdrawal').map((k) => (
                 <label key={k} className="flex items-center gap-2 text-xs">
                   <input type="checkbox" checked={(subPerms as any)[k]} onChange={(e)=> setSubPerms(p=>({ ...(p as any), [k]: e.target.checked }))} disabled={subBundle!=='custom'} />
                   <span className="capitalize">{k.replace('seller-orders','orders').replace('-', ' ')}</span>

@@ -46,8 +46,8 @@ const SellerProfileTab: React.FC = () => {
 		};
 	const { uid } = useAuth();
 	const { vendorProfileComplete } = useProfileCompletion();
-	// Automatically enable editing for incomplete profiles
-	const [isEditing, setIsEditing] = useState(!vendorProfileComplete);
+	// Start in view mode by default - will be adjusted based on vendor data
+	const [isEditing, setIsEditing] = useState(false);
 	
 	// Check if this is first visit (show welcome) - check on mount and when profile status changes
 	useEffect(() => {
@@ -55,10 +55,6 @@ const SellerProfileTab: React.FC = () => {
 		// Show welcome if profile is incomplete AND either haven't seen it OR it's been cleared
 		if (!vendorProfileComplete && !hasSeenWelcome) {
 			setShowWelcome(true);
-		}
-		// Auto-enable editing for incomplete profiles
-		if (!vendorProfileComplete) {
-			setIsEditing(true);
 		}
 	}, [vendorProfileComplete]);
 	const [saving, setSaving] = useState(false);
@@ -124,6 +120,8 @@ const SellerProfileTab: React.FC = () => {
 				
 				const v: any = (doc as any)?.vendor || null;
 				if (!v) {
+					// No vendor data exists - enable editing mode for first-time setup
+					setIsEditing(true);
 					return;
 				}
 				
