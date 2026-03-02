@@ -71,7 +71,7 @@ export default function LoginFormView({
               type="button"
               onClick={() => onEmail('')}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-              title="Clear email"
+              aria-label="Clear email"
             >
               <X className="w-5 h-5" />
             </button>

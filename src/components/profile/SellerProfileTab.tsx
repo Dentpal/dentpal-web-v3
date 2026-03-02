@@ -46,8 +46,8 @@ const SellerProfileTab: React.FC = () => {
 		};
 	const { uid } = useAuth();
 	const { vendorProfileComplete } = useProfileCompletion();
-	// Automatically enable editing for incomplete profiles
-	const [isEditing, setIsEditing] = useState(!vendorProfileComplete);
+	// Start in view mode by default - will be adjusted based on vendor data
+	const [isEditing, setIsEditing] = useState(false);
 	
 	// Check if this is first visit (show welcome) - check on mount and when profile status changes
 	useEffect(() => {
@@ -55,10 +55,6 @@ const SellerProfileTab: React.FC = () => {
 		// Show welcome if profile is incomplete AND either haven't seen it OR it's been cleared
 		if (!vendorProfileComplete && !hasSeenWelcome) {
 			setShowWelcome(true);
-		}
-		// Auto-enable editing for incomplete profiles
-		if (!vendorProfileComplete) {
-			setIsEditing(true);
 		}
 	}, [vendorProfileComplete]);
 	const [saving, setSaving] = useState(false);
@@ -123,7 +119,9 @@ const SellerProfileTab: React.FC = () => {
 				if (!mounted) return;
 				
 				const v: any = (doc as any)?.vendor || null;
-				if (!v) {
+				if (!v || Object.keys(v).length === 0) {
+					// No vendor data exists - enable editing mode for first-time setup
+					setIsEditing(true);
 					return;
 				}
 				
@@ -534,7 +532,7 @@ const SellerProfileTab: React.FC = () => {
 				) : null}
 			</div>
 		</div>
-	), [isEditing, saving, vendorProfileComplete]);
+	), [isEditing, saving, vendorProfileComplete, vendor, originalVendor, uid, errors]);
 
 	// Completed summary view (read-only)
 	const renderCompletedSummary = () => {
@@ -612,7 +610,15 @@ const SellerProfileTab: React.FC = () => {
 														name: vendor.companyName,
 													},
 												} as any);
-												setOriginalVendor(vendor);
+												setOriginalVendor(prev => ({
+													...prev,
+													tin: vendor.tin,
+													rdoCode: vendor.rdoCode,
+													taxTypes: vendor.taxTypes,
+													lineOfBusiness: vendor.lineOfBusiness,
+													dateOfRegistration: vendor.dateOfRegistration,
+													companyName: vendor.companyName,
+												}));
 												setEditingBIR(false);
 											} catch (error: any) {
 												alert('Failed to save: ' + (error.message || 'Unknown error'));
@@ -1046,13 +1052,13 @@ const SellerProfileTab: React.FC = () => {
 									)}
 								</div>
 								<div>
-									<div className="text-xs font-medium text-gray-500 mb-1">Bank Account Name</div>
+									<div className="text-xs font-medium text-gray-500 mb-1">Bank Branch Address</div>
 									{editingContact ? (
 										<Input 
 											value={vendor.bankBranchAddress} 
 											onChange={(e) => setField('bankBranchAddress', e.target.value)}
 											className="h-8 text-sm"
-											placeholder="Account Name"
+											placeholder="Bank Branch Address"
 										/>
 									) : (
 										<div className="text-sm text-gray-900">{vendor.bankBranchAddress || '-'}</div>
@@ -2095,10 +2101,10 @@ const SellerProfileTab: React.FC = () => {
 									
 									{/* Contacts */}
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-										<div>
-											<label className="block text-xs font-medium text-gray-600 mb-1">Customer Service Contact Person <span className="text-red-500">*</span></label>
-											<input disabled={!isEditing} value={vendor.landline} onChange={(e)=> setField('landline', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
-										</div>
+<div>
+    <label className="block text-xs font-medium text-gray-600 mb-1">Customer Service Contact Person <span className="text-red-500">*</span></label>
+    <input disabled={!isEditing} value={vendor.contactPerson} onChange={(e)=> setField('contactPerson', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+</div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												Mobile No <span className="text-red-500">*</span>

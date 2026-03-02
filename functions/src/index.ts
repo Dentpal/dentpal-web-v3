@@ -2432,8 +2432,17 @@ export const deleteUserAccount = onRequest({
 
   try {
     // Verify authentication
-    const decodedToken = await verifyAuthToken(req.headers.authorization);
-    const adminUid = decodedToken.uid;
+    let decodedToken;
+    let adminUid;
+    try {
+      decodedToken = await verifyAuthToken(req.headers.authorization);
+      adminUid = decodedToken.uid;
+    } catch (authError: any) {
+      res.status(401).json({ 
+        error: "Authentication failed. Invalid or missing token." 
+      });
+      return;
+    }
 
     // Verify admin role
     await verifyAdminAccess(adminUid, "delete user account");

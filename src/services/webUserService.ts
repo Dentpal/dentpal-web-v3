@@ -311,8 +311,17 @@ export async function deleteWebUser(uid: string): Promise<boolean> {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to delete user from Authentication:', errorData);
+        try {
+          const errorData = await response.json();
+          console.error('Failed to delete user from Authentication:', errorData);
+        } catch (parseError) {
+          const errorText = await response.text().catch(() => 'Unable to read response');
+          console.error('Failed to delete user from Authentication:', {
+            status: response.status,
+            statusText: response.statusText,
+            body: errorText
+          });
+        }
         // Don't throw here - Firestore data is already deleted
         // This prevents the UI from showing an error when auth deletion fails
       }
