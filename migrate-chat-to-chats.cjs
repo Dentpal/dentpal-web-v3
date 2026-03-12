@@ -100,8 +100,9 @@ async function migrateChatToChats() {
     console.log('\n✅ Migration completed successfully!');
   } catch (error) {
     console.error('❌ Migration failed:', error);
+    process.exitCode = 1;
   } finally {
-    process.exit(0);
+    process.exit(process.exitCode ?? 0);
   }
 }
 
