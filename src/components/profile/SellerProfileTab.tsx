@@ -168,12 +168,8 @@ const SellerProfileTab: React.FC = () => {
 				}
 				
 				// Load profile and cover images
-				if (v.profileImage?.url) {
-					setProfileImageUrl(v.profileImage.url);
-				}
-				if (v.coverImage?.url) {
-					setCoverImageUrl(v.coverImage.url);
-				}
+				setProfileImageUrl(v.profileImage?.url || '');
+				setCoverImageUrl(v.coverImage?.url || '');
 				
 				const loadedVendorData = {
 					categories: Array.isArray(v.categories) ? v.categories : [],
