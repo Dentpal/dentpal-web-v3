@@ -320,6 +320,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         dangerousGoods: (form.dangerousGoods && form.dangerousGoods !== 'none') ? 'dangerous' as const : 'none' as const,
         warrantyType: form.warrantyType || null,
         warrantyDuration: form.warrantyDuration || null,
+        warrantyPolicy: form.warrantyPolicy || null,
         allowInquiry: form.allowInquiry,
       };
 
