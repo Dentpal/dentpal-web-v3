@@ -1,5 +1,5 @@
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, serverTimestamp, orderBy } from 'firebase/firestore';
-import app, { storage } from '@/lib/firebase';
+import app, { storage, auth } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const db = getFirestore(app);
@@ -110,8 +110,70 @@ const SellersService = {
   },
   // NEW: Delete a sub-account/member doc
   async deleteSubAccount(parentSellerId: string, memberId: string) {
-    const refDoc = doc(db, SELLER_COL, parentSellerId, 'members', memberId);
-    await deleteDoc(refDoc);
+    // First, get the member data to retrieve the uid
+    const memberRef = doc(db, SELLER_COL, parentSellerId, 'members', memberId);
+    const memberSnap = await getDoc(memberRef);
+    
+    if (!memberSnap.exists()) {
+      throw new Error('Sub-account not found');
+    }
+    
+    const memberData = memberSnap.data();
+    const memberUid = memberData?.uid;
+    
+    // Delete the member document from the subcollection
+    await deleteDoc(memberRef);
+    
+    // If the member has a uid (was activated), delete from Seller collection and Firebase Auth
+    if (memberUid) {
+      try {
+        // Delete from Seller collection
+        const sellerDoc = doc(db, SELLER_COL, memberUid);
+        await deleteDoc(sellerDoc);
+        
+        // Try to delete from legacy web_users collection too
+        try {
+          const legacyDoc = doc(db, LEGACY_COL, memberUid);
+          await deleteDoc(legacyDoc);
+        } catch (legacyError) {
+          console.warn('Legacy collection delete failed (may not exist):', legacyError);
+        }
+        
+        // Delete from Firebase Authentication via Cloud Function
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const idToken = await currentUser.getIdToken();
+            const functionUrl = import.meta.env.VITE_FIREBASE_FUNCTION_URL || 
+                               `https://asia-southeast1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net`;
+            
+            const response = await fetch(`${functionUrl}/deleteUserAccount`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({ uid: memberUid }),
+            });
+            
+            if (!response.ok) {
+              console.error('Failed to delete user from Authentication:', {
+                status: response.status,
+                statusText: response.statusText
+              });
+            }
+          } else {
+            console.warn('No authenticated user to call delete function - skipping Auth deletion');
+          }
+        } catch (authError) {
+          console.error('Error deleting user from Authentication:', authError);
+          // Don't throw - allow the operation to complete
+        }
+      } catch (error) {
+        console.error('Error deleting sub-account user data:', error);
+        // Don't throw - member document is already deleted
+      }
+    }
   },
   // Update platform fee percentage for a seller
   async updatePlatformFee(sellerId: string, platformFeePercentage: number): Promise<void> {

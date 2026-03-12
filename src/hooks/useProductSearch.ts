@@ -41,6 +41,16 @@ export default function useProductSearch(uid: string | undefined) {
       const filtered = [];
       for (const doc of snapshot.docs) {
         const data = doc.data();
+        
+        // Filter: Only include active and approved products
+        const status = data.status || (data.isActive ? 'active' : 'inactive');
+        const isApproved = data.isApproved ?? data.IsApproved ?? data.QCProduct ?? false;
+        
+        // Skip if not active or not approved
+        if (status !== 'active' || !isApproved) {
+          continue;
+        }
+        
         const productName = data.name || '';
         if (search.trim() && !productName.toLowerCase().includes(search.toLowerCase().trim())) {
           continue;

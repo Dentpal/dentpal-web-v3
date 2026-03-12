@@ -17,8 +17,68 @@ import { Package, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, 
 import { storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
+// Helper: convert weight to grams
+const toGrams = (weight: any, unit: string) => {
+  let num = parseFloat(weight);
+  if (isNaN(num)) return null;
+  switch (unit) {
+    case 'kg': return num * 1000;
+    case 'g': return num;
+    case 'lb': return num * 453.59237;
+    case 'oz': return num * 28.3495231;
+    default: return num;
+  }
+};
+
+// Helper: convert dimension to cm
+const toCm = (val: any, unit: string) => {
+  let num = parseFloat(val);
+  if (isNaN(num)) return null;
+  switch (unit) {
+    case 'cm': return num;
+    case 'm': return num * 100;
+    case 'in': return num * 2.54;
+    case 'ft': return num * 30.48;
+    default: return num;
+  }
+};
+
+// Factory function for initial form state
+const getInitialFormState = () => ({
+  name: '',
+  description: '',
+  categoryID: '',
+  subCategoryID: '',
+  price: 0,
+  specialPrice: '' as number | '',
+  lowestPrice: '' as number | '',
+  imageURL: '',
+  imageFile: null as File | null,
+  imagePreview: null as string | null,
+  dangerousGoods: 'none' as '' | 'none' | 'battery' | 'flammable' | 'liquid',
+  warrantyType: '',
+  warrantyDuration: '',
+  warrantyPolicy: '',
+  allowInquiry: false,
+  variations: [] as Array<{
+    name: string;
+    SKU: string;
+    price: number;
+    imageURL: string;
+    imageFile?: File | null;
+    imagePreview?: string | null;
+    weight: number | '';
+    weightUnit: string;
+    dimensions: { length: number | ''; width: number | ''; height: number | '' };
+    dimensionsUnit: string;
+    isFragile?: boolean;
+    isNew?: boolean;
+  }>,
+});
+
 const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const [submitting, setSubmitting] = useState(false);
+  const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>([]);
   const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -29,36 +89,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const productImageInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
-  const [form, setForm] = useState({
-    name: '',
-    description: '',
-    categoryID: '',
-    subCategoryID: '',
-    price: 0,
-    specialPrice: '' as number | '',
-    lowestPrice: '' as number | '',
-    imageURL: '',
-    imageFile: null as File | null,
-    imagePreview: null as string | null,
-    dangerousGoods: '' as '' | 'none' | 'battery' | 'flammable' | 'liquid',
-    warrantyType: '',
-    warrantyDuration: '',
-    warrantyPolicy: '',
-    variations: [] as Array<{
-      name: string;
-      SKU: string;
-      price: number;
-      imageURL: string;
-      imageFile?: File | null;
-      imagePreview?: string | null;
-      weight: number | '';
-      weightUnit: string;
-      dimensions: { length: number | ''; width: number | ''; height: number | '' };
-      dimensionsUnit: string;
-      isFragile?: boolean;
-      isNew?: boolean;
-    }>,
-  });
+  const [form, setForm] = useState(getInitialFormState());
 
   // Load categories
   useEffect(() => {
@@ -161,31 +192,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
 
     setSubmitting(true);
 
-    // Helper: convert weight to grams
-    const toGrams = (weight: any, unit: string) => {
-      let num = parseFloat(weight);
-      if (isNaN(num)) return null;
-      switch (unit) {
-        case 'kg': return num * 1000;
-        case 'g': return num;
-        case 'lb': return num * 453.59237;
-        case 'oz': return num * 28.3495231;
-        default: return num;
-      }
-    };
-    // Helper: convert dimension to cm
-    const toCm = (val: any, unit: string) => {
-      let num = parseFloat(val);
-      if (isNaN(num)) return null;
-      switch (unit) {
-        case 'cm': return num;
-        case 'm': return num * 100;
-        case 'in': return num * 2.54;
-        case 'ft': return num * 30.48;
-        default: return num;
-      }
-    };
-
     try {
       // Upload main product image if exists
       let imageURL = form.imageURL;
@@ -207,11 +213,11 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         price: form.price || 0,
         specialPrice: form.specialPrice || null,
         lowestPrice: form.lowestPrice || form.price || null,
-        // Save dangerousGoods as string
-        dangerousGoods: form.dangerousGoods || 'none',
+        // Map dangerousGoods: battery/flammable/liquid -> 'dangerous', otherwise 'none'
+        dangerousGoods: (form.dangerousGoods && form.dangerousGoods !== 'none') ? 'dangerous' as const : 'none' as const,
         warrantyType: form.warrantyType || null,
-        // Save warrantyDuration as number only
-        warrantyDuration: form.warrantyDuration ? Number(form.warrantyDuration.split(' ')[0]) : null,
+        warrantyDuration: form.warrantyDuration || null,
+        allowInquiry: form.allowInquiry,
       };
 
       const result = await ProductService.createProduct(productData);
@@ -239,7 +245,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
             return {
               name: variation.name,
               sku: variation.SKU,
-              price: variation.price !== undefined ? Number(parseFloat(variation.price)) : 0,
+              price: variation.price !== undefined ? Number(variation.price) : 0,
               imageURL: varImageURL,
               weight: weightInGrams,
               weightUnit: 'g',
@@ -271,26 +277,111 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       }
       
       // Reset form
-      setForm({
-        name: '',
-        description: '',
-        categoryID: '',
-        subCategoryID: '',
-        price: 0,
-        specialPrice: '',
-        lowestPrice: '',
-        imageURL: '',
-        imageFile: null,
-        imagePreview: null,
-        dangerousGoods: 'none',
-        warrantyType: '',
-        warrantyDuration: '',
-        warrantyPolicy: '',
-        variations: [],
-      });
+      setForm(getInitialFormState());
     } catch (error: any) {
       console.error('Error adding product:', error);
       toast({ title: 'Error', description: error.message || 'Failed to add product', variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!effectiveSellerId) {
+      toast({ title: 'Error', description: 'No seller ID found', variant: 'destructive' });
+      return;
+    }
+
+    setSubmitting(true);
+    setShowDraftDialog(false);
+
+    try {
+      // Upload main product image if exists
+      let imageURL = form.imageURL;
+      if (form.imageFile) {
+        const imgRef = storageRef(storage, `products/${effectiveSellerId}/${Date.now()}_${form.imageFile.name}`);
+        await uploadBytes(imgRef, form.imageFile);
+        imageURL = await getDownloadURL(imgRef);
+      }
+
+      // Create product as draft - no validation required
+      const productData = {
+        sellerId: effectiveSellerId,
+        name: form.name || 'Untitled Product',
+        description: form.description || '',
+        categoryID: form.categoryID || '',
+        subCategoryID: form.subCategoryID || '',
+        imageURL: imageURL || '',
+        status: 'draft' as const,
+        price: form.price || 0,
+        specialPrice: form.specialPrice || null,
+        lowestPrice: form.lowestPrice || form.price || null,
+        // Map dangerousGoods: battery/flammable/liquid -> 'dangerous', otherwise 'none'
+        dangerousGoods: (form.dangerousGoods && form.dangerousGoods !== 'none') ? 'dangerous' as const : 'none' as const,
+        warrantyType: form.warrantyType || null,
+        warrantyDuration: form.warrantyDuration || null,
+        warrantyPolicy: form.warrantyPolicy || null,
+        allowInquiry: form.allowInquiry,
+      };
+
+      const result = await ProductService.createProduct(productData);
+      const productId = result.id;
+
+      // Add variations if any
+      if (form.variations.length > 0) {
+        const variationsData = await Promise.all(
+          form.variations.map(async (variation) => {
+            let varImageURL = variation.imageURL;
+            if (variation.imageFile) {
+              const varImgRef = storageRef(storage, `products/${effectiveSellerId}/variations/${Date.now()}_${variation.imageFile.name}`);
+              await uploadBytes(varImgRef, variation.imageFile);
+              varImageURL = await getDownloadURL(varImgRef);
+            }
+
+            const weightInGrams = toGrams(variation.weight, variation.weightUnit);
+            const lengthInCm = toCm(variation.dimensions.length, variation.dimensionsUnit);
+            const widthInCm = toCm(variation.dimensions.width, variation.dimensionsUnit);
+            const heightInCm = toCm(variation.dimensions.height, variation.dimensionsUnit);
+
+            return {
+              name: variation.name || '',
+              sku: variation.SKU || '',
+              price: variation.price !== undefined ? Number(variation.price) : 0,
+              imageURL: varImageURL,
+              weight: weightInGrams,
+              weightUnit: 'g',
+              dimensions: {
+                length: lengthInCm,
+                width: widthInCm,
+                height: heightInCm,
+              },
+              dimensionsUnit: 'cm',
+              isFragile: variation.isFragile || false,
+            };
+          })
+        );
+
+        const validVariations = variationsData.filter(v => v !== null);
+        if (validVariations.length > 0) {
+          await ProductService.addVariations(productId, validVariations);
+        }
+      }
+
+      toast({ 
+        title: 'Saved as Draft', 
+        description: 'Product saved to drafts. You can complete it later.' 
+      });
+      
+      // Call success callback if provided
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 1000);
+      }
+      
+      // Reset form
+      setForm(getInitialFormState());
+    } catch (error: any) {
+      console.error('Error saving draft:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to save draft', variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -327,7 +418,18 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name <span className="text-red-500">*</span></label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Product Name <span className="text-red-500">*</span></label>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.allowInquiry}
+                      onChange={(e) => setForm({...form, allowInquiry: e.target.checked})}
+                      className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                    />
+                    Allow Inquiry
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={form.name}
@@ -573,7 +675,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                             const parts = val.split('.');
                             if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                             const updatedVariations = [...form.variations];
-                            updatedVariations[index] = { ...variation, price: val };
+                            updatedVariations[index] = { ...variation, price: val ? parseFloat(val) : 0 };
                             setForm({ ...form, variations: updatedVariations });
                           }}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -595,7 +697,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const parts = val.split('.');
                               if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, weight: val };
+                              updatedVariations[index] = { ...variation, weight: val ? parseFloat(val) : '' };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -626,10 +728,10 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                                 // Round to 3 decimals for display
                                 weight = Math.round(weight * 1000) / 1000;
                               } else {
-                                weight = '';
+                                weight = '' as any;
                               }
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, weight: weight, weightUnit: newUnit };
+                              updatedVariations[index] = { ...variation, weight: weight as number | '', weightUnit: newUnit };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -658,7 +760,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, length: val }
+                                dimensions: { ...variation.dimensions, length: val ? parseFloat(val) : '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -678,7 +780,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, width: val }
+                                dimensions: { ...variation.dimensions, width: val ? parseFloat(val) : '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -698,7 +800,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, height: val }
+                                dimensions: { ...variation.dimensions, height: val ? parseFloat(val) : '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -735,9 +837,9 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                                 ...variation,
                                 dimensionsUnit: newUnit,
                                 dimensions: {
-                                  length: convert(variation.dimensions.length),
-                                  width: convert(variation.dimensions.width),
-                                  height: convert(variation.dimensions.height),
+                                  length: convert(variation.dimensions.length) as number | '',
+                                  width: convert(variation.dimensions.width) as number | '',
+                                  height: convert(variation.dimensions.height) as number | '',
                                 }
                               };
                               setForm({ ...form, variations: updatedVariations });
@@ -888,27 +990,19 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         {/* Footer */}
         <div className="bg-white px-6 py-4 rounded-xl border border-gray-200 flex items-center justify-end gap-3 sticky bottom-0">
           <button
-            onClick={() => setForm({
-              name: '',
-              description: '',
-              categoryID: '',
-              subCategoryID: '',
-              price: 0,
-              specialPrice: '',
-              lowestPrice: '',
-              imageURL: '',
-              imageFile: null,
-              imagePreview: null,
-              dangerousGoods: 'none',
-              warrantyType: '',
-              warrantyDuration: '',
-              warrantyPolicy: '',
-              variations: [],
-            })}
+            onClick={() => setForm(getInitialFormState())}
             disabled={submitting}
             className="px-5 py-2.5 border-2 border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-100 transition disabled:opacity-50"
           >
             Reset
+          </button>
+          <button
+            onClick={() => setShowDraftDialog(true)}
+            disabled={submitting}
+            className="px-5 py-2.5 border-2 border-orange-400 bg-orange-50 text-orange-700 font-medium rounded-lg hover:bg-orange-100 transition disabled:opacity-50 flex items-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            Save as Draft
           </button>
           <button
             onClick={handleSave}
@@ -922,6 +1016,41 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
             )}
           </button>
         </div>
+
+        {/* Draft Confirmation Dialog */}
+        {showDraftDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 border-2 border-orange-400">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="p-2 bg-orange-100 rounded-full">
+                  <AlertTriangle className="w-6 h-6 text-orange-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">Save as Draft</h3>
+                  <p className="text-sm text-gray-600">
+                    This product listing will be saved as a draft. You can complete or edit it later from the Draft tab.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowDraftDialog(false)}
+                  disabled={submitting}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveDraft}
+                  disabled={submitting}
+                  className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submitting ? 'Saving...' : 'Save as Draft'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 };

@@ -2418,7 +2418,7 @@ export const listPaymongoTransactions = onRequest({
 
 /**
  * Delete a user from Firebase Authentication
- * Admin-only access required
+ * Admin-only access required OR seller deleting their own sub-account
  * This is called after deleting Firestore data to ensure complete user removal
  */
 export const deleteUserAccount = onRequest({
@@ -2433,19 +2433,16 @@ export const deleteUserAccount = onRequest({
   try {
     // Verify authentication
     let decodedToken;
-    let adminUid;
+    let requestorUid;
     try {
       decodedToken = await verifyAuthToken(req.headers.authorization);
-      adminUid = decodedToken.uid;
+      requestorUid = decodedToken.uid;
     } catch (authError: any) {
       res.status(401).json({ 
         error: "Authentication failed. Invalid or missing token." 
       });
       return;
     }
-
-    // Verify admin role
-    await verifyAdminAccess(adminUid, "delete user account");
 
     const { uid } = req.body;
 
@@ -2454,9 +2451,43 @@ export const deleteUserAccount = onRequest({
       return;
     }
 
-    // Prevent admin from deleting themselves
-    if (uid === adminUid) {
+    // Prevent user from deleting themselves
+    if (uid === requestorUid) {
       res.status(400).json({ error: "Cannot delete your own account" });
+      return;
+    }
+
+    // Get the requestor's role
+    const requestorDoc = await db.collection("Seller").doc(requestorUid).get();
+    const requestorRole = requestorDoc.exists ? requestorDoc.data()?.role : null;
+
+    // Check if requestor is admin OR if they're a seller deleting their own sub-account
+    let hasPermission = false;
+
+    if (requestorRole === "admin") {
+      // Admin can delete any user
+      hasPermission = true;
+    } else if (requestorRole === "seller") {
+      // Seller can only delete their sub-accounts
+      // Check if the user to be deleted is a sub-account of the requestor
+      const userToDeleteDoc = await db.collection("Seller").doc(uid).get();
+      if (userToDeleteDoc.exists) {
+        const userData = userToDeleteDoc.data();
+        if (userData?.isSubAccount && userData?.parentId === requestorUid) {
+          hasPermission = true;
+        }
+      }
+    }
+
+    if (!hasPermission) {
+      logger.warn("Unauthorized deletion attempt", {
+        requestorUid,
+        requestorRole,
+        targetUid: uid,
+      });
+      res.status(403).json({ 
+        error: "Unauthorized. You can only delete your own sub-accounts." 
+      });
       return;
     }
 
@@ -2465,7 +2496,8 @@ export const deleteUserAccount = onRequest({
 
     logger.info("User account deleted successfully", {
       deletedUid: uid,
-      deletedBy: adminUid,
+      deletedBy: requestorUid,
+      deletedByRole: requestorRole,
     });
 
     res.status(200).json({ 

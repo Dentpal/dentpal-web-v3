@@ -17,7 +17,8 @@ import {
   MoreVertical,
   Copy,
   Share2,
-  Star
+  Star,
+  GripVertical
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,6 +130,7 @@ interface ImageAsset {
   usageCount: number;
   path?: string; // storage path for delete/management
   duration?: { startTime: string; endTime: string };
+  order?: number;
 }
 
 interface ImagesTabProps {
@@ -156,6 +158,8 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
   const [activeRange, setActiveRange] = useState<{ start: Date | null; end: Date | null }>({ start: new Date(), end: new Date(Date.now() + 7*86400000) });
   const [activeCalendarMonth, setActiveCalendarMonth] = useState<Date>(new Date());
   const [dragActive, setDragActive] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Upload states
@@ -218,6 +222,8 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Ignore during card reorder drag (card drag has text/plain, no Files)
+    if (e.dataTransfer.types.includes('text/plain') && !e.dataTransfer.types.includes('Files')) return;
     if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
     } else if (e.type === "dragleave") {
@@ -276,7 +282,7 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
           return;
         }
 
-        const bannerArray: ImageAsset[] = Object.entries(data).map(([key, value]: [string, any]) => {
+        const bannerArray: ImageAsset[] = Object.entries(data).map(([key, value]: [string, any], idx) => {
           return {
             id: key,
             name: value.name || 'Untitled',
@@ -293,12 +299,43 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
             tags: [],
             isActive: value.isActive !== undefined ? value.isActive : true,
             usageCount: value.usageCount || 0,
-            path: value.storagePath || '',
+            path: value.storagePath || value.path || '',
             duration: value.duration || undefined,
+            order: value.order !== undefined ? value.order : idx,
           };
         });
 
-        setImages(bannerArray);
+        // Sort by order
+        bannerArray.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+        // Backfill order into Firebase for any banner missing the field
+        const missingOrder = bannerArray.filter(b => {
+          const raw = (data as any)[b.id];
+          return raw?.order === undefined;
+        });
+        if (missingOrder.length > 0) {
+          missingOrder.forEach(b => {
+            const bannerRef = dbRef(database, `Banner/${b.id}`);
+            update(bannerRef, { order: b.order }).catch(() => {});
+          });
+        }
+
+        // Auto-expire: set isActive=false for banners whose end date has passed
+        const now = new Date();
+        const expiredIds: string[] = [];
+        bannerArray.forEach(b => {
+          if (b.isActive && b.duration?.endTime && new Date(b.duration.endTime) < now) {
+            expiredIds.push(b.id);
+            const expiredRef = dbRef(database, `Banner/${b.id}`);
+            update(expiredRef, { isActive: false, lastModified: now.toISOString() }).catch(() => {});
+          }
+        });
+
+        const finalArray = expiredIds.length > 0
+          ? bannerArray.map(b => expiredIds.includes(b.id) ? { ...b, isActive: false } : b)
+          : bannerArray;
+
+        setImages(finalArray);
         setBannerLoading(false);
       } catch (err) {
         console.error('Failed to load banner images', err);
@@ -311,13 +348,37 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
   // Fetch on mount
   useEffect(() => { loadBanners(); }, []);
 
+  // Periodically auto-expire banners whose end time has passed
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setImages(prev => {
+        const now = new Date();
+        const expiredIds: string[] = [];
+        prev.forEach(b => {
+          if (b.isActive && b.duration?.endTime && new Date(b.duration.endTime) < now) {
+            expiredIds.push(b.id);
+            const expiredRef = dbRef(database, `Banner/${b.id}`);
+            update(expiredRef, { isActive: false, lastModified: now.toISOString() }).catch(() => {});
+          }
+        });
+        if (expiredIds.length === 0) return prev;
+        return prev.map(b => expiredIds.includes(b.id) ? { ...b, isActive: false } : b);
+      });
+    }, 60000); // Check every 60 seconds
+    return () => clearInterval(interval);
+  }, []);
+
   const handleUpload = async () => {
+    // Prevent multiple uploads
+    if (bannerLoading) return;
+    
     if (uploadFiles.length === 0) return;
     if (!bannerName.trim()) {
       setError?.("Please enter a banner name");
       return;
     }
 
+    setBannerLoading(true);
     setError?.(null);
     try {
       for (const file of uploadFiles) {
@@ -374,6 +435,7 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
           usageCount: 0,
           priority: 1,
           targetScreen: 'home',
+          order: images.length,
         };
 
         await set(newBannerRef, bannerData);
@@ -384,9 +446,12 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
       setUploadTags("");
       setBannerName("");
       setBannerURL("");
+      loadBanners(); // Reload banners to show the new upload
     } catch (err) {
       console.error(err);
       setError?.("Failed to upload images. Please try again.");
+    } finally {
+      setBannerLoading(false);
     }
   };
 
@@ -519,6 +584,53 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
     );
   };
 
+  // --- Drag-to-reorder handlers ---
+  const handleCardDragStart = (e: React.DragEvent, imageId: string) => {
+    e.stopPropagation();
+    setDraggingId(imageId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', imageId);
+  };
+
+  const handleCardDragOver = (e: React.DragEvent, imageId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    if (imageId !== draggingId) setDragOverId(imageId);
+  };
+
+  const handleCardDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggingId || draggingId === targetId) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
+    setImages(prev => {
+      const fromIndex = prev.findIndex(i => i.id === draggingId);
+      const toIndex = prev.findIndex(i => i.id === targetId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+      const reordered = [...prev];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      const withOrder = reordered.map((img, idx) => ({ ...img, order: idx }));
+      // Persist new order to Firebase
+      Promise.all(withOrder.map(img => {
+        const bannerRef = dbRef(database, `Banner/${img.id}`);
+        return update(bannerRef, { order: img.order });
+      })).catch(() => {});
+      return withOrder;
+    });
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
+  const handleCardDragEnd = () => {
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
   const selectAllImages = () => {
     if (selectedImages.length === filteredImages.length) {
       setSelectedImages([]);
@@ -557,9 +669,13 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
     if (images.length === 0) return;
     if (window.confirm("Are you sure you want to clear all images? This action cannot be undone.")) {
       await Promise.all(
-        images.map(img =>
-          img.path ? deleteObject(storageRef(storage, img.path)).catch(() => {}) : Promise.resolve()
-        )
+        images.map(async img => {
+          if (img.path) {
+            await deleteObject(storageRef(storage, img.path)).catch(() => {});
+          }
+          const bannerRef = dbRef(database, `Banner/${img.id}`);
+          await remove(bannerRef).catch(() => {});
+        })
       );
       setImages([]);
       setSelectedImages([]);
@@ -581,26 +697,36 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
     return `${m}m left`;
   };
 
-  const renderImageCard = (image: ImageAsset) => (
+  const renderImageCard = (image: ImageAsset, index?: number) => (
     <div 
       key={image.id}
-      className={`group relative bg-white rounded-xl border-2 transition-all duration-200 hover:shadow-lg ${
-        image.isActive
-          ? 'border-green-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]'
-          : selectedImages.includes(image.id)
-            ? 'border-teal-500 shadow-md'
-            : 'border-gray-200 hover:border-gray-300'
+      draggable
+      onDragStart={(e) => handleCardDragStart(e, image.id)}
+      onDragOver={(e) => handleCardDragOver(e, image.id)}
+      onDrop={(e) => handleCardDrop(e, image.id)}
+      onDragEnd={handleCardDragEnd}
+      className={`group relative bg-white rounded-xl border-2 transition-all duration-200 hover:shadow-lg select-none ${
+        draggingId === image.id
+          ? 'opacity-40 scale-95 border-dashed border-gray-400'
+          : dragOverId === image.id
+            ? 'border-teal-400 shadow-xl scale-[1.02]'
+            : image.isActive
+              ? 'border-green-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]'
+              : selectedImages.includes(image.id)
+                ? 'border-teal-500 shadow-md'
+                : 'border-gray-200 hover:border-gray-300'
       }`}
     >
-      <div className="absolute top-3 left-3 z-10">
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5">
+        <GripVertical className="w-4 h-4 text-gray-400 cursor-grab active:cursor-grabbing opacity-60 group-hover:opacity-100 transition-opacity" />
         <input
           type="checkbox"
           checked={selectedImages.includes(image.id)}
           onChange={() => toggleImageSelection(image.id)}
           className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
+          onClick={(e) => e.stopPropagation()}
         />
       </div>
-
       <div className="absolute top-3 right-3 z-10 flex flex-col items-end gap-2">
         <Button
           variant="secondary"
@@ -613,11 +739,19 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
             {image.isActive ? 'Active' : 'Set Active'}
           </span>
         </Button>
-        {image.isActive && image.duration?.startTime && image.duration?.endTime && (
-          <div className="text-[11px] bg-white/90 rounded px-2 py-0.5 border border-green-200 text-green-700 shadow-sm">
-            {formatCountdown(image.duration.startTime, image.duration.endTime)}
-          </div>
-        )}
+        {image.isActive && image.duration?.startTime && image.duration?.endTime && (() => {
+          const countdown = formatCountdown(image.duration.startTime, image.duration.endTime);
+          const style = countdown === 'Ended'
+            ? 'bg-red-50 border-red-300 text-red-700'
+            : countdown === 'Not started'
+              ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
+              : 'bg-white/90 border-green-200 text-green-700';
+          return (
+            <div className={`text-[11px] rounded px-2 py-0.5 border shadow-sm ${style}`}>
+              {countdown}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="aspect-video bg-gray-100 rounded-t-xl overflow-hidden relative">
@@ -665,9 +799,16 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
 
       <div className="p-4">
         <div className="flex items-start justify-between mb-2">
-          <h4 className="font-medium text-gray-900 truncate flex-1 mr-2">
-            {image.name}
-          </h4>
+          <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+            {index !== undefined && (
+              <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-600 text-white text-[10px] font-bold">
+                {index + 1}
+              </span>
+            )}
+            <h4 className="font-medium text-gray-900 truncate">
+              {image.name}
+            </h4>
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -943,7 +1084,7 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
           {viewMode === 'grid' ? (
             <div className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {filteredImages.map(renderImageCard)}
+                {filteredImages.map((image, index) => renderImageCard(image, index))}
               </div>
             </div>
           ) : (
@@ -1131,10 +1272,10 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
                 </Button>
                 <Button
                   onClick={handleUpload}
-                  disabled={loading || uploadFiles.length === 0 || !bannerName.trim()}
+                  disabled={bannerLoading || uploadFiles.length === 0 || !bannerName.trim()}
                   className="bg-teal-600 hover:bg-teal-700 text-white"
                 >
-                  {loading ? "Uploading..." : "Upload Banner"}
+                  {bannerLoading ? "Uploading..." : "Upload Banner"}
                 </Button>
               </div>
             </div>

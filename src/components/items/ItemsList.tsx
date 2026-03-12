@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { ProductService } from '@/services/product';
 import CategoryService from '@/services/category';
-import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Archive, RotateCcw } from 'lucide-react';
+import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Archive, RotateCcw, MessageCircle } from 'lucide-react';
 import { storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs } from 'firebase/firestore';
@@ -39,6 +39,8 @@ interface InventoryItem {
   isActive?: boolean;
   updatedAt?: number;
   variationCount?: number;
+  qcReason?: string;
+  violationmessage?: string;
 }
 
 interface ItemsListProps {
@@ -52,6 +54,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
+  const [variationPrices, setVariationPrices] = useState<Record<string, number>>({});
+  const [variationStocks, setVariationStocks] = useState<Record<string, number>>({});
   // Map subCategoryID to parent categoryName
   const [subcategoryToCategory, setSubcategoryToCategory] = useState<Record<string, string>>({});
 
@@ -90,6 +94,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     warrantyDuration: string;
     promoStart: number | null;
     promoEnd: number | null;
+    allowInquiry: boolean;
     variations: Array<{
       id?: string;
       name: string;
@@ -190,12 +195,67 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         status: r.status,
         isActive: r.isActive != null ? !!r.isActive : (r.status === 'active'),
         variationCount: r.variationCount || 0,
+        qcReason: r.qcReason || '',
+        violationmessage: r.violationmessage || '',
       }));
       setItems(mapped as any);
       setLoading(false);
     });
     return () => unsub();
   }, [effectiveSellerId]);
+
+  // Stable array of unique item IDs derived from items
+  const itemIds = useMemo(() => {
+    return Array.from(new Set(items.map(item => item.id)));
+  }, [items.map(item => item.id).join(',')]);
+
+  // Load first variation prices and stocks for all items
+  const fetchIdRef = useRef(0);
+  useEffect(() => {
+    if (!itemIds.length) return;
+    
+    // Increment fetch ID to invalidate previous fetches
+    const currentFetchId = ++fetchIdRef.current;
+    
+    const loadVariationData = async () => {
+      try {
+        // Parallel fetch with individual error handling
+        const results = await Promise.all(
+          itemIds.map(async (id) => {
+            try {
+              const variations = await ProductService.getVariations(id);
+              return {
+                id,
+                price: variations && variations.length > 0 ? variations[0].price || 0 : 0,
+                stock: variations && variations.length > 0 ? variations[0].stock || 0 : 0,
+              };
+            } catch (error) {
+              console.error(`Failed to load variations for ${id}:`, error);
+              return { id, price: 0, stock: 0 };
+            }
+          })
+        );
+        
+        // Only update state if this is still the current fetch
+        if (currentFetchId === fetchIdRef.current) {
+          const prices: Record<string, number> = {};
+          const stocks: Record<string, number> = {};
+          
+          results.forEach(({ id, price, stock }) => {
+            prices[id] = price;
+            stocks[id] = stock;
+          });
+          
+          setVariationPrices(prices);
+          setVariationStocks(stocks);
+        }
+      } catch (error) {
+        console.error('Failed to load variation data:', error);
+      }
+    };
+    
+    loadVariationData();
+  }, [itemIds]);
 
   // Enrich items with category names
   const enrichedItems = useMemo(() => {
@@ -405,6 +465,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       warrantyDuration: product.warrantyDuration || '',
       promoStart: product.promoStart || null,
       promoEnd: product.promoEnd || null,
+      allowInquiry: product.allowInquiry || false,
       variations: variations,
     });
 
@@ -449,6 +510,10 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         imageUrl = await getDownloadURL(sRef);
       }
 
+      // If product is in violation, change status to pending_qc when saving
+      const currentItem = items.find(item => item.id === editingItem);
+      const newStatus = currentItem?.status === 'violation' ? 'pending_qc' : editForm.status;
+
       // Update product details (price and lowestPrice are handled by updatePriceAndPromo)
       await ProductService.updateProduct(editingItem, {
         name: editForm.name,
@@ -457,10 +522,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         categoryID: editForm.categoryID || null,
         subCategoryID: editForm.subCategoryID || null,
         suggestedThreshold: editForm.suggestedThreshold,
-        status: editForm.status,
+        status: newStatus,
         dangerousGoods: editForm.dangerousGoods,
         warrantyType: editForm.warrantyType || null,
         warrantyDuration: editForm.warrantyDuration || null,
+        allowInquiry: editForm.allowInquiry,
       } as any);
 
       // Update pricing
@@ -555,7 +621,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         )
       );
 
-      toast({ title: 'Success', description: 'Product updated successfully' });
+      const wasViolation = currentItem?.status === 'violation';
+      toast({ 
+        title: 'Success', 
+        description: wasViolation ? 'Product updated and resubmitted for review' : 'Product updated successfully' 
+      });
       setShowEditModal(false);
       setEditingItem(null);
       setEditForm(null);
@@ -602,6 +672,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
             {t.key === 'inactive' && statusCounts.inactive > 0 && (
               <span className="absolute -top-2 -right-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-gray-500 text-white text-[10px] leading-none shadow ring-2 ring-white">
                 {statusCounts.inactive}
+              </span>
+            )}
+            {t.key === 'draft' && statusCounts.draft > 0 && (
+              <span className="absolute -top-2 -right-2 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] leading-none shadow ring-2 ring-white">
+                {statusCounts.draft}
               </span>
             )}
             {t.key === 'pending_qc' && statusCounts.pending_qc > 0 && (
@@ -680,7 +755,10 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
             <tr className="text-left">
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRODUCT NAME</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
-              {catalogTab !== 'archive' && (
+              {catalogTab === 'violation' && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">REASON</th>
+              )}
+              {catalogTab !== 'archive' && catalogTab !== 'violation' && (
                 <>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
@@ -732,17 +810,29 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   </td>
                   {/* Category */}
                   <td className="px-4 py-3 text-gray-700">{displayCategory}</td>
-                  {/* Price and Stock - hidden in archive tab */}
-                  {catalogTab !== 'archive' && (
+                  {/* Reason - shown only in violation tab */}
+                  {catalogTab === 'violation' && (
+                    <td className="px-4 py-3 text-sm text-red-600">
+                      {item.violationmessage || item.qcReason || '—'}
+                    </td>
+                  )}
+                  {/* Price - hidden in archive and violation tab */}
+                  {catalogTab !== 'archive' && catalogTab !== 'violation' && (
                     <>
                       <td className="px-4 py-3 text-gray-700">
-                        {item.price != null ? (
-                          <span>₱{Number(item.price).toLocaleString()}</span>
+                        {variationPrices[item.id] != null ? (
+                          <span>₱{Number(variationPrices[item.id]).toLocaleString()}</span>
                         ) : (
                           <span className="text-gray-400">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-700">{item.inStock}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {variationStocks[item.id] != null ? (
+                          <span>{Number(variationStocks[item.id]).toLocaleString()}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
                     </>
                   )}
                   {/* Status Badge - only in "all" tab */}
@@ -804,15 +894,20 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       </button>
                     </td>
                   )}
-                  {/* Edit Item or Restore Button */}
-                  <td className="px-4 py-3" onClick={e => { e.stopPropagation(); catalogTab === 'archive' ? handleRestoreItem(item.id) : handleEditItem(item); }}>
-                    {catalogTab === 'archive' ? (
+                  {/* Edit Item, Under Review, or Restore Button */}
+                  <td className="px-4 py-3" onClick={e => { e.stopPropagation(); if (status !== 'pending_qc') { catalogTab === 'archive' ? handleRestoreItem(item.id) : handleEditItem(item); } }}>
+                    {catalogTab === 'archive' || status === 'archive' ? (
                       <button
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-blue-600 text-white hover:bg-blue-700"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         Restore
                       </button>
+                    ) : status === 'pending_qc' ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        Under Review
+                      </span>
                     ) : (
                       <button
                         disabled={isDeleted}
@@ -896,7 +991,18 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-gray-700">Product Name *</label>
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editForm.allowInquiry}
+                          onChange={(e) => setEditForm({...editForm, allowInquiry: e.target.checked})}
+                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                        />
+                        Allow Inquiry
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={editForm.name}
@@ -985,50 +1091,6 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       ))}
                     </select>
                   </div>
-                </div>
-              </div>
-
-              {/* Pricing Section */}
-              <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
-                    <input
-                      type="text"
-                      value={editForm.price}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Allow empty or valid number
-                        if (value === '' || !isNaN(Number(value))) {
-                          setEditForm({...editForm, price: value});
-                        }
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  {/* <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Special Price (₱)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editForm.specialPrice}
-                      onChange={(e) => setEditForm({...editForm, specialPrice: e.target.value === '' ? '' : parseFloat(e.target.value)})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="0.00"
-                    />
-                  </div> */}
-                  {/* <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Threshold</label>
-                    <input
-                      type="number"
-                      value={editForm.suggestedThreshold}
-                      onChange={(e) => setEditForm({...editForm, suggestedThreshold: parseInt(e.target.value) || 5})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="5"
-                    />
-                  </div> */}
                 </div>
               </div>
 
@@ -1213,7 +1275,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                               />
                             </div>
 
-                            {/* Stock */}
+                            {/* Stock - Hidden */}
+                            {false && (
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">Stock Quantity *</label>
                               <input
@@ -1232,6 +1295,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                                 placeholder="0"
                               />
                             </div>
+                            )}
 
                             {/* Weight */}
                             <div>

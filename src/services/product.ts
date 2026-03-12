@@ -14,7 +14,7 @@ export type CreateProductInput = {
   lowestPrice?: number | null;
   variationImageVersions?: Record<string, string> | null;
   // New: optional status override for creation (e.g., 'draft')
-  status?: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
+  status?: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted' | 'archive';
   // New: suggested threshold for low-stock alerts
   suggestedThreshold?: number | null;
   // Updated: warranty & compliance
@@ -68,7 +68,18 @@ export const ProductService = {
   },
 
   // Listen to logs for a seller (across all products)
-  listenProductLogsBySeller(sellerId: string, cb: (logs: any[]) => void, options?: { startDate?: Date | null; endDate?: Date | null }) {
+  listenProductLogsBySeller(
+    sellerId: string, 
+    cb: (logs: any[], pagination?: { hasNextPage: boolean; hasPrevPage: boolean; lastDoc: any; firstDoc: any }) => void, 
+    options?: { 
+      startDate?: Date | null; 
+      endDate?: Date | null;
+      pageSize?: number;
+      direction?: 'next' | 'prev';
+      startAfterDoc?: any;
+      endBeforeDoc?: any;
+    }
+  ) {
     try {
       const pageSize = options?.pageSize || 50;
 
@@ -84,7 +95,7 @@ export const ProductService = {
         cutoffEnd = now;
       }
 
-      let logsQueryBase = [
+      const logsQueryBase: any[] = [
         collectionGroup(db, 'Logs'),
         where('sellerId', '==', sellerId),
         where('at', '>=', cutoffStart),
@@ -100,11 +111,11 @@ export const ProductService = {
       }
       logsQueryBase.push(limit(pageSize));
 
-      const logsQuery = query.apply(null, logsQueryBase);
+      const logsQuery = query(logsQueryBase[0], ...logsQueryBase.slice(1));
 
       const unsub = onSnapshot(logsQuery, (snap) => {
         const docs = snap.docs;
-        const logs = docs.map((d) => ({ id: d.id, ...d.data() }));
+        const logs = docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
         const hasNextPage = docs.length === pageSize;
         const hasPrevPage = !!options?.startAfterDoc || !!options?.endBeforeDoc;
         const lastDoc = docs.length > 0 ? docs[docs.length - 1] : null;
@@ -237,6 +248,7 @@ export const ProductService = {
       IsApproved: false,
       qcRejectedAt: serverTimestamp(),
       qcReason: reason ?? '',
+      violationMessage: reason ?? '',
       updatedAt: serverTimestamp(),
     });
   },
@@ -275,7 +287,7 @@ export const ProductService = {
           const status = data.status || 'inactive';
           // Backward compatibility: treat QCProduct true as approved as well
           const approved = data.IsApproved === true || data.QCProduct === true;
-          const excluded = status === 'deleted' || status === 'violation';
+          const excluded = status === 'deleted' || status === 'violation' || status === 'draft';
           return !excluded && !approved; // include anything not approved yet
         })
         .sort((a, b) => {
@@ -337,7 +349,7 @@ export const ProductService = {
       price?: number;
       specialPrice?: number;
       inStock: number;
-      status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
+      status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted' | 'archive';
       updatedAt: number;
       sku?: string;
       category?: string;
@@ -372,7 +384,7 @@ export const ProductService = {
           effectiveSpecial = Number(pd.specialPrice);
         }
         // Prefer explicit status if present, else derive from isActive
-        const s = (pd.status ?? (pd.isActive === false ? 'inactive' : 'active')) as 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
+        const s = (pd.status ?? (pd.isActive === false ? 'inactive' : 'active')) as 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted' | 'archive';
         return {
           id: String(d.id),
           name: String(pd.name ?? ''),
@@ -525,7 +537,7 @@ export const ProductService = {
     subCategoryID: string | null;
     isActive: boolean;
     price: number | null;
-    status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted';
+    status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted' | 'archive';
     suggestedThreshold: number | null;
     // Updated: warranty & compliance
     dangerousGoods: 'none' | 'dangerous';

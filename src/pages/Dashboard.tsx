@@ -578,6 +578,10 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         "access",
         "images",
         "users",
+        "chats",
+        "policies",
+        "categories",
+        "warranty",
       ];
       const firstAllowed = order.find((id) => isAllowed(id));
       if (firstAllowed) setActiveItem(firstAllowed);
