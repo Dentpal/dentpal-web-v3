@@ -116,11 +116,16 @@ function determineProductName(shipmentItems) {
         totalWeight, maxShort, maxLong, totalHeight,
         itemCount: shipmentItems.length,
     });
+    // Named constants for thickness limits (cm) per JRS docs
+    const EXPRESS_LETTER_MAX_THICK = 0.5; // 0.5 cm
+    const ONE_POUNDER_MAX_THICK = 2.0; // 2.0 cm
+    const THREE_POUNDER_MAX_THICK = 3.0; // 3.0 cm
+    const FIVE_POUNDER_MAX_THICK = 5.0; // 5.0 cm
     // Helper: check if items fit in a 2D envelope/pouch (orientation-independent)
-    const fitsIn2D = (pkgDim1, pkgDim2) => {
+    const fitsIn2D = (pkgDim1, pkgDim2, pkgMaxThickness) => {
         const pkgShort = Math.min(pkgDim1, pkgDim2);
         const pkgLong = Math.max(pkgDim1, pkgDim2);
-        return maxShort <= pkgShort && maxLong <= pkgLong;
+        return maxShort <= pkgShort && maxLong <= pkgLong && totalHeight <= pkgMaxThickness;
     };
     // Helper: check if items fit in a 3D box (orientation-independent)
     const fitsIn3D = (pkgDim1, pkgDim2, pkgDim3) => {
@@ -128,18 +133,18 @@ function determineProductName(shipmentItems) {
         const itemDims = [maxShort, maxLong, totalHeight].sort((a, b) => a - b);
         return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
     };
-    // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 cm)
-    if (totalWeight <= 100 && fitsIn2D(24.13, 16.00)) {
+    // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 × 0.5 cm)
+    if (totalWeight <= 100 && fitsIn2D(24.13, 16.00, EXPRESS_LETTER_MAX_THICK)) {
         logger.info("📦 Matched: Express Letter");
         return "Express Letter";
     }
-    // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 cm)
-    if (totalWeight <= 500 && fitsIn2D(38.10, 27.94)) {
+    // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 × 2.0 cm)
+    if (totalWeight <= 500 && fitsIn2D(38.10, 27.94, ONE_POUNDER_MAX_THICK)) {
         logger.info("📦 Matched: 1 Pounder");
         return "1 Pounder";
     }
-    // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 cm)
-    if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56)) {
+    // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 × 3.0 cm)
+    if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56, THREE_POUNDER_MAX_THICK)) {
         logger.info("📦 Matched: 3 Pounder");
         return "3 Pounder";
     }
@@ -149,8 +154,8 @@ function determineProductName(shipmentItems) {
         logger.info("📦 Matched: Bulilit Box");
         return "Bulilit Box";
     }
-    // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 cm)
-    if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56)) {
+    // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 × 5.0 cm)
+    if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56, FIVE_POUNDER_MAX_THICK)) {
         logger.info("📦 Matched: 5 Pounder");
         return "5 Pounder";
     }
@@ -186,25 +191,30 @@ const fetchSellerData = async (sellerId) => {
     return null;
 };
 const calculateShipmentItems = (orderItems) => {
-    var _a, _b, _c, _d;
-    // Default dimensions if not provided in order items
-    // Dimensions in cm, weight in kg (converted to grams below)
-    const defaultDimensions = {
-        length: 20,
-        width: 15,
-        height: 10,
-        weight: 0.5, // kg
-    };
+    // No defaultDimensions: missing values are set to -1 (invalid) to trigger determineProductName's guard
     const items = [];
     for (const item of orderItems) {
         const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
-        const length = ((_a = item.dimensions) === null || _a === void 0 ? void 0 : _a.length) || defaultDimensions.length;
-        const width = ((_b = item.dimensions) === null || _b === void 0 ? void 0 : _b.width) || defaultDimensions.width;
-        const height = ((_c = item.dimensions) === null || _c === void 0 ? void 0 : _c.height) || defaultDimensions.height;
-        // Weight from order data is in kg; convert to grams for determineProductName
-        const unitWeightKg = ((_d = item.dimensions) === null || _d === void 0 ? void 0 : _d.weight) || defaultDimensions.weight;
-        const unitWeightGrams = unitWeightKg * 1000;
+        let length = -1;
+        let width = -1;
+        let height = -1;
+        let unitWeightGrams = -1;
         const unitDeclaredValue = item.price || 100;
+        if (item.dimensions) {
+            length = typeof item.dimensions.length === "number" ? item.dimensions.length : -1;
+            width = typeof item.dimensions.width === "number" ? item.dimensions.width : -1;
+            height = typeof item.dimensions.height === "number" ? item.dimensions.height : -1;
+            unitWeightGrams = typeof item.dimensions.weight === "number" ? item.dimensions.weight * 1000 : -1;
+        }
+        else {
+            // Log warning if dimensions are missing
+            logger.warn("Order item missing dimensions, applying -1 for determineProductName auto-selection", {
+                orderId: item.orderId || "unknown",
+                itemId: item.productId || item.id || "unknown",
+                itemName: item.name || item.productName || "unknown",
+            });
+            // All fields remain -1
+        }
         // Expand each order line into per-unit ShipmentItem entries so that
         // determineProductName correctly sums totalHeight (stacked items) and
         // totalWeight across all physical units.
@@ -1990,38 +2000,79 @@ exports.listPaymongoTransactions = (0, https_1.onRequest)({
 });
 /**
  * Delete a user from Firebase Authentication
- * Admin-only access required
+ * Admin-only access required OR seller deleting their own sub-account
  * This is called after deleting Firestore data to ensure complete user removal
  */
 exports.deleteUserAccount = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
 }, async (req, res) => {
+    var _a;
     if (req.method !== "POST") {
         res.status(405).json({ error: "Method not allowed" });
         return;
     }
     try {
         // Verify authentication
-        const decodedToken = await verifyAuthToken(req.headers.authorization);
-        const adminUid = decodedToken.uid;
-        // Verify admin role
-        await verifyAdminAccess(adminUid, "delete user account");
+        let decodedToken;
+        let requestorUid;
+        try {
+            decodedToken = await verifyAuthToken(req.headers.authorization);
+            requestorUid = decodedToken.uid;
+        }
+        catch (authError) {
+            res.status(401).json({
+                error: "Authentication failed. Invalid or missing token."
+            });
+            return;
+        }
         const { uid } = req.body;
         if (!uid || typeof uid !== "string") {
             res.status(400).json({ error: "Invalid user ID provided" });
             return;
         }
-        // Prevent admin from deleting themselves
-        if (uid === adminUid) {
+        // Prevent user from deleting themselves
+        if (uid === requestorUid) {
             res.status(400).json({ error: "Cannot delete your own account" });
+            return;
+        }
+        // Get the requestor's role
+        const requestorDoc = await db.collection("Seller").doc(requestorUid).get();
+        const requestorRole = requestorDoc.exists ? (_a = requestorDoc.data()) === null || _a === void 0 ? void 0 : _a.role : null;
+        // Check if requestor is admin OR if they're a seller deleting their own sub-account
+        let hasPermission = false;
+        if (requestorRole === "admin") {
+            // Admin can delete any user
+            hasPermission = true;
+        }
+        else if (requestorRole === "seller") {
+            // Seller can only delete their sub-accounts
+            // Check if the user to be deleted is a sub-account of the requestor
+            const userToDeleteDoc = await db.collection("Seller").doc(uid).get();
+            if (userToDeleteDoc.exists) {
+                const userData = userToDeleteDoc.data();
+                if ((userData === null || userData === void 0 ? void 0 : userData.isSubAccount) && (userData === null || userData === void 0 ? void 0 : userData.parentId) === requestorUid) {
+                    hasPermission = true;
+                }
+            }
+        }
+        if (!hasPermission) {
+            logger.warn("Unauthorized deletion attempt", {
+                requestorUid,
+                requestorRole,
+                targetUid: uid,
+            });
+            res.status(403).json({
+                error: "Unauthorized. You can only delete your own sub-accounts."
+            });
             return;
         }
         // Delete the user from Firebase Authentication
         await auth.deleteUser(uid);
         logger.info("User account deleted successfully", {
             deletedUid: uid,
-            deletedBy: adminUid,
+            deletedBy: requestorUid,
+            deletedByRole: requestorRole,
         });
         res.status(200).json({
             success: true,

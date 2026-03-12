@@ -98,10 +98,32 @@ export function useAuth(): UseAuthResult {
   // Helper: normalize a permission map to full key set with default false
   const normalizePermsFalse = (src: Partial<WebUserPermissions> | null | undefined): WebUserPermissions => {
     const base = PERMISSIONS_BY_ROLE['seller'];
-    const s = src || {};
+    const s: any = { ...(src || {}) };
+    // Backward compat: map legacy 'chat' key to 'chats'
+    if (s.chats === undefined && s.chat !== undefined) {
+      s.chats = s.chat;
+    }
     const out: any = {};
     (Object.keys(base) as Array<keyof WebUserPermissions>).forEach((k) => {
       out[k] = Boolean((s as any)[k]);
+    });
+    return out as WebUserPermissions;
+  };
+
+  // Helper: normalize parent permissions using role defaults for missing keys
+  // This ensures newer permissions (like chats) that parents never explicitly saved
+  // still get their role-default value instead of false
+  const normalizeParentPerms = (src: Partial<WebUserPermissions> | null | undefined, role: WebUserRole = 'seller'): WebUserPermissions => {
+    const defaults = PERMISSIONS_BY_ROLE[role];
+    const s: any = { ...(src || {}) };
+    // Backward compat: map legacy 'chat' key to 'chats'
+    if (s.chats === undefined && s.chat !== undefined) {
+      s.chats = s.chat;
+    }
+    const out: any = {};
+    (Object.keys(defaults) as Array<keyof WebUserPermissions>).forEach((k) => {
+      // If the key exists in stored permissions, use it; otherwise use the role default
+      out[k] = (k in s) ? Boolean((s as any)[k]) : Boolean((defaults as any)[k]);
     });
     return out as WebUserPermissions;
   };
@@ -183,7 +205,9 @@ export function useAuth(): UseAuthResult {
                   }
                 } catch {}
                 // Normalize child to explicit booleans, then apply ceiling
-                perms = maskPerms(normalizePermsFalse(effectiveChild), normalizePermsFalse(parentPerms));
+                // Parent uses role-defaults for missing keys so newer permissions (like chats)
+                // don't get blocked just because the parent never explicitly saved them
+                perms = maskPerms(normalizePermsFalse(effectiveChild), normalizeParentPerms(parentPerms, 'seller'));
               } catch {
                 // If parent fetch fails, still normalize child to avoid default fallbacks
                 perms = normalizePermsFalse(perms || {});
@@ -231,11 +255,19 @@ export function useAuth(): UseAuthResult {
   const hasPermission = (permission: Permission): boolean => {
     if (!role) return false;
     if (isSubAccount && (permission === 'access' || permission === 'users')) return false;
+    
+    // For sub-accounts, check permissions object explicitly
+    if (isSubAccount) {
+      if (!permissions) return false;
+      // Use bracket notation to access the permission
+      return Boolean((permissions as any)[permission]);
+    }
+    
+    // For regular users, check permissions first, then fallback to role defaults
     if (permissions && permission in permissions) {
       return Boolean((permissions as any)[permission]);
     }
-    // For sub-accounts, never fallback to role defaults
-    if (isSubAccount) return false;
+    
     return PERMISSIONS_BY_ROLE[role][permission] || false;
   };
 

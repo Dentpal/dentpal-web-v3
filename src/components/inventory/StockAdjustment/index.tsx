@@ -6,7 +6,7 @@ import useProductSearch from '@/hooks/useProductSearch';
 import useProductVariations from '@/hooks/useProductVariations';
 import { batchAdjustMultipleProducts, generateBatchId, BatchAdjustmentItem } from '@/services/stockAdjustment';
 import { logBatchStockAdjustment } from '../../../services/logAdjustment';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, CheckCircle } from 'lucide-react';
 
 // Interface for adjustment items in the table
 interface AdjustmentItem {
@@ -22,11 +22,14 @@ interface AdjustmentItem {
 
 const StockAdjustment: React.FC = () => {
 	const navigate = useNavigate();
-	const { uid, role } = useAuth();
+	const { uid, role, isSeller, isSubAccount, parentId } = useAuth();
+  const effectiveSellerId = isSeller ? (isSubAccount ? (parentId || uid) : uid) : null;
   const [search, setSearch] = useState('');
   const [reason, setReason] = useState('Receive items');
   const [notes, setNotes] = useState('');
   const [adjustmentItems, setAdjustmentItems] = useState<AdjustmentItem[]>([]);
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
   
   // Variation selection modal state
   const [showVariationModal, setShowVariationModal] = useState(false);
@@ -43,6 +46,20 @@ const StockAdjustment: React.FC = () => {
     minute: '2-digit'
   }));
   
+  // Handle Escape key to close success dialog
+  useEffect(() => {
+    if (!showSuccessDialog) return;
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowSuccessDialog(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showSuccessDialog]);
+  
   // Generate adjustment number from batch ID
   const adjustmentNo = useMemo(() => {
     const timestamp = batchId.split('-')[1];
@@ -53,7 +70,7 @@ const StockAdjustment: React.FC = () => {
   // State for managing products
   const [currentProduct, setCurrentProduct] = useState<any | null>(null);
 
-  const { results, loading, error, searchProducts } = useProductSearch(uid);
+  const { results, loading, error, searchProducts } = useProductSearch(effectiveSellerId);
   const { variations, fetchVariations } = useProductVariations();
 
   // Auto-search as user types (with debounce)
@@ -180,7 +197,8 @@ const StockAdjustment: React.FC = () => {
     }
 
     try {
-      const sellerId = adjustmentItems[0]?.productId ? uid || '' : uid || '';
+      // Use effectiveSellerId so all adjustments are logged under the main seller account
+      const sellerId = effectiveSellerId || uid || '';
       const userName = uid || ''; // You can extend this with actual username
       
       // Perform batch adjustment
@@ -209,7 +227,10 @@ const StockAdjustment: React.FC = () => {
       setAdjustmentItems([]);
       setSearch('');
       
-      alert(`Successfully adjusted ${allItems.length} item(s)!`);
+      // Show success dialog
+      const itemText = allItems.length === 1 ? allItems[0].productName : `${allItems.length} items`;
+      setSuccessMessage(`Successfully adjusted ${itemText}!`);
+      setShowSuccessDialog(true);
     } catch (err: any) {
       alert('Failed to submit batch adjustment: ' + (err?.message || 'Unknown error'));
     }
@@ -804,6 +825,86 @@ const StockAdjustment: React.FC = () => {
             </div>
           </div>
         </>
+      )}
+
+      {/* Success Dialog */}
+      {showSuccessDialog && (
+        <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="success-dialog-title"
+          onClick={() => setShowSuccessDialog(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'white',
+              borderRadius: 12,
+              padding: 32,
+              maxWidth: 400,
+              textAlign: 'center',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+            }}
+          >
+            <div style={{
+              width: 64,
+              height: 64,
+              backgroundColor: '#10b981',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px'
+            }}>
+              <CheckCircle style={{ width: 40, height: 40, color: 'white' }} />
+            </div>
+            <h3 
+              id="success-dialog-title"
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: '#1f2937',
+                marginBottom: 8
+              }}
+            >
+              Success!
+            </h3>
+            <p style={{
+              fontSize: 14,
+              color: '#6b7280',
+              marginBottom: 24
+            }}>
+              {successMessage}
+            </p>
+            <button
+              onClick={() => setShowSuccessDialog(false)}
+              style={{
+                padding: '10px 24px',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#059669'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#10b981'}
+            >
+              OK
+            </button>
+          </div>
+        </div>
       )}
 	</div>
 	);

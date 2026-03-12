@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { MessageSquare, Send, Search, X, User, Loader2, Image as ImageIcon, ZoomIn } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '@/hooks/use-auth';
 
 interface ChatMessage {
   id: string;
@@ -63,6 +64,16 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | undefined>(undefined);
 
   const userId = currentUserId || auth.currentUser?.uid;
+  const { isSubAccount, parentId } = useAuth();
+  
+  // For sub-accounts, also check parent's chats
+  const effectiveUserIds = useMemo(() => {
+    const ids = [userId];
+    if (isSubAccount && parentId) {
+      ids.push(parentId);
+    }
+    return ids.filter(Boolean) as string[];
+  }, [userId, isSubAccount, parentId]);
 
   // Load current user's avatar
   useEffect(() => {
@@ -98,7 +109,7 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
 
   // Load chat rooms
   useEffect(() => {
-    if (!userId) {
+    if (!userId || effectiveUserIds.length === 0) {
       setLoading(false);
       return;
     }
@@ -113,11 +124,18 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
         Object.keys(data).forEach((key) => {
           const roomData = data[key];
           
-          // Check if current user is part of this chat
-          if (roomData.user1Id === userId || roomData.user2Id === userId) {
+          // Check if current user (or their parent if sub-account) is part of this chat
+          const isUserInChat = effectiveUserIds.some(id => 
+            roomData.user1Id === id || roomData.user2Id === id
+          );
+          
+          if (isUserInChat) {
             // Check if chat is deleted for this user
             const deletedFor = roomData.deletedFor || [];
-            if (!deletedFor.includes(userId)) {
+            // For sub-accounts, check if deleted for either the sub-account or parent
+            const isDeletedForUser = effectiveUserIds.some(id => deletedFor.includes(id));
+            
+            if (!isDeletedForUser) {
               const room: ChatRoom = {
                 id: key,
                 user1Id: roomData.user1Id || '',
@@ -174,7 +192,7 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
     return () => {
       off(chatRoomsRef, 'value', handleChatRoomsUpdate);
     };
-  }, [userId]);
+  }, [userId, effectiveUserIds]);
 
   // Load messages for selected chat room
   useEffect(() => {
@@ -327,11 +345,14 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
       // Get download URL
       const imageUrl = await getDownloadURL(imageStorageRef);
 
-      // Get sender data from Firestore
+      // For sub-accounts, use parent ID as the sender
+      const effectiveSenderId = (isSubAccount && parentId) ? parentId : userId;
+
+      // Get sender data from Firestore using effective sender ID
       let senderName = 'User';
       let senderAvatar: string | undefined;
 
-      const userDoc = await getDoc(doc(db, 'User', userId));
+      const userDoc = await getDoc(doc(db, 'User', effectiveSenderId));
       if (userDoc.exists()) {
         const userData = userDoc.data();
         senderName = userData.fullName || userData.displayName || 'User';
@@ -339,7 +360,7 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
       }
 
       // Check if seller and get seller data
-      const sellerDoc = await getDoc(doc(db, 'Seller', userId));
+      const sellerDoc = await getDoc(doc(db, 'Seller', effectiveSenderId));
       if (sellerDoc.exists()) {
         const sellerData = sellerDoc.data();
         if (sellerData.photoURL) {
@@ -350,12 +371,13 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
       const messagesRef = ref(database, `chatRooms/${selectedChatRoom.id}/messages`);
       const newMessageRef = push(messagesRef);
 
-      const otherUserId = selectedChatRoom.user1Id === userId 
+      // Determine other user ID - check against effective sender ID
+      const otherUserId = selectedChatRoom.user1Id === effectiveSenderId 
         ? selectedChatRoom.user2Id 
         : selectedChatRoom.user1Id;
 
       const messageData: any = {
-        senderId: userId,
+        senderId: effectiveSenderId,
         receiverId: otherUserId,
         message: '📷 Image',
         timestamp: Date.now(),
@@ -406,11 +428,14 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
     setSending(true);
 
     try {
-      // Get sender data from Firestore
+      // For sub-accounts, use parent ID as the sender
+      const effectiveSenderId = (isSubAccount && parentId) ? parentId : userId;
+      
+      // Get sender data from Firestore using effective sender ID
       let senderName = 'User';
       let senderAvatar: string | undefined;
 
-      const userDoc = await getDoc(doc(db, 'User', userId));
+      const userDoc = await getDoc(doc(db, 'User', effectiveSenderId));
       if (userDoc.exists()) {
         const userData = userDoc.data();
         senderName = userData.fullName || userData.displayName || 'User';
@@ -418,7 +443,7 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
       }
 
       // Check if seller and get seller data
-      const sellerDoc = await getDoc(doc(db, 'Seller', userId));
+      const sellerDoc = await getDoc(doc(db, 'Seller', effectiveSenderId));
       if (sellerDoc.exists()) {
         const sellerData = sellerDoc.data();
         if (sellerData.photoURL) {
@@ -429,12 +454,13 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
       const messagesRef = ref(database, `chatRooms/${selectedChatRoom.id}/messages`);
       const newMessageRef = push(messagesRef);
 
-      const otherUserId = selectedChatRoom.user1Id === userId 
+      // Determine other user ID - check against effective sender ID
+      const otherUserId = selectedChatRoom.user1Id === effectiveSenderId 
         ? selectedChatRoom.user2Id 
         : selectedChatRoom.user1Id;
 
       const messageData: any = {
-        senderId: userId,
+        senderId: effectiveSenderId,
         receiverId: otherUserId,
         message: messageText.trim(),
         timestamp: Date.now(),
@@ -469,7 +495,9 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
   const getChatDisplayName = (room: ChatRoom): string => {
     if (!userId) return 'Unknown';
 
-    const isUser1 = room.user1Id === userId;
+    // For sub-accounts, check against parent ID if available
+    const effectiveId = (isSubAccount && parentId) ? parentId : userId;
+    const isUser1 = room.user1Id === effectiveId;
     
     if (isSeller) {
       // For sellers, show buyer name or product name
@@ -523,7 +551,9 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
   // Get other user's avatar
   const getOtherUserAvatar = (room: ChatRoom): string | undefined => {
     if (!userId) return undefined;
-    const isUser1 = room.user1Id === userId;
+    // For sub-accounts, check against parent ID if available
+    const effectiveId = (isSubAccount && parentId) ? parentId : userId;
+    const isUser1 = room.user1Id === effectiveId;
     return isUser1 ? room.user2Avatar : room.user1Avatar;
   };
 
@@ -747,7 +777,8 @@ const ChatsTab = ({ isSeller = false, currentUserId }: ChatsTabProps) => {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  const isMe = msg.senderId === userId;
+                  // For sub-accounts, treat messages from either the sub-account or parent as "me"
+                  const isMe = effectiveUserIds.includes(msg.senderId);
                   
                   return (
                     <div

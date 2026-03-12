@@ -32,18 +32,49 @@ const SellerProfileTab: React.FC = () => {
 		const [coverUploadOpen, setCoverUploadOpen] = useState(false);
 		// Walkthrough/Welcome state
 		const [showWelcome, setShowWelcome] = useState(false);
+	// Success dialog state
+	const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+	// Image URLs state
+	const [profileImageUrl, setProfileImageUrl] = useState<string>('');
+	const [coverImageUrl, setCoverImageUrl] = useState<string>('');
 
-		// Handler for image upload (profile)
-		const handleProfileImageUpload = () => {
-			setProfileUploadOpen(false);
-			// Optionally, show a success message or refresh state
-		};
+	// Handler for image upload (profile)
+	const handleProfileImageUpload = async () => {
+		setProfileUploadOpen(false);
+		// Refresh the vendor data to get the new image URL
+		if (uid) {
+			try {
+				const doc = await SellersService.get(uid);
+				const v: any = (doc as any)?.vendor || null;
+				if (v?.profileImage?.url) {
+					setProfileImageUrl(v.profileImage.url);
+					setShowSuccessDialog(true);
+				}
+			} catch (error) {
+				console.error('Error loading profile image:', error);
+				// Consider showing an error toast/alert to the user
+			}
+		}
+	};
 
-		// Handler for image upload (cover)
-		const handleCoverImageUpload = () => {
-			setCoverUploadOpen(false);
-			// Optionally, show a success message or refresh state
-		};
+	// Handler for image upload (cover)
+	const handleCoverImageUpload = async () => {
+		setCoverUploadOpen(false);
+		// Refresh the vendor data to get the new image URL
+		if (uid) {
+			try {
+				const doc = await SellersService.get(uid);
+				const v: any = (doc as any)?.vendor || null;
+				if (v?.coverImage?.url) {
+					setCoverImageUrl(v.coverImage.url);
+					setShowSuccessDialog(true);
+				}
+			} catch (error) {
+				console.error('Error loading cover image:', error);
+				// Consider showing an error toast/alert to the user
+			}
+		}
+	};
 	const { uid } = useAuth();
 	const { vendorProfileComplete } = useProfileCompletion();
 	// Start in view mode by default - will be adjusted based on vendor data
@@ -134,6 +165,14 @@ const SellerProfileTab: React.FC = () => {
 						catalogue: v.documents?.catalogue || undefined,
 						warrantyPolicy: v.documents?.warrantyPolicy || undefined,
 					});
+				}
+				
+				// Load profile and cover images
+				if (v.profileImage?.url) {
+					setProfileImageUrl(v.profileImage.url);
+				}
+				if (v.coverImage?.url) {
+					setCoverImageUrl(v.coverImage.url);
 				}
 				
 				const loadedVendorData = {
@@ -541,97 +580,133 @@ const SellerProfileTab: React.FC = () => {
 		
 		return (
 		<div className="space-y-4">
-			<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+			<div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
 				{/* Header with Action Buttons */}
-				<div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-4">
+				<div className="bg-gradient-to-r from-teal-600 to-teal-700 px-8 py-6">
 					<div className="flex items-center justify-between">
 						<div>
-							<div className="text-white font-semibold text-lg">Vendor Profile</div>
-							<div className="text-teal-100 text-xs mt-0.5">Complete enrollment information</div>
-						</div>
-						<div className="flex gap-2">
-							<button
-								className="px-4 py-2 bg-white text-teal-700 font-medium rounded-lg hover:bg-teal-50 transition shadow-sm text-sm"
-								onClick={() => setProfileUploadOpen(true)}
-							>
-								Submit Profile
-							</button>
-							<button
-								className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm text-sm"
-								onClick={() => setCoverUploadOpen(true)}
-							>
-								Submit Cover Image
-							</button>
+							<div className="text-white font-bold text-2xl mb-1">Vendor Profile</div>
+							<div className="text-teal-100 text-sm">Complete enrollment information</div>
 						</div>
 					</div>
 				</div>
 
 				<div className="p-6 space-y-6">
+					{/* Profile and Cover Images Section - Enhanced */}
+					<div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+						<div className="flex items-center gap-2 mb-5">
+							<svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+							</svg>
+							<h3 className="text-base font-semibold text-gray-900">Profile Images</h3>
+						</div>
+						
+						<div className="grid md:grid-cols-2 gap-6">
+							{/* Profile Image */}
+							<div className="bg-white rounded-lg p-5 shadow-sm border border-gray-200">
+								<div className="flex items-center justify-between mb-3">
+									<div className="text-sm font-semibold text-gray-700">Profile Image</div>
+									{profileImageUrl && (
+										<span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+											<CheckCircle2 className="w-3 h-3 mr-1" />
+											Uploaded
+										</span>
+									)}
+								</div>
+								<div className="mb-4">
+									{profileImageUrl ? (
+										<div className="relative rounded-lg border-2 border-gray-200 bg-gray-50 overflow-hidden mx-auto" style={{ width: '180px', height: '180px' }}>
+											<img
+												src={profileImageUrl}
+												alt="Profile"
+												className="w-full h-full object-cover"
+												onError={(e) => {
+													const target = e.target as HTMLImageElement;
+													target.style.display = 'none';
+													const parent = target.parentElement;
+													if (parent) {
+														parent.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400 text-xs">No image</div>';
+													}
+												}}
+											/>
+										</div>
+									) : (
+										<div className="relative rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 overflow-hidden mx-auto flex items-center justify-center" style={{ width: '180px', height: '180px' }}>
+											<div className="text-center">
+												<svg className="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+												</svg>
+												<p className="text-xs text-gray-500">No profile image</p>
+											</div>
+										</div>
+									)}
+								</div>
+								<button
+									className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700 transition shadow-sm"
+									onClick={() => setProfileUploadOpen(true)}
+								>
+									<Upload className="w-4 h-4" />
+									Upload Profile Image
+								</button>
+							</div>
+
+							{/* Cover Image */}
+							<div className="bg-white rounded-lg p-5 shadow-sm border border-gray-200">
+								<div className="flex items-center justify-between mb-3">
+									<div className="text-sm font-semibold text-gray-700">Cover Image</div>
+									{coverImageUrl && (
+										<span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+											<CheckCircle2 className="w-3 h-3 mr-1" />
+											Uploaded
+										</span>
+									)}
+								</div>
+								<div className="mb-4">
+									{coverImageUrl ? (
+										<div className="relative rounded-lg border-2 border-gray-200 bg-gray-50 overflow-hidden" style={{ width: '100%', height: '180px' }}>
+											<img
+												src={coverImageUrl}
+												alt="Cover"
+												className="w-full h-full object-cover"
+												onError={(e) => {
+													const target = e.target as HTMLImageElement;
+													target.style.display = 'none';
+													const parent = target.parentElement;
+													if (parent) {
+														parent.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400 text-xs">No image</div>';
+													}
+												}}
+											/>
+										</div>
+									) : (
+										<div className="relative rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 overflow-hidden flex items-center justify-center" style={{ width: '100%', height: '180px' }}>
+											<div className="text-center">
+												<svg className="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+												</svg>
+												<p className="text-xs text-gray-500">No cover image</p>
+											</div>
+										</div>
+									)}
+								</div>
+								<button
+									className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm"
+									onClick={() => setCoverUploadOpen(true)}
+								>
+									<Upload className="w-4 h-4" />
+									Upload Cover Image
+								</button>
+							</div>
+						</div>
+					</div>
+
 					{/* Section 1: BIR Information */}
 					<div className="border border-gray-200 rounded-lg p-5 bg-gray-50">
-						<div className="flex items-center justify-between mb-4">
-							<div className="flex items-center gap-2">
-								<div className="w-8 h-8 bg-teal-100 rounded-lg flex items-center justify-center">
-									<span className="text-teal-700 font-semibold text-sm">1</span>
-								</div>
-								<h3 className="font-semibold text-gray-900">BIR Information</h3>
+						<div className="flex items-center mb-4">
+							<div className="w-8 h-8 bg-teal-100 rounded-lg flex items-center justify-center">
+								<span className="text-teal-700 font-semibold text-sm">1</span>
 							</div>
-							{!editingBIR ? (
-								<button 
-									onClick={() => setEditingBIR(true)}
-									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
-								>
-									<Pencil className="w-3.5 h-3.5" /> Edit
-								</button>
-							) : (
-								<div className="flex gap-2">
-									<button 
-										onClick={() => {
-											setVendor(originalVendor);
-											setEditingBIR(false);
-										}}
-										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
-									>
-										<X className="w-3.5 h-3.5" /> Cancel
-									</button>
-									<button 
-										disabled={saving}
-										onClick={async () => {
-											setSaving(true);
-											try {
-												if (!uid) return;
-												await SellersService.saveVendorProfile(uid, {
-													tin: vendor.tin,
-													rdoCode: vendor.rdoCode,
-													taxTypes: vendor.taxTypes,
-													lineOfBusiness: vendor.lineOfBusiness,
-													dateOfRegistration: vendor.dateOfRegistration,
-													company: {
-														name: vendor.companyName,
-													},
-												} as any);
-												setOriginalVendor(prev => ({
-													...prev,
-													tin: vendor.tin,
-													rdoCode: vendor.rdoCode,
-													taxTypes: vendor.taxTypes,
-													lineOfBusiness: vendor.lineOfBusiness,
-													dateOfRegistration: vendor.dateOfRegistration,
-													companyName: vendor.companyName,
-												}));
-												setEditingBIR(false);
-											} catch (error: any) {
-												alert('Failed to save: ' + (error.message || 'Unknown error'));
-											} finally { 
-												setSaving(false); 
-											}
-										}}
-										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
-									>
-										{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
-									</button>
-								</div>
-							)}
+							<h3 className="font-semibold text-gray-900 ml-2">BIR Information</h3>
 						</div>
 						<div className="bg-white rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div>
@@ -2425,6 +2500,25 @@ const SellerProfileTab: React.FC = () => {
 							</div>
 						</div>
 					)}
+
+					{/* Profile Image Upload Success Dialog */}
+					<Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+						<DialogContent className="sm:max-w-md">
+							<div className="flex flex-col items-center justify-center py-6">
+								<div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+									<CheckCircle2 className="w-10 h-10 text-green-600" />
+								</div>
+								<h2 className="text-xl font-semibold text-gray-900 mb-2">Submit Profile Successful</h2>
+								<p className="text-sm text-gray-600 text-center">Your profile image has been updated successfully.</p>
+								<button
+									onClick={() => setShowSuccessDialog(false)}
+									className="mt-6 px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition"
+								>
+									OK
+								</button>
+							</div>
+						</DialogContent>
+					</Dialog>
 				</>
 			)}
 		</div>

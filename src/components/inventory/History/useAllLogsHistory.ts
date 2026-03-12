@@ -80,7 +80,8 @@ export function useAllLogsHistory() {
         console.log('First doc sample:', JSON.stringify(docsData[0], null, 2));
         
         // Filter data by accountId (current user or parent account)
-        const filteredData = docsData.filter(d => d.userId === accountId);
+        // Check both sellerId and userId for backwards compatibility
+        const filteredData = docsData.filter(d => d.sellerId === accountId || d.userId === accountId);
         console.log(`Filtered to ${filteredData.length} adjustments for account ${accountId}`);
         
         // Fetch seller names for all unique userIds

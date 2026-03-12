@@ -84,6 +84,7 @@ function normalizeTimestamp(value: any): number | null {
     'product-qc': role === 'admin',
     categories: role === 'admin',
     policies: role === 'admin',
+    chats: role === 'admin' || role === 'seller',
   });
 
   // Normalize any loaded permissions to include all keys for the role
@@ -106,7 +107,7 @@ function normalizeTimestamp(value: any): number | null {
       'seller-orders': 'Orders',
       'add-product': 'Items',
       'policies': 'Policies',
-      'chat': 'Chat'
+      'chats': 'Chat'
     };
     return labelMap[key] || key.replace('-', ' ');
   };
@@ -131,6 +132,7 @@ interface User {
     'seller-orders': boolean;
     'add-product': boolean;
     policies: boolean;
+    chats: boolean;
   };
   Platform_fee_percentage?: number; // Platform fee percentage (default 8.88%)
   lastLogin?: string;
@@ -167,6 +169,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         'seller-orders': true,
         'add-product': true,
         policies: true,
+        chats: true,
       },
       lastLogin: "2024-09-09T10:30:00Z",
       createdAt: "2024-01-15T00:00:00Z"
@@ -189,6 +192,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         inventory: false,
         'seller-orders': true,
         'add-product': true,
+        policies: false,
+        chats: true,
       },
       lastLogin: "2024-09-09T09:15:00Z",
       createdAt: "2024-02-20T00:00:00Z"
@@ -211,6 +216,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         inventory: false,
         'seller-orders': true,
         'add-product': true,
+        policies: false,
+        chats: true,
       },
       createdAt: "2024-09-08T00:00:00Z"
     }
@@ -311,6 +318,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       inventory: false,
       'seller-orders': false,
       'add-product': false,
+      policies: false,
+      chats: false,
     },
     ops: {
       dashboard: true,
@@ -324,6 +333,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       inventory: true,
       'seller-orders': true,
       'add-product': true,
+      policies: false,
+      chats: false,
     },
     custom: {
       dashboard: true,
@@ -337,6 +348,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       inventory: false,
       'seller-orders': false,
       'add-product': false,
+      policies: false,
+      chats: false,
     }
   };
 
@@ -1686,7 +1699,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
               {/* Permissions grid (for custom tweak) */}
               <div className="grid grid-cols-2 gap-2">
-                {Object.keys({ ...subPerms, chat: (subPerms as any).chat ?? false }).filter(k => {
+                {Object.keys({ ...subPerms, chats: (subPerms as any).chats ?? false }).filter(k => {
                   // Hide bookings, notifications, confirmation, access, users, images, profile, withdrawal
                   if ([
                     'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile', 'withdrawal'
