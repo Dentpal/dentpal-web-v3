@@ -135,6 +135,13 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     productId: string;
   }>({ open: false, productName: '', status: null, productId: '' });
 
+  // Delete confirmation dialog states
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    productId: string;
+    productName: string;
+  }>({ open: false, productId: '', productName: '' });
+
   const categoriesList = useMemo(() => {
     return Object.entries(categoryMap)
       .map(([id, name]) => ({ id, name }))
@@ -369,6 +376,29 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       toast({ 
         title: 'Error', 
         description: 'Failed to restore product', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  // Delete handler
+  const handleDeleteProduct = async () => {
+    try {
+      const { productId } = deleteDialog;
+      // Remove from local state immediately
+      setItems(prev => prev.filter(i => i.id !== productId));
+      // Delete from database
+      await ProductService.deleteProduct(productId);
+      toast({ 
+        title: 'Success', 
+        description: 'Product deleted successfully' 
+      });
+      setDeleteDialog({ open: false, productId: '', productName: '' });
+    } catch (error) {
+      console.error('Failed to delete product:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to delete product', 
         variant: 'destructive' 
       });
     }
@@ -802,6 +832,9 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ARCHIVE</th>
               )}
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">{catalogTab === 'archive' ? 'RESTORE' : 'EDIT ITEM'}</th>
+              {(catalogTab === 'draft' || catalogTab === 'archive') && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">DELETE</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -950,6 +983,17 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       </button>
                     )}
                   </td>
+                  {/* Delete Button - only in draft and archive tabs */}
+                  {(catalogTab === 'draft' || catalogTab === 'archive') && (
+                    <td className="px-4 py-3" onClick={e => { e.stopPropagation(); setDeleteDialog({ open: true, productId: item.id, productName: item.name }); }}>
+                      <button
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-red-600 text-white hover:bg-red-700"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -1626,6 +1670,33 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 OK
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog({ open: false, productId: '', productName: '' })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Product</DialogTitle>
+            <DialogDescription>
+              Do you wish to delete <strong>{deleteDialog.productName}</strong>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeleteDialog({ open: false, productId: '', productName: '' })}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleDeleteProduct}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

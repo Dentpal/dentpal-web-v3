@@ -690,6 +690,15 @@ export const ProductService = {
     await updateDoc(pRef, { updatedAt: serverTimestamp() });
     return ref.id;
   },
+
+  // Delete a product (for draft and archive items only)
+  async deleteProduct(productId: string) {
+    const pRef = doc(db, PRODUCT_COLLECTION, productId);
+    await updateDoc(pRef, { 
+      status: 'deleted',
+      updatedAt: serverTimestamp() 
+    });
+  },
 };
 
 export default ProductService;
