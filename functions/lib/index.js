@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testCreateJRSShipping = exports.updateUserStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+exports.testCreateJRSShipping = exports.setUserAccountStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -2099,100 +2099,101 @@ exports.deleteUserAccount = (0, https_1.onRequest)({
     }
 });
 // ============================================
-// Update User Status (Enable/Disable Account)
+// User Account Status Management (Enable/Disable)
 // ============================================
-exports.updateUserStatus = (0, https_1.onRequest)({ cors: true }, async (req, res) => {
+/**
+ * Enable or disable a user account in Firebase Authentication
+ * Admin-only access required
+ * This is called when toggling user status between 'active' and 'inactive'
+ */
+exports.setUserAccountStatus = (0, https_1.onRequest)({
+    cors: true,
+    region: "asia-southeast1",
+}, async (req, res) => {
+    // Add explicit CORS headers
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Max-Age', '86400');
+    // Handle preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+    }
     try {
-        // Only allow POST requests
-        if (req.method !== "POST") {
-            res.status(405).json({ error: "Method not allowed" });
-            return;
-        }
-        // Verify authentication token
-        const decodedToken = await verifyAuthToken(req.headers.authorization);
-        // Verify admin access
-        await verifyAdminAccess(decodedToken.uid, "update user status");
-        // Get userId and status from request body
-        const { userId, status } = req.body;
-        if (!userId || !status) {
-            res.status(400).json({ error: "userId and status are required" });
-            return;
-        }
-        if (!["active", "inactive", "suspended", "pending"].includes(status)) {
-            res.status(400).json({ error: "Invalid status. Must be: active, inactive, suspended, or pending" });
-            return;
-        }
-        logger.info("Updating user status", { userId, status, requestedBy: decodedToken.uid });
-        // Update Firestore User collection
-        const userRef = db.collection("User").doc(userId);
-        const userDoc = await userRef.get();
-        if (!userDoc.exists) {
-            res.status(404).json({ error: "User not found in Firestore" });
-            return;
-        }
-        await userRef.update({
-            status: status,
-            updatedAt: firestore_1.FieldValue.serverTimestamp(),
-        });
-        logger.info("Updated Firestore User collection status", { userId, status });
-        // Update Firebase Authentication account (disable/enable)
+        // Verify authentication
+        let decodedToken;
         try {
-            if (status === "inactive" || status === "suspended") {
-                // Disable the Firebase Authentication account
-                await auth.updateUser(userId, { disabled: true });
-                logger.info("Disabled Firebase Authentication account", { userId });
-            }
-            else if (status === "active") {
-                // Enable the Firebase Authentication account
-                await auth.updateUser(userId, { disabled: false });
-                logger.info("Enabled Firebase Authentication account", { userId });
-            }
+            decodedToken = await verifyAuthToken(req.headers.authorization);
         }
         catch (authError) {
-            logger.error("Error updating Firebase Authentication status", {
-                userId,
-                error: authError.message,
-                code: authError.code,
+            res.status(401).json({
+                error: "Authentication failed. Invalid or missing token."
             });
-            // Don't fail the whole operation if auth update fails
-            // Firestore is already updated, which is the source of truth
+            return;
         }
-        // Also update web_users collection for consistency
+        // Verify admin access
         try {
-            const webUserRef = db.collection("web_users").doc(userId);
-            const webUserDoc = await webUserRef.get();
-            if (webUserDoc.exists) {
-                await webUserRef.update({
-                    isActive: status === "active",
-                });
-                logger.info("Updated web_users collection", { userId, isActive: status === "active" });
+            await verifyAdminAccess(decodedToken.uid, "toggle user account status");
+        }
+        catch (adminError) {
+            if (adminError instanceof AdminAccessError) {
+                res.status(403).json({ error: adminError.message });
+                return;
             }
+            throw adminError;
         }
-        catch (webUserError) {
-            logger.error("Error updating web_users collection", {
-                userId,
-                error: webUserError.message,
-            });
+        const { uid, disabled } = req.body;
+        if (!uid || typeof uid !== "string") {
+            res.status(400).json({ error: "Invalid user ID provided" });
+            return;
         }
+        if (typeof disabled !== "boolean") {
+            res.status(400).json({ error: "Invalid 'disabled' value. Must be a boolean." });
+            return;
+        }
+        // Prevent admin from disabling themselves
+        if (uid === decodedToken.uid && disabled) {
+            res.status(400).json({ error: "Cannot disable your own account" });
+            return;
+        }
+        // Update the user's disabled status in Firebase Authentication
+        await auth.updateUser(uid, { disabled });
+        logger.info("User account status updated successfully", {
+            targetUid: uid,
+            disabled,
+            updatedBy: decodedToken.uid,
+            action: disabled ? "disabled" : "enabled",
+        });
         res.status(200).json({
             success: true,
-            message: `User account ${status === "active" ? "enabled" : "disabled"} successfully`,
-            status: status
+            message: `User account ${disabled ? 'disabled' : 'enabled'} successfully`,
+            uid,
+            disabled,
         });
     }
     catch (error) {
-        // Handle admin access errors with 403
-        if (error instanceof AdminAccessError) {
-            res.status(403).json({ error: error.message });
-            return;
-        }
-        logger.error("Error updating user status", {
+        logger.error("Error updating user account status", {
             error: error.message,
             code: error.code,
         });
-        res.status(500).json({
+        let statusCode = 500;
+        let errorMessage = error.message || "Failed to update user account status";
+        if (error.code === "auth/user-not-found") {
+            statusCode = 404;
+            errorMessage = "User not found in authentication system";
+        }
+        else if (error.code === "auth/invalid-uid") {
+            statusCode = 400;
+            errorMessage = "Invalid user ID format";
+        }
+        res.status(statusCode).json({
             success: false,
-            error: error.message || "Failed to update user status"
+            error: errorMessage
         });
     }
 });

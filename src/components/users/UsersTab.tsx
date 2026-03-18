@@ -11,6 +11,7 @@ import { getProvinces as getPhProvinces } from '@/lib/phLocations';
 import { Button } from "@/components/ui/button";
 import { Download, FileText, FileSpreadsheet } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,6 +19,7 @@ import autoTable from 'jspdf-autotable';
 
 export default function UsersTab() {
   const { users, loading, resetPoints } = useUserRealtime();
+  const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>({search:'', province:'all', specialty:'all', status:'all'});
   const [selected, setSelected] = useState<string[]>([]);
   const [selectedUser, setSelectedUser] = useState<User|null>(null);
@@ -73,18 +75,28 @@ export default function UsersTab() {
 
     if (currentStatus !== 'active' && currentStatus !== 'inactive') {
       console.warn(`Cannot toggle status for user ${id}: current status '${currentStatus}' is not 'active' or 'inactive'`);
-      // TODO: Show toast notification to user
-      // toast({ title: 'Cannot toggle status', description: `Users with '${currentStatus}' status cannot be toggled. Only 'active' and 'inactive' users can be toggled.`, variant: 'destructive' });
+      toast({ 
+        title: 'Cannot toggle status', 
+        description: `Users with '${currentStatus}' status cannot be toggled. Only 'active' and 'inactive' users can be toggled.`, 
+        variant: 'destructive' 
+      });
       return;
     }
 
     try {
       const newStatus: User['status'] = currentStatus === 'active' ? 'inactive' : 'active';
       await updateUserStatus(id, newStatus);
+      toast({ 
+        title: 'Status updated', 
+        description: `User account has been ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully. ${newStatus === 'inactive' ? 'The user will no longer be able to log in.' : 'The user can now log in again.'}`,
+      });
     } catch (e) {
       console.error('Failed to toggle user status', e);
-      // TODO: Show toast notification to user
-      // toast({ title: 'Failed to update status', description: 'Please try again.', variant: 'destructive' });
+      toast({ 
+        title: 'Failed to update status', 
+        description: e instanceof Error ? e.message : 'Please try again.', 
+        variant: 'destructive' 
+      });
     }
   };
 

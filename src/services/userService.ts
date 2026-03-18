@@ -1,5 +1,6 @@
 import {collection, getDocs, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, where} from 'firebase/firestore';
 import {db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
 import type {User } from '@/components/users/types';
 
 const USERS_COLLECTION ='User';
@@ -261,9 +262,63 @@ export async function updateUserRewardPoints(userId: string, points: number) {
   await updateDoc(ref, { rewardPoints: points });
 }
 
-export async function updateUserStatus(userId: string, status: User['status']) {
+/**
+ * Update user status in Firestore and optionally disable/enable their Firebase Auth account
+ * @param userId - The user's Firestore document ID (which should match their Firebase Auth UID)
+ * @param status - The new status ('active' or 'inactive')
+ * @param updateAuth - Whether to also update the Firebase Auth disabled status (default: true)
+ */
+export async function updateUserStatus(userId: string, status: User['status'], updateAuth: boolean = true) {
+  // Update Firestore status
   const ref = doc(db, USERS_COLLECTION, userId);
   await updateDoc(ref, { status });
+  
+  // Also update Firebase Auth disabled status if requested
+  if (updateAuth && (status === 'active' || status === 'inactive')) {
+    try {
+      await setUserAuthDisabled(userId, status === 'inactive');
+    } catch (error) {
+      console.error('Failed to update Firebase Auth status, but Firestore status was updated:', error);
+      // Re-throw to let the caller handle it
+      throw error;
+    }
+  }
+}
+
+/**
+ * Enable or disable a user's Firebase Authentication account
+ * This calls the Firebase Cloud Function that uses Admin SDK
+ * @param uid - The user's Firebase Auth UID
+ * @param disabled - Whether to disable (true) or enable (false) the account
+ */
+export async function setUserAuthDisabled(uid: string, disabled: boolean): Promise<{ success: boolean }> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('No authenticated user. Please log in.');
+  }
+
+  const idToken = await currentUser.getIdToken();
+  
+  // Get the Firebase Functions URL from environment or use default
+  const functionsBaseUrl = import.meta.env.VITE_FIREBASE_FUNCTIONS_URL || 
+    `https://asia-southeast1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net`;
+  
+  const response = await fetch(`${functionsBaseUrl}/setUserAccountStatus`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ uid, disabled }),
+  });
+
+  const data = await response.json();
+  
+  if (!response.ok) {
+    throw new Error(data.error || `Failed to ${disabled ? 'disable' : 'enable'} user account`);
+  }
+  
+  return data;
 }
 
 export async function updateUserSellerApproval(userId: string, status: User['sellerApprovalStatus']) {

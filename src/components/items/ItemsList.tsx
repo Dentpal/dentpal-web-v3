@@ -24,6 +24,7 @@ const CATEGORY_OPTIONS = ['Consumables', 'Dental Equipment', 'Disposables', 'Equ
 interface InventoryItem {
   id: string;
   name: string;
+  brand?: string;
   description?: string;
   imageUrl?: string;
   category?: string;
@@ -41,6 +42,11 @@ interface InventoryItem {
   variationCount?: number;
   qcReason?: string;
   violationmessage?: string;
+  warrantyType?: string;
+  warrantyDuration?: string;
+  warrantyPolicy?: string;
+  dangerousGoods?: string;
+  allowInquiry?: boolean;
 }
 
 interface ItemsListProps {
@@ -1320,7 +1326,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                                   // Allow empty or valid integer only
                                   if (value === '' || /^\d+$/.test(value)) {
                                     const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = { ...variation, pcsPerBox: value };
+                                    updatedVariations[index] = { ...variation, pcsPerBox: value === '' ? '' : Number(value) };
                                     setEditForm({ ...editForm, variations: updatedVariations });
                                   }
                                 }}

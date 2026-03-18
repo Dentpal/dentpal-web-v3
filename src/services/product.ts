@@ -348,6 +348,7 @@ export const ProductService = {
     cb: (rows: Array<{
       id: string;
       name: string;
+      brand?: string;
       description?: string;
       imageUrl?: string;
       price?: number;
@@ -361,9 +362,16 @@ export const ProductService = {
       subcategory?: string;
       subCategoryID?: string;
       qcReason?: string;
+      violationmessage?: string;
       // New: expose threshold
       suggestedThreshold?: number | null;
       variationCount?: number;
+      // Warranty & compliance
+      warrantyType?: string;
+      warrantyDuration?: string;
+      warrantyPolicy?: string;
+      dangerousGoods?: string;
+      allowInquiry?: boolean;
     }>) => void
   ) {
     const qRef = query(collection(db, PRODUCT_COLLECTION), where('sellerId', '==', sellerId));
@@ -392,6 +400,7 @@ export const ProductService = {
         return {
           id: String(d.id),
           name: String(pd.name ?? ''),
+          brand: typeof pd.brand === 'string' ? pd.brand : undefined,
           description: typeof pd.description === 'string' ? pd.description : '',
           imageUrl: pd.imageURL ? String(pd.imageURL) : undefined,
           price: pd.price != null ? Number(pd.price) : undefined,
@@ -405,8 +414,14 @@ export const ProductService = {
           subcategory: typeof pd.subCategoryID === 'string' ? pd.subCategoryID : undefined,
           subCategoryID: typeof pd.subCategoryID === 'string' ? pd.subCategoryID : undefined,
           qcReason: typeof pd.qcReason === 'string' ? pd.qcReason : undefined,
+          violationmessage: typeof pd.violationmessage === 'string' ? pd.violationmessage : undefined,
           suggestedThreshold: pd.suggestedThreshold != null ? Number(pd.suggestedThreshold) : null,
           variationCount: variationCount,
+          warrantyType: typeof pd.warrantyType === 'string' ? pd.warrantyType : undefined,
+          warrantyDuration: typeof pd.warrantyDuration === 'string' ? pd.warrantyDuration : undefined,
+          warrantyPolicy: typeof pd.warrantyPolicy === 'string' ? pd.warrantyPolicy : undefined,
+          dangerousGoods: typeof pd.dangerousGoods === 'string' ? pd.dangerousGoods : undefined,
+          allowInquiry: typeof pd.allowInquiry === 'boolean' ? pd.allowInquiry : undefined,
         };
       }));
       // sort name asc like before
@@ -479,6 +494,7 @@ export const ProductService = {
     dimensionsUnit?: string;
     imageURL?: string;
     isFragile?: boolean;
+    pcsPerBox?: number;
   }) {
     const vRef = doc(db, PRODUCT_COLLECTION, productId, 'Variation', variationId);
     const updateData: any = {
@@ -497,6 +513,7 @@ export const ProductService = {
     if (updates.dimensionsUnit !== undefined) updateData.dimensionsUnit = updates.dimensionsUnit;
     if (updates.imageURL !== undefined) updateData.imageURL = updates.imageURL;
     if (updates.isFragile !== undefined) updateData.isFragile = updates.isFragile;
+    if (updates.pcsPerBox !== undefined) updateData.pcsPerBox = Number(updates.pcsPerBox);
     
     if (updates.dimensions) {
       updateData.dimensions = updates.dimensions;

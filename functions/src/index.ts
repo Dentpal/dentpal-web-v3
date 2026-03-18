@@ -2528,6 +2528,118 @@ export const deleteUserAccount = onRequest({
   }
 });
 // ============================================
+// User Account Status Management (Enable/Disable)
+// ============================================
+
+/**
+ * Enable or disable a user account in Firebase Authentication
+ * Admin-only access required
+ * This is called when toggling user status between 'active' and 'inactive'
+ */
+export const setUserAccountStatus = onRequest({
+  cors: true,
+  region: "asia-southeast1",
+}, async (req, res) => {
+  // Add explicit CORS headers
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '86400');
+
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    // Verify authentication
+    let decodedToken: DecodedIdToken;
+    try {
+      decodedToken = await verifyAuthToken(req.headers.authorization);
+    } catch (authError: any) {
+      res.status(401).json({ 
+        error: "Authentication failed. Invalid or missing token." 
+      });
+      return;
+    }
+
+    // Verify admin access
+    try {
+      await verifyAdminAccess(decodedToken.uid, "toggle user account status");
+    } catch (adminError) {
+      if (adminError instanceof AdminAccessError) {
+        res.status(403).json({ error: adminError.message });
+        return;
+      }
+      throw adminError;
+    }
+
+    const { uid, disabled } = req.body;
+
+    if (!uid || typeof uid !== "string") {
+      res.status(400).json({ error: "Invalid user ID provided" });
+      return;
+    }
+
+    if (typeof disabled !== "boolean") {
+      res.status(400).json({ error: "Invalid 'disabled' value. Must be a boolean." });
+      return;
+    }
+
+    // Prevent admin from disabling themselves
+    if (uid === decodedToken.uid && disabled) {
+      res.status(400).json({ error: "Cannot disable your own account" });
+      return;
+    }
+
+    // Update the user's disabled status in Firebase Authentication
+    await auth.updateUser(uid, { disabled });
+
+    logger.info("User account status updated successfully", {
+      targetUid: uid,
+      disabled,
+      updatedBy: decodedToken.uid,
+      action: disabled ? "disabled" : "enabled",
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: `User account ${disabled ? 'disabled' : 'enabled'} successfully`,
+      uid,
+      disabled,
+    });
+
+  } catch (error: any) {
+    logger.error("Error updating user account status", {
+      error: error.message,
+      code: error.code,
+    });
+
+    let statusCode = 500;
+    let errorMessage = error.message || "Failed to update user account status";
+
+    if (error.code === "auth/user-not-found") {
+      statusCode = 404;
+      errorMessage = "User not found in authentication system";
+    } else if (error.code === "auth/invalid-uid") {
+      statusCode = 400;
+      errorMessage = "Invalid user ID format";
+    }
+
+    res.status(statusCode).json({ 
+      success: false, 
+      error: errorMessage 
+    });
+  }
+});
+
+// ============================================
 // Test JRS Shipping Function (QA API)
 // ============================================
 export {testCreateJRSShipping} from "./testJRSShipping";
