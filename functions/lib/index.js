@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testCreateJRSShipping = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+exports.testCreateJRSShipping = exports.updateUserStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -2095,6 +2095,104 @@ exports.deleteUserAccount = (0, https_1.onRequest)({
         res.status(error.code === "auth/user-not-found" ? 404 : 500).json({
             success: false,
             error: errorMessage
+        });
+    }
+});
+// ============================================
+// Update User Status (Enable/Disable Account)
+// ============================================
+exports.updateUserStatus = (0, https_1.onRequest)({ cors: true }, async (req, res) => {
+    try {
+        // Only allow POST requests
+        if (req.method !== "POST") {
+            res.status(405).json({ error: "Method not allowed" });
+            return;
+        }
+        // Verify authentication token
+        const decodedToken = await verifyAuthToken(req.headers.authorization);
+        // Verify admin access
+        await verifyAdminAccess(decodedToken.uid, "update user status");
+        // Get userId and status from request body
+        const { userId, status } = req.body;
+        if (!userId || !status) {
+            res.status(400).json({ error: "userId and status are required" });
+            return;
+        }
+        if (!["active", "inactive", "suspended", "pending"].includes(status)) {
+            res.status(400).json({ error: "Invalid status. Must be: active, inactive, suspended, or pending" });
+            return;
+        }
+        logger.info("Updating user status", { userId, status, requestedBy: decodedToken.uid });
+        // Update Firestore User collection
+        const userRef = db.collection("User").doc(userId);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+            res.status(404).json({ error: "User not found in Firestore" });
+            return;
+        }
+        await userRef.update({
+            status: status,
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        logger.info("Updated Firestore User collection status", { userId, status });
+        // Update Firebase Authentication account (disable/enable)
+        try {
+            if (status === "inactive" || status === "suspended") {
+                // Disable the Firebase Authentication account
+                await auth.updateUser(userId, { disabled: true });
+                logger.info("Disabled Firebase Authentication account", { userId });
+            }
+            else if (status === "active") {
+                // Enable the Firebase Authentication account
+                await auth.updateUser(userId, { disabled: false });
+                logger.info("Enabled Firebase Authentication account", { userId });
+            }
+        }
+        catch (authError) {
+            logger.error("Error updating Firebase Authentication status", {
+                userId,
+                error: authError.message,
+                code: authError.code,
+            });
+            // Don't fail the whole operation if auth update fails
+            // Firestore is already updated, which is the source of truth
+        }
+        // Also update web_users collection for consistency
+        try {
+            const webUserRef = db.collection("web_users").doc(userId);
+            const webUserDoc = await webUserRef.get();
+            if (webUserDoc.exists) {
+                await webUserRef.update({
+                    isActive: status === "active",
+                });
+                logger.info("Updated web_users collection", { userId, isActive: status === "active" });
+            }
+        }
+        catch (webUserError) {
+            logger.error("Error updating web_users collection", {
+                userId,
+                error: webUserError.message,
+            });
+        }
+        res.status(200).json({
+            success: true,
+            message: `User account ${status === "active" ? "enabled" : "disabled"} successfully`,
+            status: status
+        });
+    }
+    catch (error) {
+        // Handle admin access errors with 403
+        if (error instanceof AdminAccessError) {
+            res.status(403).json({ error: error.message });
+            return;
+        }
+        logger.error("Error updating user status", {
+            error: error.message,
+            code: error.code,
+        });
+        res.status(500).json({
+            success: false,
+            error: error.message || "Failed to update user status"
         });
     }
 });

@@ -45,6 +45,7 @@ const toCm = (val: any, unit: string) => {
 
 // Factory function for initial form state
 const getInitialFormState = () => ({
+  brand: '',
   name: '',
   description: '',
   categoryID: '',
@@ -71,6 +72,7 @@ const getInitialFormState = () => ({
     weightUnit: string;
     dimensions: { length: number | ''; width: number | ''; height: number | '' };
     dimensionsUnit: string;
+    pcsPerBox: number | '';
     isFragile?: boolean;
     isNew?: boolean;
   }>,
@@ -163,6 +165,11 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       return;
     }
 
+    if (!form.brand.trim()) {
+      toast({ title: 'Error', description: 'Brand is required', variant: 'destructive' });
+      return;
+    }
+
     if (!form.name.trim()) {
       toast({ title: 'Error', description: 'Product name is required', variant: 'destructive' });
       return;
@@ -204,6 +211,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       // Create product - Always set to pending_qc for admin approval
       const productData = {
         sellerId: effectiveSellerId,
+        brand: form.brand,
         name: form.name,
         description: form.description,
         categoryID: form.categoryID,
@@ -217,6 +225,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         dangerousGoods: (form.dangerousGoods && form.dangerousGoods !== 'none') ? 'dangerous' as const : 'none' as const,
         warrantyType: form.warrantyType || null,
         warrantyDuration: form.warrantyDuration || null,
+        warrantyPolicy: form.warrantyPolicy || null,
         allowInquiry: form.allowInquiry,
       };
 
@@ -255,6 +264,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 height: heightInCm,
               },
               dimensionsUnit: 'cm',
+              pcsPerBox: variation.pcsPerBox ? Number(variation.pcsPerBox) : null,
               isFragile: variation.isFragile || false,
             };
           })
@@ -307,6 +317,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       // Create product as draft - no validation required
       const productData = {
         sellerId: effectiveSellerId,
+        brand: form.brand || '',
         name: form.name || 'Untitled Product',
         description: form.description || '',
         categoryID: form.categoryID || '',
@@ -356,6 +367,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 height: heightInCm,
               },
               dimensionsUnit: 'cm',
+              pcsPerBox: variation.pcsPerBox ? Number(variation.pcsPerBox) : null,
               isFragile: variation.isFragile || false,
             };
           })
@@ -412,24 +424,36 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         <div className="space-y-6">
           {/* Basic Information Section */}
           <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Package className="w-5 h-5 text-teal-600" />
-              Basic Information
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Package className="w-5 h-5 text-teal-600" />
+                  Basic Information
+                </h3>
+                <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                  <input
+                    type="checkbox"
+                    checked={form.allowInquiry}
+                    onChange={(e) => setForm({...form, allowInquiry: e.target.checked})}
+                    className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Allow Inquiry</span>
+                </label>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Product Name <span className="text-red-500">*</span></label>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.allowInquiry}
-                      onChange={(e) => setForm({...form, allowInquiry: e.target.checked})}
-                      className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
-                    />
-                    Allow Inquiry
-                  </label>
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Brand <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={form.brand}
+                  onChange={(e) => setForm({...form, brand: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  placeholder="Enter your brand name"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={form.name}
@@ -539,6 +563,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                         weightUnit: 'g',
                         dimensions: { length: '', width: '', height: '' },
                         dimensionsUnit: 'cm',
+                        pcsPerBox: '',
                         isFragile: false,
                         isNew: true
                       }
@@ -683,6 +708,25 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                         />
                       </div>
 
+                      {/* Pcs per Box */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Pcs per Box <span className="text-red-500">*</span></label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={variation.pcsPerBox}
+                          onChange={(e) => {
+                            let val = e.target.value.replace(/[^0-9]/g, '');
+                            const updatedVariations = [...form.variations];
+                            updatedVariations[index] = { ...variation, pcsPerBox: val ? parseInt(val) : '' };
+                            setForm({ ...form, variations: updatedVariations });
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="e.g., 12"
+                        />
+                      </div>
+
                       {/* Weight */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Weight <span className="text-red-500">*</span></label>
@@ -697,7 +741,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const parts = val.split('.');
                               if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
                               const updatedVariations = [...form.variations];
-                              updatedVariations[index] = { ...variation, weight: val ? parseFloat(val) : '' };
+                              updatedVariations[index] = { ...variation, weight: val as number | '' };
                               setForm({ ...form, variations: updatedVariations });
                             }}
                             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -760,7 +804,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, length: val ? parseFloat(val) : '' }
+                                dimensions: { ...variation.dimensions, length: val as number | '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -780,7 +824,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, width: val ? parseFloat(val) : '' }
+                                dimensions: { ...variation.dimensions, width: val as number | '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}
@@ -800,7 +844,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                               const updatedVariations = [...form.variations];
                               updatedVariations[index] = {
                                 ...variation,
-                                dimensions: { ...variation.dimensions, height: val ? parseFloat(val) : '' }
+                                dimensions: { ...variation.dimensions, height: val as number | '' }
                               };
                               setForm({ ...form, variations: updatedVariations });
                             }}

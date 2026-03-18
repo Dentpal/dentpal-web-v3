@@ -21,20 +21,23 @@ const toValidNumber = (v: unknown) => {
 };
 
 const RevenueChart = ({ data }: { data?: RevenuePoint[] }) => {
-  const rawData = (data && data.length ? data : demoData);
-  // Sanitize data to avoid NaN in scales
-  const chartData = rawData.map(d => ({ ...d, revenue: toValidNumber(d.revenue) }));
-
-  // Friendly empty state checks
-  const maxRevenue = Math.max(...chartData.map(d => d.revenue));
-
-  if (!chartData || chartData.length === 0) {
+  // Use provided data only, no demo fallback
+  if (!data || data.length === 0) {
     return (
       <div className="h-80 flex items-center justify-center text-sm text-slate-500 border rounded-lg bg-white">
-        No data to display yet.
+        <div className="text-center">
+          <div className="text-sm font-medium text-gray-700">No revenue data available</div>
+          <div className="text-xs text-gray-500 mt-1">Revenue will appear once orders are placed</div>
+        </div>
       </div>
     );
   }
+
+  // Sanitize data to avoid NaN in scales
+  const chartData = data.map(d => ({ ...d, revenue: toValidNumber(d.revenue) }));
+
+  // Friendly empty state checks
+  const maxRevenue = Math.max(...chartData.map(d => d.revenue));
 
   const xTickCount = Math.min(8, chartData.length);
   const yMax = Math.max(1, Math.ceil((Number.isFinite(maxRevenue) ? maxRevenue : 0) * 1.1));

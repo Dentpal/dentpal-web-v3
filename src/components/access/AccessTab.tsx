@@ -1700,9 +1700,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               {/* Permissions grid (for custom tweak) */}
               <div className="grid grid-cols-2 gap-2">
                 {Object.keys({ ...subPerms, chats: (subPerms as any).chats ?? false }).filter(k => {
-                  // Hide bookings, notifications, confirmation, access, users, images, profile, withdrawal
+                  // Hide bookings, notifications, confirmation, access, users, images, profile, withdrawal, policies
                   if ([
-                    'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile', 'withdrawal'
+                    'bookings', 'notifications', 'confirmation', 'access', 'users', 'images', 'profile', 'withdrawal', 'policies'
                   ].includes(k)) return false;
                   return true;
                 }).map((k) => (

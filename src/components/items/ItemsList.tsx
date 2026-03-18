@@ -78,6 +78,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   const [editingItem, setEditingItem] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     name: string;
+    brand: string;
     description: string;
     categoryID: string;
     subCategoryID: string;
@@ -92,6 +93,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     dangerousGoods: 'none' | 'dangerous';
     warrantyType: string;
     warrantyDuration: string;
+    warrantyPolicy: string;
     promoStart: number | null;
     promoEnd: number | null;
     allowInquiry: boolean;
@@ -108,6 +110,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       weightUnit: string;
       dimensions: { length: number | string | ''; width: number | string | ''; height: number | string | '' };
       dimensionsUnit: string;
+      pcsPerBox: number | '';
       isFragile?: boolean;
       isNew?: boolean;
       isDeleted?: boolean;
@@ -181,6 +184,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       const mapped = rows.map((r: any) => ({
         id: r.id,
         name: r.name,
+        brand: r.brand || '',
         suggestedThreshold: r.suggestedThreshold != null ? Number(r.suggestedThreshold) : 5,
         inStock: r.inStock,
         updatedAt: r.updatedAt,
@@ -197,6 +201,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         variationCount: r.variationCount || 0,
         qcReason: r.qcReason || '',
         violationmessage: r.violationmessage || '',
+        warrantyType: r.warrantyType || '',
+        warrantyDuration: r.warrantyDuration || '',
+        warrantyPolicy: r.warrantyPolicy || '',
+        dangerousGoods: r.dangerousGoods || 'none',
+        allowInquiry: r.allowInquiry || false,
       }));
       setItems(mapped as any);
       setLoading(false);
@@ -437,6 +446,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
           height: v.dimensions?.height || ''
         },
         dimensionsUnit: v.dimensionsUnit || 'cm',
+        pcsPerBox: v.pcsPerBox || '',
         isFragile: v.isFragile ?? false,
         isNew: false,
         isDeleted: false,
@@ -449,6 +459,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     
     setEditForm({
       name: product.name || '',
+      brand: product.brand || '',
       description: product.description || '',
       categoryID: product.category || '',
       subCategoryID: product.subcategory || '',
@@ -463,6 +474,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       dangerousGoods: product.dangerousGoods || 'none',
       warrantyType: product.warrantyType || '',
       warrantyDuration: product.warrantyDuration || '',
+      warrantyPolicy: product.warrantyPolicy || '',
       promoStart: product.promoStart || null,
       promoEnd: product.promoEnd || null,
       allowInquiry: product.allowInquiry || false,
@@ -511,12 +523,19 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       }
 
       // If product is in violation, change status to pending_qc when saving
+      // If product is archived, change status to inactive when saving
       const currentItem = items.find(item => item.id === editingItem);
-      const newStatus = currentItem?.status === 'violation' ? 'pending_qc' : editForm.status;
+      let newStatus = editForm.status;
+      if (currentItem?.status === 'violation') {
+        newStatus = 'pending_qc';
+      } else if (currentItem?.status === 'archive') {
+        newStatus = 'inactive';
+      }
 
       // Update product details (price and lowestPrice are handled by updatePriceAndPromo)
       await ProductService.updateProduct(editingItem, {
         name: editForm.name,
+        brand: editForm.brand,
         description: editForm.description,
         imageURL: imageUrl,
         categoryID: editForm.categoryID || null,
@@ -526,6 +545,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         dangerousGoods: editForm.dangerousGoods,
         warrantyType: editForm.warrantyType || null,
         warrantyDuration: editForm.warrantyDuration || null,
+        warrantyPolicy: editForm.warrantyPolicy || '',
         allowInquiry: editForm.allowInquiry,
       } as any);
 
@@ -573,6 +593,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               height: variation.dimensions.height !== '' ? Number(variation.dimensions.height) : undefined,
             },
             dimensionsUnit: variation.dimensionsUnit,
+            pcsPerBox: variation.pcsPerBox !== '' ? Number(variation.pcsPerBox) : undefined,
             imageURL: variationImageUrl || null,
             isFragile: variation.isFragile ?? false,
           }]);
@@ -591,6 +612,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               height: variation.dimensions.height !== '' ? Number(variation.dimensions.height) : undefined,
             },
             dimensionsUnit: variation.dimensionsUnit,
+            pcsPerBox: variation.pcsPerBox !== '' ? Number(variation.pcsPerBox) : undefined,
             imageURL: variationImageUrl,
             isFragile: variation.isFragile ?? false,
           });
@@ -990,19 +1012,29 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   Basic Information
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2 flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.allowInquiry}
+                        onChange={(e) => setEditForm({...editForm, allowInquiry: e.target.checked})}
+                        className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                      />
+                      Allow Inquiry
+                    </label>
+                  </div>
                   <div className="md:col-span-2">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">Product Name *</label>
-                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={editForm.allowInquiry}
-                          onChange={(e) => setEditForm({...editForm, allowInquiry: e.target.checked})}
-                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
-                        />
-                        Allow Inquiry
-                      </label>
-                    </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Brand *</label>
+                    <input
+                      type="text"
+                      value={editForm.brand}
+                      onChange={(e) => setEditForm({...editForm, brand: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Enter your brand name"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
                     <input
                       type="text"
                       value={editForm.name}
@@ -1123,6 +1155,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                             weightUnit: 'kg',
                             dimensions: { length: '', width: '', height: '' },
                             dimensionsUnit: 'cm',
+                            pcsPerBox: '',
                             isFragile: false,
                             isNew: true
                           }
@@ -1272,6 +1305,27 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                                 }}
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 placeholder="0.00"
+                              />
+                            </div>
+
+                            {/* Pcs per Box */}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Pcs per Box *</label>
+                              <input
+                                type="text"
+                                pattern="[0-9]*"
+                                value={variation.pcsPerBox}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  // Allow empty or valid integer only
+                                  if (value === '' || /^\d+$/.test(value)) {
+                                    const updatedVariations = [...editForm.variations];
+                                    updatedVariations[index] = { ...variation, pcsPerBox: value };
+                                    setEditForm({ ...editForm, variations: updatedVariations });
+                                  }
+                                }}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="0"
                               />
                             </div>
 
@@ -1435,6 +1489,56 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Warranty & Compliance Section */}
+              <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Warranty & Compliance</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Type</label>
+                    <select
+                      value={editForm.warrantyType}
+                      onChange={(e) => setEditForm({...editForm, warrantyType: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    >
+                      <option value="">No Warranty</option>
+                      <option value="manufacturer">Manufacturer Warranty</option>
+                      <option value="seller">Seller Warranty</option>
+                      <option value="extended">Extended Warranty</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Duration</label>
+                    <select
+                      value={editForm.warrantyDuration}
+                      onChange={(e) => setEditForm({...editForm, warrantyDuration: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      disabled={!editForm.warrantyType}
+                    >
+                      <option value="">Select Duration</option>
+                      <option value="30-days">30 Days</option>
+                      <option value="60-days">60 Days</option>
+                      <option value="90-days">90 Days</option>
+                      <option value="6-months">6 Months</option>
+                      <option value="1-year">1 Year</option>
+                      <option value="2-years">2 Years</option>
+                      <option value="3-years">3 Years</option>
+                      <option value="lifetime">Lifetime</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Policy</label>
+                    <textarea
+                      value={editForm.warrantyPolicy}
+                      onChange={(e) => setEditForm({...editForm, warrantyPolicy: e.target.value})}
+                      rows={3}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Describe your warranty policy and terms..."
+                      disabled={!editForm.warrantyType}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 

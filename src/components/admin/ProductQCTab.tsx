@@ -360,6 +360,12 @@ const ProductQCTab: React.FC = () => {
                         <div className="text-sm font-semibold text-gray-900">{preview.name}</div>
                       </div>
                       <div className="bg-white rounded-lg p-4 shadow-sm">
+                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Brand</div>
+                        <div className="text-sm font-semibold text-gray-900">{previewDetail?.product?.brand || '—'}</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white rounded-lg p-4 shadow-sm col-span-2">
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Seller</div>
                         <div className="text-sm font-semibold text-gray-900">{(preview.sellerId && sellerNames[preview.sellerId]) || preview.sellerId || '—'}</div>
                       </div>
@@ -513,6 +519,12 @@ const ProductQCTab: React.FC = () => {
                                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Price (₱)</div>
                                 <div className="text-sm font-semibold text-teal-600">
                                   {v.price != null ? currency.format(Number(v.price)) : '—'}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Pcs per Box</div>
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {v.pcsPerBox != null ? Number(v.pcsPerBox).toLocaleString() : '—'}
                                 </div>
                               </div>
                               <div>

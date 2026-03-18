@@ -120,7 +120,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [phProvinces, setPhProvinces] = useState<Array<{ code: string; name: string }>>([]);
   const [phCities, setPhCities] = useState<Array<{ code: string; name: string; provinceCode: string }>>([]);
   // Admin sellers list for filtering & export table
-  const [adminSellers, setAdminSellers] = useState<Array<{ uid: string; name?: string; shopName?: string; storeName?: string; province?: string; city?: string; zipCode?: string; address?: any }>>([]);
+  const [adminSellers, setAdminSellers] = useState<Array<{ uid: string; name?: string; shopName?: string; storeName?: string; province?: string; city?: string; zipCode?: string; address?: any; isSubAccount?: boolean; parentId?: string | null }>>([]);
     // Fetch all Seller documents for Employee name mapping (for both admin and sellers)
     useEffect(() => {
       async function fetchSellers() {
@@ -3260,10 +3260,69 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">REVENUE</h3>
-                  <p className="text-3xl font-bold text-gray-900">PHP 3,000,000.00</p>
+                  <p className="text-3xl font-bold text-gray-900">{(() => {
+                    const totalRevenue = adminSellersDisplayed.reduce((sum, s) => {
+                      const sellerOrders = confirmationOrders.filter(o => {
+                        const orderSellerIds = o.sellerIds || [];
+                        if (!orderSellerIds.includes(s.uid)) return false;
+                        if (adminFilters.dateFrom && adminFilters.dateTo) {
+                          const orderDate = o.timestamp ? o.timestamp.slice(0, 10) : '';
+                          if (orderDate < adminFilters.dateFrom || orderDate > adminFilters.dateTo) return false;
+                        }
+                        if (adminFilters.province !== 'all') {
+                          const orderProvinceCode = o.region?.province;
+                          if (orderProvinceCode !== adminFilters.province) return false;
+                        }
+                        if (adminSelectedCityCodes.size > 0) {
+                          const orderCity = o.region?.municipality;
+                          const matchingCity = phCities.find(c => c.name === orderCity);
+                          if (!matchingCity || !adminSelectedCityCodes.has(matchingCity.code)) return false;
+                        }
+                        if (!isPaidStatus(o.status)) return false;
+                        return true;
+                      });
+                      const gross = sellerOrders.reduce((s, o) => s + (Number(o.summary?.subtotal) || 0), 0);
+                      return sum + gross;
+                    }, 0);
+                    return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(totalRevenue);
+                  })()}</p>
                 </div>
               </div>
-              <RevenueChart />
+              <RevenueChart data={(() => {
+                // Calculate revenue by date from export table data
+                const revenueByDate: Record<string, number> = {};
+                adminSellersDisplayed.forEach(s => {
+                  const sellerOrders = confirmationOrders.filter(o => {
+                    const orderSellerIds = o.sellerIds || [];
+                    if (!orderSellerIds.includes(s.uid)) return false;
+                    if (adminFilters.dateFrom && adminFilters.dateTo) {
+                      const orderDate = o.timestamp ? o.timestamp.slice(0, 10) : '';
+                      if (orderDate < adminFilters.dateFrom || orderDate > adminFilters.dateTo) return false;
+                    }
+                    if (adminFilters.province !== 'all') {
+                      const orderProvinceCode = o.region?.province;
+                      if (orderProvinceCode !== adminFilters.province) return false;
+                    }
+                    if (adminSelectedCityCodes.size > 0) {
+                      const orderCity = o.region?.municipality;
+                      const matchingCity = phCities.find(c => c.name === orderCity);
+                      if (!matchingCity || !adminSelectedCityCodes.has(matchingCity.code)) return false;
+                    }
+                    if (!isPaidStatus(o.status)) return false;
+                    return true;
+                  });
+                  sellerOrders.forEach(o => {
+                    const orderDate = o.timestamp ? o.timestamp.slice(0, 10) : '';
+                    if (!revenueByDate[orderDate]) revenueByDate[orderDate] = 0;
+                    revenueByDate[orderDate] += Number(o.summary?.subtotal) || 0;
+                  });
+                });
+                // Convert to array and sort by date
+                const chartData = Object.entries(revenueByDate)
+                  .map(([date, revenue]) => ({ name: date, revenue }))
+                  .sort((a, b) => a.name.localeCompare(b.name));
+                return chartData;
+              })()} />
             </div>
             {/* NEW: Export + Seller Metrics Table */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
@@ -4293,14 +4352,21 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
             province: province,
             city: city,
             zipCode: zipCode,
-            address: address, 
+            address: address,
+            isSubAccount: data.isSubAccount || false,
+            parentId: data.parentId || null,
           };
         });
         
-        const sellers = allSellers.filter(seller => seller.role !== 'admin');
+        // Filter out admins AND sub-accounts (only show parent seller accounts)
+        const sellers = allSellers.filter(seller => {
+          const isAdmin = seller.role === 'admin';
+          const isSubAccount = seller.isSubAccount === true || seller.parentId;
+          return !isAdmin && !isSubAccount;
+        });
         
         console.log('[Dashboard] All sellers:', allSellers.length);
-        console.log('[Dashboard] Filtered sellers (excluding admins):', sellers.length);
+        console.log('[Dashboard] Filtered sellers (excluding admins & sub-accounts):', sellers.length);
         console.log('[Dashboard] Seller details with addresses:', sellers.map(s => ({ 
           uid: s.uid, 
           storeName: s.storeName, 

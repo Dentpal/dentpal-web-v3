@@ -3,6 +3,7 @@ import { addDoc, collection, serverTimestamp, onSnapshot, query, where, updateDo
 
 export type CreateProductInput = {
   sellerId: string;
+  brand?: string;
   name: string;
   description?: string;
   imageURL?: string;
@@ -140,6 +141,7 @@ export const ProductService = {
     const initialStatus = input.status ?? 'pending_qc';
     const payload = {
       sellerId: input.sellerId,
+      brand: input.brand ?? null,
       name: input.name,
       description: input.description ?? '',
       imageURL: input.imageURL ?? '',
@@ -189,6 +191,7 @@ export const ProductService = {
     dimensions?: { length?: number; width?: number; height?: number } | null;
     imageURL?: string | null;
     name?: string;
+    pcsPerBox?: number | null;
     isFragile?: boolean;
   }>) {
     const col = collection(db, PRODUCT_COLLECTION, productId, 'Variation');
@@ -216,6 +219,7 @@ export const ProductService = {
         dimensions: dim ?? null,
         imageURL: v.imageURL ?? null,
         name: v.name ?? null,
+        pcsPerBox: v.pcsPerBox ?? null,
         isFragile: v.isFragile ?? false,
         productId,
         createdAt: serverTimestamp(),
@@ -531,6 +535,7 @@ export const ProductService = {
 
   async updateProduct(productId: string, updates: Partial<{
     name: string;
+    brand: string;
     description: string;
     imageURL: string;
     categoryID: string | null;
@@ -543,11 +548,13 @@ export const ProductService = {
     dangerousGoods: 'none' | 'dangerous';
     warrantyType: string | null;
     warrantyDuration: string | null;
+    warrantyPolicy: string;
     allowInquiry: boolean; // new
   }>) {
     const pRef = doc(db, PRODUCT_COLLECTION, productId);
     const payload: any = {
       ...(updates.name !== undefined ? { name: updates.name } : {}),
+      ...(updates.brand !== undefined ? { brand: updates.brand } : {}),
       ...(updates.description !== undefined ? { description: updates.description } : {}),
       ...(updates.imageURL !== undefined ? { imageURL: updates.imageURL } : {}),
       ...(updates.categoryID !== undefined ? { categoryID: updates.categoryID } : {}),
@@ -559,6 +566,7 @@ export const ProductService = {
       ...(updates.dangerousGoods !== undefined ? { dangerousGoods: updates.dangerousGoods } : {}),
       ...(updates.warrantyType !== undefined ? { warrantyType: updates.warrantyType } : {}),
       ...(updates.warrantyDuration !== undefined ? { warrantyDuration: updates.warrantyDuration } : {}),
+      ...(updates.warrantyPolicy !== undefined ? { warrantyPolicy: updates.warrantyPolicy } : {}),
       ...(updates.allowInquiry !== undefined ? { allowInquiry: !!updates.allowInquiry } : {}),
       updatedAt: serverTimestamp(),
     };
