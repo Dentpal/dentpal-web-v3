@@ -27,6 +27,7 @@ export interface User {
   totalSpent: number;
   registrationDate: string;
   lastActivity: string;
+  createdAt?: any; // Firestore Timestamp from Firebase User > createdAt
   status: 'active' | 'inactive' | 'pending' | 'suspended';
   rewardPoints: number;
   membershipLevel: 'bronze' | 'silver' | 'gold' | 'platinum';

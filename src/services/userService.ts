@@ -180,6 +180,7 @@ export async function fetchUsers(): Promise<User []> {
         totalSpent: Number(raw.totalSpent ?? 0),
         registrationDate: (raw.registrationDate ?? raw.createdAt ?? '').toString(),
         lastActivity: (raw.lastActivity ?? raw.updatedAt ?? '').toString(),
+        createdAt: raw.createdAt, // Keep the raw Firestore Timestamp
         status: (raw.status ?? 'active') as User['status'],
         rewardPoints: Number(raw.rewardPoints ?? 0),
         membershipLevel: (raw.membershipLevel ?? 'bronze') as User['membershipLevel'],
@@ -241,6 +242,7 @@ export function listenUsers(onChange: (users: User[]) => void) {
             totalSpent: Number(raw.totalSpent ?? 0),
             registrationDate: (raw.registrationDate ?? raw.createdAt ?? '').toString(),
             lastActivity: (raw.lastActivity ?? raw.updatedAt ?? '').toString(),
+            createdAt: raw.createdAt, // Keep the raw Firestore Timestamp
             status: (raw.status ?? 'active') as User['status'],
             rewardPoints: Number(raw.rewardPoints ?? 0),
             membershipLevel: (raw.membershipLevel ?? 'bronze') as User['membershipLevel'],

@@ -19,16 +19,16 @@ const DashboardHeader = ({ title, subtitle }: DashboardHeaderProps) => {
         </div>
         
         <div className="flex items-center space-x-4">
-          <Button variant="ghost" size="icon">
+          {/* Temporarily commented out - search, notification, and settings icons */}
+          {/* <Button variant="ghost" size="icon">
             <Search className="h-4 w-4" />
           </Button>
           
-          {/* New Notification Center */}
           <NotificationCenter />
           
           <Button variant="ghost" size="icon">
             <Settings className="h-4 w-4" />
-          </Button>
+          </Button> */}
         </div>
       </div>
     </header>

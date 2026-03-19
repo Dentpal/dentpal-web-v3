@@ -4170,6 +4170,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         return isAdmin ? "Dashboard" : "Sales";
       case "policies":
         return "Terms & Policies";
+      case "profile":
+        return "Profile";
       case "confirmation": return "Confirmation";
       case "withdrawal": return "Withdrawal";
       case "access": return "Access";

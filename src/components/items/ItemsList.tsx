@@ -304,7 +304,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     return enrichedItems
       .filter(i => {
         const status = (i.status ?? 'active');
-        if (catalogTab === 'all') return true;
+        // Hide deleted items from the "All" tab
+        if (catalogTab === 'all') return status !== 'deleted';
         if (catalogTab === 'pending_qc') return status === 'pending_qc';
         if (catalogTab === 'archive') return status === 'archive';
         return status === catalogTab;

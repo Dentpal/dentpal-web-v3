@@ -137,6 +137,8 @@ interface User {
   Platform_fee_percentage?: number; // Platform fee percentage (default 8.88%)
   lastLogin?: string;
   createdAt: string;
+  isSubAccount?: boolean; // Whether this is a sub-account
+  parentId?: string; // Parent account ID for sub-accounts
 }
 
 interface AccessTabProps {
@@ -354,10 +356,16 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   };
 
   // Mask a permission set by the seller's own permissions (never exceed parent)
+  // Also excludes 'profile' as sub-accounts should never have profile access
   const maskPerms = (perms: User['permissions'], owner: User['permissions']): User['permissions'] => {
     const out: any = {};
     (Object.keys(perms) as Array<keyof User['permissions']>).forEach((k) => {
-      out[k] = Boolean(perms[k] && owner[k]);
+      // Sub-accounts should never have profile access
+      if (k === 'profile') {
+        out[k] = false;
+      } else {
+        out[k] = Boolean(perms[k] && owner[k]);
+      }
     });
     return out as User['permissions'];
   };
@@ -539,6 +547,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         permissions: s.permissions as any,
         createdAt: s.createdAt || Date.now(),
         Platform_fee_percentage: s.Platform_fee_percentage,
+        isSubAccount: (s as any).isSubAccount,
+        parentId: (s as any).parentId,
       })) : await getWebUsers();
       const mapped: User[] = webUsers.map((u: any) => {
         const createdAtMs = normalizeTimestamp((u as any).createdAt);
@@ -554,6 +564,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
           Platform_fee_percentage: u.Platform_fee_percentage,
           lastLogin: lastLoginMs ? new Date(lastLoginMs).toISOString() : undefined,
           createdAt: createdAtMs ? new Date(createdAtMs).toISOString() : new Date().toISOString(),
+          isSubAccount: u.isSubAccount,
+          parentId: u.parentId,
         };
       });
       setUsers(mapped);
@@ -615,6 +627,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
           permissions: s.permissions as any,
           createdAt: s.createdAt || Date.now(),
           Platform_fee_percentage: s.Platform_fee_percentage,
+          isSubAccount: (s as any).isSubAccount,
+          parentId: (s as any).parentId,
         })) : await getWebUsers();
          const mapped: User[] = webUsers.map((u: any) => {
             const createdAtMs = normalizeTimestamp((u as any).createdAt);
@@ -630,6 +644,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               Platform_fee_percentage: u.Platform_fee_percentage,
               lastLogin: lastLoginMs ? new Date(lastLoginMs).toISOString() : undefined,
               createdAt: createdAtMs ? new Date(createdAtMs).toISOString() : new Date().toISOString(),
+              isSubAccount: u.isSubAccount,
+              parentId: u.parentId,
             };
           });
          setUsers(mapped);
@@ -1110,6 +1126,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
 
   // Derived lists and UI helpers
   const filteredUsers = users.filter((user) => {
+    // Exclude sub-accounts from the main list (they appear under their parent)
+    if (user.isSubAccount) return false;
+    
     const term = (searchTerm || '').toLowerCase();
     const uname = (user.username || '').toLowerCase();
     const mail = (user.email || '').toLowerCase();
@@ -1491,10 +1510,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     const allowedKeys = (Object.keys(subPerms) as Array<keyof User['permissions']>).filter(k => sellerPerms[k]);
     return (
       <div className="space-y-6">
-        <div className="bg-gradient-to-r from-green-600 to-teal-600 rounded-2xl p-6 text-white shadow-lg">
-          <h1 className="text-xl font-semibold">Sub Account</h1>
-          <p className="text-green-100 text-sm">Create team sub-accounts. Permissions cannot exceed your own access.</p>
-        </div>
+        {/* Green banner hidden as requested */}
 
         <div className="bg-white rounded-xl border p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1912,6 +1928,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                                 <div className="flex flex-wrap gap-1">
                                   {Object.entries((m as any).permissions || {})
                                     .filter(([, v]) => v)
+                                    .filter(([k]) => k !== 'profile') // Sub-accounts don't have profile access
                                     .map(([k]) => (
                                       <Badge
                                         key={k}

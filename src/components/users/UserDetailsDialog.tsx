@@ -8,8 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "./badges";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { updateUserRewardPoints, updateUserSellerApproval } from "@/services/userService";
+import { updateUserRewardPoints } from "@/services/userService";
 
 // Mask user name for privacy: "Michael John Garcia" -> "M**** J*** G****"
 const maskName = (firstName?: string, middleName?: string, lastName?: string) => {
@@ -32,11 +31,9 @@ const maskName = (firstName?: string, middleName?: string, lastName?: string) =>
 export default function UserDetailsDialog ({ user, open, onClose }: { user: User | null; open: boolean ; onClose: () => void}) {
   const [saving, setSaving] = useState(false);
   const [points, setPoints] = useState<string>(user ? String(user.rewardPoints ?? 0) : "0");
-  const [sellerApproval, setSellerApproval] = useState<User['sellerApprovalStatus']>(user?.sellerApprovalStatus ?? 'not_requested');
 
   React.useEffect(() => {
     setPoints(user ? String(user.rewardPoints ?? 0) : "0");
-    setSellerApproval(user?.sellerApprovalStatus ?? 'not_requested');
   }, [user]);
 
   if (!user) return null;
@@ -46,10 +43,7 @@ export default function UserDetailsDialog ({ user, open, onClose }: { user: User
   const handleSave = async () => {
     setSaving(true);
     try {
-      await Promise.all([
-        updateUserRewardPoints(user.id, Number(points || 0)),
-        updateUserSellerApproval(user.id, sellerApproval),
-      ]);
+      await updateUserRewardPoints(user.id, Number(points || 0));
       onClose();
     } finally {
       setSaving(false);
@@ -88,30 +82,18 @@ export default function UserDetailsDialog ({ user, open, onClose }: { user: User
                   <div className="mt-1">{user.contactNumber || '—'}</div>
                 </div>
                 <div>
-                  <Label>Gender</Label>
-                  <div className="mt-1">{(user as any).gender || '—'}</div>
-                </div>
-                <div>
-                  <Label>Birthdate</Label>
-                  <div className="mt-1">{formatDate(String((user as any).birthdate ?? '')) || '—'}</div>
-                </div>
-                <div>
-                  <Label>Role</Label>
-                  <div className="mt-1">{(user as any).role || 'user'}</div>
-                </div>
-                <div>
                   <Label>Created at</Label>
-                  <div className="mt-1">{formatDate(String((user as any).registrationDate ?? (user as any).createdAt ?? ''))}</div>
+                  <div className="mt-1">{formatDate(user.createdAt)}</div>
                 </div>
                 <div>
                   <Label>Last updated</Label>
-                  <div className="mt-1">{formatDate(String((user as any).lastActivity ?? (user as any).updatedAt ?? ''))}</div>
+                  <div className="mt-1">{formatDate((user as any).lastActivity ?? (user as any).updatedAt)}</div>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+              <CardContent className="pt-6">
                 <div>
                   <Label>Reward points</Label>
                   <Input
@@ -121,20 +103,6 @@ export default function UserDetailsDialog ({ user, open, onClose }: { user: User
                     value={points}
                     onChange={(e) => setPoints(e.target.value)}
                   />
-                </div>
-                <div>
-                  <Label>For seller approval</Label>
-                  <Select value={sellerApproval} onValueChange={(v) => setSellerApproval(v as User['sellerApprovalStatus'])}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Set status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="not_requested">Not requested</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="approved">Approved</SelectItem>
-                      <SelectItem value="rejected">Not approved</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </CardContent>
             </Card>
