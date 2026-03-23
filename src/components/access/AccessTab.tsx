@@ -1263,7 +1263,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 {Object.entries(currentUser.permissions || {})
                   .filter(([permission]) => {
                     // Hide these permissions for Admin role
-                    const hiddenAdminPermissions = ['profile', 'bookings', 'confirmation', 'inventory', 'seller-orders', 'add-product'];
+                    const hiddenAdminPermissions = ['profile', 'bookings', 'confirmation', 'inventory', 'seller-orders', 'add-product', 'chats'];
                     return !hiddenAdminPermissions.includes(permission);
                   })
                   .map(([permission, enabled]) => (
@@ -1415,7 +1415,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                         {Object.entries(user.permissions || {})
                           .filter(([permission, enabled]) => {
                             // Hide seller-specific permissions from admin display
-                            const hiddenPermissions = ['bookings', 'booking', 'inventory', 'seller-orders', 'add-product'];
+                            const hiddenPermissions = ['bookings', 'booking', 'inventory', 'seller-orders', 'add-product', 'chats'];
                             return enabled && !hiddenPermissions.includes(permission);
                           })
                           .map(([permission]) => (
@@ -1430,7 +1430,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                             </Badge>
                           ))}
                         {Object.entries(user.permissions || {}).filter(([permission, enabled]) => {
-                          const hiddenPermissions = ['bookings', 'booking', 'inventory', 'seller-orders', 'add-product'];
+                          const hiddenPermissions = ['bookings', 'booking', 'inventory', 'seller-orders', 'add-product', 'chats'];
                           return enabled && !hiddenPermissions.includes(permission);
                         }).length === 0 && (
                           <span className="text-xs text-gray-400 italic">No permissions</span>
@@ -2151,7 +2151,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 <h4 className="text-sm font-medium text-gray-900 mb-3">Access permissions</h4>
                 <div className="space-y-3 max-h-72 overflow-auto pr-1">
                   {Object.entries(editingUser.permissions || {})
-                    .filter(([permission]) => !['bookings', 'inventory', 'seller-orders', 'add-product', 'profile', 'confirmation'].includes(permission))
+                    .filter(([permission]) => !['bookings', 'inventory', 'seller-orders', 'add-product', 'profile', 'confirmation', 'chats'].includes(permission))
                     .map(([permission, enabled]) => (
                     <div key={permission} className="flex items-center justify-between">
                       <label className="text-sm text-gray-700 capitalize">{permission === 'seller-orders' ? 'orders' : permission === 'policies' ? 'terms & policies' : permission.replace('-', ' ')}</label>
