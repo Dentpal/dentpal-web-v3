@@ -4,6 +4,7 @@ import {initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import {getAuth, DecodedIdToken} from "firebase-admin/auth";
 import {defineString, defineSecret} from "firebase-functions/params";
+export * from "./testJRSShipping";
 import axios from "axios";
 
 // Initialize Firebase Admin
@@ -2623,6 +2624,126 @@ export const setUserAccountStatus = onRequest({
 
     let statusCode = 500;
     let errorMessage = error.message || "Failed to update user account status";
+
+    if (error.code === "auth/user-not-found") {
+      statusCode = 404;
+      errorMessage = "User not found in authentication system";
+    } else if (error.code === "auth/invalid-uid") {
+      statusCode = 400;
+      errorMessage = "Invalid user ID format";
+    }
+
+    res.status(statusCode).json({ 
+      success: false, 
+      error: errorMessage 
+    });
+  }
+});
+
+// ============================================
+// Manually Verify User Email
+// ============================================
+
+/**
+ * Manually verify a user's email address in Firebase Authentication
+ * Admin-only access required
+ * This is used when an admin needs to manually verify a user's email
+ */
+export const verifyUserEmail = onRequest({
+  cors: true,
+  region: "asia-southeast1",
+}, async (req, res) => {
+  // Add explicit CORS headers
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Max-Age', '86400');
+
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    // Verify authentication
+    let decodedToken: DecodedIdToken;
+    try {
+      decodedToken = await verifyAuthToken(req.headers.authorization);
+    } catch (authError: any) {
+      res.status(401).json({ 
+        error: "Authentication failed. Invalid or missing token." 
+      });
+      return;
+    }
+
+    // Verify admin access
+    try {
+      await verifyAdminAccess(decodedToken.uid, "manually verify user email");
+    } catch (adminError) {
+      if (adminError instanceof AdminAccessError) {
+        res.status(403).json({ error: adminError.message });
+        return;
+      }
+      throw adminError;
+    }
+
+    const { uid } = req.body;
+
+    if (!uid || typeof uid !== "string") {
+      res.status(400).json({ error: "Invalid user ID provided" });
+      return;
+    }
+
+    // Get the user to check their current email verification status
+    const userRecord = await auth.getUser(uid);
+    
+    if (userRecord.emailVerified) {
+      res.status(400).json({ 
+        error: "User's email is already verified",
+        emailVerified: true 
+      });
+      return;
+    }
+
+    // Update the user's emailVerified status in Firebase Authentication
+    await auth.updateUser(uid, { emailVerified: true });
+
+    // Also update the emailVerified field in Firestore User collection
+    const userRef = db.collection("User").doc(uid);
+    await userRef.update({ 
+      emailVerified: true,
+      emailVerifiedAt: FieldValue.serverTimestamp(),
+      emailVerifiedBy: decodedToken.uid,
+    });
+
+    logger.info("User email manually verified successfully", {
+      targetUid: uid,
+      verifiedBy: decodedToken.uid,
+      email: userRecord.email,
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: "User email verified successfully",
+      uid,
+      email: userRecord.email,
+      emailVerified: true,
+    });
+
+  } catch (error: any) {
+    logger.error("Error verifying user email", {
+      error: error.message,
+      code: error.code,
+    });
+
+    let statusCode = 500;
+    let errorMessage = error.message || "Failed to verify user email";
 
     if (error.code === "auth/user-not-found") {
       statusCode = 404;

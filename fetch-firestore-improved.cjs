@@ -133,7 +133,7 @@ async function main() {
         
         // Fetch documents
         const documents = [
-            { collection: 'Order', id: 'TdAonfSPNYj390eXN5bo', key: 'order' },
+            { collection: 'UserLookup', id: '1ruvuCzlBMT2vxbFXcvomcmUYwp2', key: 'userlookup' },
         ];
         
         for (const doc of documents) {

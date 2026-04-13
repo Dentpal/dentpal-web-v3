@@ -1,12 +1,27 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testCreateJRSShipping = exports.setUserAccountStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+exports.testCreateJRSShipping = exports.verifyUserEmail = exports.setUserAccountStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
 const auth_1 = require("firebase-admin/auth");
 const params_1 = require("firebase-functions/params");
+__exportStar(require("./testJRSShipping"), exports);
 const axios_1 = require("axios");
 // Initialize Firebase Admin
 (0, app_1.initializeApp)();
@@ -2183,6 +2198,112 @@ exports.setUserAccountStatus = (0, https_1.onRequest)({
         });
         let statusCode = 500;
         let errorMessage = error.message || "Failed to update user account status";
+        if (error.code === "auth/user-not-found") {
+            statusCode = 404;
+            errorMessage = "User not found in authentication system";
+        }
+        else if (error.code === "auth/invalid-uid") {
+            statusCode = 400;
+            errorMessage = "Invalid user ID format";
+        }
+        res.status(statusCode).json({
+            success: false,
+            error: errorMessage
+        });
+    }
+});
+// ============================================
+// Manually Verify User Email
+// ============================================
+/**
+ * Manually verify a user's email address in Firebase Authentication
+ * Admin-only access required
+ * This is used when an admin needs to manually verify a user's email
+ */
+exports.verifyUserEmail = (0, https_1.onRequest)({
+    cors: true,
+    region: "asia-southeast1",
+}, async (req, res) => {
+    // Add explicit CORS headers
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Max-Age', '86400');
+    // Handle preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+    }
+    try {
+        // Verify authentication
+        let decodedToken;
+        try {
+            decodedToken = await verifyAuthToken(req.headers.authorization);
+        }
+        catch (authError) {
+            res.status(401).json({
+                error: "Authentication failed. Invalid or missing token."
+            });
+            return;
+        }
+        // Verify admin access
+        try {
+            await verifyAdminAccess(decodedToken.uid, "manually verify user email");
+        }
+        catch (adminError) {
+            if (adminError instanceof AdminAccessError) {
+                res.status(403).json({ error: adminError.message });
+                return;
+            }
+            throw adminError;
+        }
+        const { uid } = req.body;
+        if (!uid || typeof uid !== "string") {
+            res.status(400).json({ error: "Invalid user ID provided" });
+            return;
+        }
+        // Get the user to check their current email verification status
+        const userRecord = await auth.getUser(uid);
+        if (userRecord.emailVerified) {
+            res.status(400).json({
+                error: "User's email is already verified",
+                emailVerified: true
+            });
+            return;
+        }
+        // Update the user's emailVerified status in Firebase Authentication
+        await auth.updateUser(uid, { emailVerified: true });
+        // Also update the emailVerified field in Firestore User collection
+        const userRef = db.collection("User").doc(uid);
+        await userRef.update({
+            emailVerified: true,
+            emailVerifiedAt: firestore_1.FieldValue.serverTimestamp(),
+            emailVerifiedBy: decodedToken.uid,
+        });
+        logger.info("User email manually verified successfully", {
+            targetUid: uid,
+            verifiedBy: decodedToken.uid,
+            email: userRecord.email,
+        });
+        res.status(200).json({
+            success: true,
+            message: "User email verified successfully",
+            uid,
+            email: userRecord.email,
+            emailVerified: true,
+        });
+    }
+    catch (error) {
+        logger.error("Error verifying user email", {
+            error: error.message,
+            code: error.code,
+        });
+        let statusCode = 500;
+        let errorMessage = error.message || "Failed to verify user email";
         if (error.code === "auth/user-not-found") {
             statusCode = 404;
             errorMessage = "User not found in authentication system";

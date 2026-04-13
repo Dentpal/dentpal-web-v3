@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { User } from "./types";
 import { StatusBadge } from "./badges";
-import { Pencil, Eye, Trash2, Calendar, Phone, User as UserIcon, Lock, Unlock } from "lucide-react";
+import { Pencil, Eye, Trash2, Calendar, Phone, User as UserIcon, Lock, Unlock, MailCheck } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { db } from '@/lib/firebase';
@@ -34,6 +34,7 @@ export default function UserTable({
   onDelete,
   onChangeSellerApproval,
   onToggleStatus,
+  onVerifyEmail,
 }: {
   users: User[];
   selected: string[];
@@ -44,6 +45,7 @@ export default function UserTable({
   onDelete: (id: string) => void;
   onChangeSellerApproval: (id: string, status: User["sellerApprovalStatus"]) => void;
   onToggleStatus: (id: string, currentStatus: User['status']) => void;
+  onVerifyEmail: (id: string, email: string) => void;
 }) {
   // VIEW MODAL STATE
   const [viewUserId, setViewUserId] = useState<string | null>(null);
@@ -202,6 +204,22 @@ export default function UserTable({
                         <TooltipContent>{u.status === 'active' ? 'Disable Account' : 'Enable Account'}</TooltipContent>
                       </Tooltip>
                     )}
+                    
+                    {/* Verify Email Button */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          aria-label="Verify Email"
+                          onClick={() => onVerifyEmail(u.id, u.email)}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          <MailCheck className="w-4 h-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Verify Email</TooltipContent>
+                    </Tooltip>
                     
                     <Tooltip>
                       <TooltipTrigger asChild>

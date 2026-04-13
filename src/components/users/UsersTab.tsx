@@ -6,7 +6,7 @@ import UserDetailsDialog from "./UserDetailsDialog";
 import ResetPointsDialog from "./ResetPointsDialog";
 import { User, Filters } from "./types";
 import { useUserRealtime } from "@/hooks/useUser";
-import { updateUserSellerApproval, deleteUser, updateUserStatus } from "@/services/userService";
+import { updateUserSellerApproval, deleteUser, updateUserStatus, verifyUserEmail } from "@/services/userService";
 import { getProvinces as getPhProvinces } from '@/lib/phLocations';
 import { Button } from "@/components/ui/button";
 import { Download, FileText, FileSpreadsheet } from "lucide-react";
@@ -106,6 +106,23 @@ export default function UsersTab() {
       setSelected(prev => prev.filter(sid => sid !== id));
     } catch (e) {
       console.error('Failed to delete user', e);
+    }
+  };
+
+  const handleVerifyEmail = async (id: string, email: string) => {
+    try {
+      await verifyUserEmail(id);
+      toast({ 
+        title: 'Email verified', 
+        description: `Email address for ${email} has been manually verified successfully.`,
+      });
+    } catch (e) {
+      console.error('Failed to verify user email', e);
+      toast({ 
+        title: 'Failed to verify email', 
+        description: e instanceof Error ? e.message : 'Please try again.', 
+        variant: 'destructive' 
+      });
     }
   };
 
@@ -388,6 +405,7 @@ export default function UsersTab() {
         onDelete={handleDeleteUser}
         onChangeSellerApproval={handleChangeSellerApproval}
         onToggleStatus={handleToggleUserStatus}
+        onVerifyEmail={handleVerifyEmail}
       />
       <UserDetailsDialog user={selectedUser} open={!!selectedUser} onClose={()=>setSelectedUser(null)} />
       <ResetPointsDialog open={isResetOpen} label={selected.length ? `${selected.length} users` : 'user'} onCancel={()=>setResetOpen(false)} onConfirm={handleConfirmReset} />

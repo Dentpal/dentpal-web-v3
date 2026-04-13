@@ -328,6 +328,41 @@ export async function updateUserSellerApproval(userId: string, status: User['sel
   await updateDoc(ref, { sellerApprovalStatus: status });
 }
 
+/**
+ * Manually verify a user's email address in Firebase Authentication
+ * This calls the Firebase Cloud Function that uses Admin SDK
+ * @param uid - The user's Firebase Auth UID
+ */
+export async function verifyUserEmail(uid: string): Promise<{ success: boolean; email?: string }> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('No authenticated user. Please log in.');
+  }
+
+  const idToken = await currentUser.getIdToken();
+  
+  // Get the Firebase Functions URL from environment or use default
+  const functionsBaseUrl = import.meta.env.VITE_FIREBASE_FUNCTIONS_URL || 
+    `https://asia-southeast1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net`;
+  
+  const response = await fetch(`${functionsBaseUrl}/verifyUserEmail`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ uid }),
+  });
+
+  const data = await response.json();
+  
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to verify user email');
+  }
+  
+  return data;
+}
+
 export async function deleteUser(userId: string) {
   const ref = doc(db, USERS_COLLECTION, userId);
   await deleteDoc(ref);

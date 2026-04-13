@@ -257,7 +257,7 @@ function buildJRSRequest(testOrder: TestOrder, index: number): JRSShippingReques
   return {
     requestType: "shipfromecom",
     apiShippingRequest: {
-      express: true,
+      express: false,
       insurance: true,
       valuation: true,
       ...(resolvedProductName ? {productName: resolvedProductName} : {}),
@@ -483,6 +483,121 @@ export const testCreateJRSShipping = onRequest({
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
     });
+    res.status(500).json({
+      error: "Internal server error",
+      message: error instanceof Error ? error.message : "Unknown error",
+      testMode: true,
+    });
+  }
+});
+
+
+
+const JRS_TEST_GETRATE_URL = "https://jrs-express.azure-api.net/qa-online-shipping-getrate/ShippingRequestFunction";
+
+export const testJRSShippingExpress = onRequest({
+  cors: true,
+  region: "asia-southeast1",
+  timeoutSeconds: 120,
+  secrets: [JRS_TEST_API_KEY],
+}, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Max-Age", "86400");
+
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
+
+  try {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    // 1-pounder test item
+    const shipmentItem = {
+      declaredValue: 850,
+      length: 30,
+      width: 25,
+      height: 5,
+      weight: 400,
+    };
+
+    // Shared addresses (simplified for getrate)
+    const shipperAddressLine1 = "Makati City, Metro Manila";
+    const recipientAddressLine1 = "Quezon City, Metro Manila";
+
+    // Prepare both requests
+    const requests = [
+      {
+        label: "Express TRUE",
+        apiShippingRequest: {
+          express: true,
+          insurance: true,
+          valuation: true,
+          codAmountToCollect: 0,
+          shipperAddressLine1,
+          recipientAddressLine1,
+          shipmentItems: [shipmentItem],
+        },
+      },
+      {
+        label: "Express FALSE",
+        apiShippingRequest: {
+          express: false,
+          insurance: true,
+          valuation: true,
+          codAmountToCollect: 0,
+          shipperAddressLine1,
+          recipientAddressLine1,
+          shipmentItems: [shipmentItem],
+        },
+      },
+    ];
+
+    // Send both requests in parallel
+    const results = await Promise.all(
+      requests.map(async (reqObj) => {
+        try {
+          const response = await axios.post(
+            JRS_TEST_GETRATE_URL,
+            {
+              requestType: "getrate",
+              apiShippingRequest: reqObj.apiShippingRequest,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                "Ocp-Apim-Subscription-Key": JRS_TEST_API_KEY.value(),
+              },
+              timeout: 30000,
+            }
+          );
+          return {
+            label: reqObj.label,
+            status: "SUCCESS",
+            response: response.data,
+          };
+        } catch (error: any) {
+          return {
+            label: reqObj.label,
+            status: "ERROR",
+            error: error.response?.data || error.message,
+          };
+        }
+      })
+    );
+
+    res.status(200).json({
+      testMode: true,
+      note: "JRS getrate API express flag test with 1-pounder item.",
+      results,
+    });
+  } catch (error) {
     res.status(500).json({
       error: "Internal server error",
       message: error instanceof Error ? error.message : "Unknown error",
