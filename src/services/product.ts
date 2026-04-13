@@ -25,6 +25,8 @@ export type CreateProductInput = {
   warrantyPolicy?: string;
   // New: inquiry flag
   allowInquiry?: boolean;
+  // Brand image URL
+  brandImage?: string | null;
 };
 
 const PRODUCT_COLLECTION = 'Product';
@@ -172,6 +174,8 @@ export const ProductService = {
       warrantyPolicy: input.warrantyPolicy ?? '',
       // Persist inquiry flag
       allowInquiry: input.allowInquiry ?? false,
+      // Brand image
+      brandImage: input.brandImage ?? null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     } as const;

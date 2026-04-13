@@ -27,6 +27,7 @@ import InventoryTab from '@/components/inventory/InventoryTab';
 import ProductQCTab from '@/components/admin/ProductQCTab';
 import PoliciesTab from '@/components/policies/PoliciesTab';
 import ChatsTab from '@/components/chats/ChatsTab';
+import VoucherTab from '@/components/vouchers/VoucherTab';
 import { ItemsTab, ItemsAll, ItemsList } from '@/components/items';
 import AddItem from '@/components/items/AddItem';
 import ItemsView from '@/components/items/ItemsView';
@@ -548,6 +549,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     'categories': 'categories',
     chats: 'chats',
     policies: 'policies',
+    vouchers: 'dashboard',
   } as any;
 
   const isAllowed = (itemId: string) => {
@@ -575,6 +577,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         "product-qc",
         "confirmation",
         "withdrawal",
+        "vouchers",
         "access",
         "images",
         "users",
@@ -4085,10 +4088,14 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
             onTabChange={handleTabChange}
           />
         );
+      case "vouchers":
+        if (!isAllowed("vouchers")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
+        if (isAdmin) return <div className="p-6 bg-white rounded-xl border">Seller-only feature</div>;
+        return <VoucherTab />;
       case "access":
         if (!isAllowed("access")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return (
-          <AccessTab 
+          <AccessTab
             loading={loading}
             error={error}
             setError={setError}
@@ -4174,6 +4181,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         return "Profile";
       case "confirmation": return "Confirmation";
       case "withdrawal": return "Withdrawal";
+      case "vouchers": return "Vouchers";
       case "access": return "Access";
       case 'seller-orders': return 'Orders';
       case 'reports': return 'Reports'; 
@@ -4222,6 +4230,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         return "Review and confirm patient appointments";
       case "withdrawal":
         return "Manage payment withdrawals and financial transactions";
+      case "vouchers":
+        return "Create and manage discount vouchers for your products";
       case "access":
         return "Control user access and system permissions";
       case "sub-accounts":

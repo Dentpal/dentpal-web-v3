@@ -25,7 +25,8 @@ import {
   ClipboardList,
   Edit,
   Plus,
-  List
+  List,
+  Ticket
 } from "lucide-react";
 import dentalLogo from "@/assets/dentpal_logo.png";
 import { useAuth } from "@/hooks/use-auth";
@@ -70,6 +71,7 @@ const menuItems: MenuItem[] = [
   { id: "categories", label: "Categories", icon: FolderTree },
   { id: "confirmation", label: "Confirmation", icon: CheckCircle },
   { id: "withdrawal", label: "Withdrawal", icon: CreditCard },
+  { id: "vouchers", label: "Vouchers", icon: Ticket },
   { id: "sub-accounts", label: "Sub Account", icon: Users },
   { id: "access", label: "Access", icon: Key },
   { id: "images", label: "Images", icon: Images },
@@ -132,6 +134,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     images: "images",
     users: "users",
     notifications: 'notifications',
+    vouchers: 'dashboard',
     policies: "policies",
     chats: 'chats',
   };
@@ -175,7 +178,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
           if (item.id === 'chats' && isAdmin) return false; // Hide chats for admin
           if (item.id === 'confirmation' && isAdmin) return false; // Hide confirmation for admin
           if (item.id === 'reports' && isAdmin) return false; // Hide reports for admin
-          if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts'].includes(item.id)) return false;
+          if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts','vouchers'].includes(item.id)) return false;
           const key = permissionByMenuId[item.id];
 
           if (isSubAccount) {
@@ -201,7 +204,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         }
 
         if (isSeller && !isAdmin) {
-          const sellerOrder = ['dashboard', 'seller-orders', 'reports', 'withdrawal', 'inventory', 'inventory-control', 'items', 'chats', 'sub-accounts', 'profile'];
+          const sellerOrder = ['dashboard', 'seller-orders', 'reports', 'withdrawal', 'vouchers', 'inventory', 'inventory-control', 'items', 'chats', 'sub-accounts', 'profile'];
           const map = new Map(permitted.map((i) => [i.id, i] as const));
           const ordered = sellerOrder.map((id) => map.get(id)).filter(Boolean) as typeof permitted;
           return ordered;

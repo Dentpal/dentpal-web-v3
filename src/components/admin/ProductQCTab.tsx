@@ -18,6 +18,19 @@ interface Row {
 
 const currency = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 2 });
 
+// Helper to parse price that might be a string with commas
+const parsePrice = (value: any): number | undefined => {
+  if (value == null) return undefined;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string') {
+    // Remove commas and parse
+    const cleaned = value.replace(/,/g, '');
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : undefined;
+  }
+  return undefined;
+};
+
 const ProductQCTab: React.FC = () => {
   const [tab, setTab] = useState<'pending' | 'approved' | 'violation'>('pending');
   const [rows, setRows] = useState<Row[]>([]);
@@ -133,14 +146,24 @@ const ProductQCTab: React.FC = () => {
           if (!detail) { updatesPrice[r.id] = undefined; updatesStock[r.id] = undefined; return; }
           const p: any = detail.product;
           const vars: any[] = Array.isArray(detail.variations) ? detail.variations : [];
+          
+          console.log(`[QC Price Debug] Product: ${r.name}, ID: ${r.id}`);
+          console.log(`[QC Price Debug] Variations:`, vars.map(v => ({ name: v.name, price: v.price, priceType: typeof v.price })));
+          
           // price: prefer product.lowestPrice, else min variation price
-          const varPrices = vars.map(v => Number(v.price ?? 0)).filter(n => Number.isFinite(n) && n > 0);
+          const varPrices = vars.map(v => parsePrice(v.price)).filter((n): n is number => n != null && n > 0);
+          console.log(`[QC Price Debug] Parsed variation prices:`, varPrices);
+          
           const minVar = varPrices.length ? Math.min(...varPrices) : undefined;
-          const price = p?.lowestPrice != null ? Number(p.lowestPrice) : (p?.price != null ? Number(p.price) : minVar);
+          const price = parsePrice(p?.lowestPrice) ?? parsePrice(p?.price) ?? minVar;
+          
+          console.log(`[QC Price Debug] Final price:`, price, `(lowestPrice: ${p?.lowestPrice}, product.price: ${p?.price}, minVar: ${minVar})`);
+          
           const totalStock = vars.reduce((s, v) => s + (Number(v.stock ?? 0) || 0), 0);
           updatesPrice[r.id] = price;
           updatesStock[r.id] = totalStock;
-        } catch {
+        } catch (err) {
+          console.error(`[QC Price Debug] Error loading price for ${r.id}:`, err);
           updatesPrice[r.id] = undefined;
           updatesStock[r.id] = undefined;
         }
@@ -333,6 +356,30 @@ const ProductQCTab: React.FC = () => {
             </div>
 
             <div className="p-6 space-y-6">
+              {/* Brand Section */}
+              {previewDetail?.product && (
+                <div className="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Brand</h3>
+                  <div className="flex items-center gap-5">
+                    {previewDetail.product.brandImage ? (
+                      <img
+                        src={previewDetail.product.brandImage}
+                        alt="Brand"
+                        className="w-20 h-20 rounded-xl object-contain border border-gray-200 bg-gray-50 p-1 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center text-gray-400 text-xs text-center">
+                        No Brand Image
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-xs text-gray-400 uppercase tracking-wide mb-1">Brand Name</div>
+                      <div className="text-lg font-bold text-gray-900">{previewDetail.product.brand || '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Basic Information Section */}
               <div className="bg-gradient-to-br from-teal-50 to-blue-50 rounded-xl p-5 border border-teal-100">
                 <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
@@ -355,13 +402,9 @@ const ProductQCTab: React.FC = () => {
                   </div>
                   <div className="md:col-span-2 space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-white rounded-lg p-4 shadow-sm">
+                      <div className="bg-white rounded-lg p-4 shadow-sm col-span-2">
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Product Name</div>
                         <div className="text-sm font-semibold text-gray-900">{preview.name}</div>
-                      </div>
-                      <div className="bg-white rounded-lg p-4 shadow-sm">
-                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Brand</div>
-                        <div className="text-sm font-semibold text-gray-900">{previewDetail?.product?.brand || '—'}</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">

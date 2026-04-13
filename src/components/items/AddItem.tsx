@@ -46,6 +46,9 @@ const toCm = (val: any, unit: string) => {
 // Factory function for initial form state
 const getInitialFormState = () => ({
   brand: '',
+  brandImageFile: null as File | null,
+  brandImageURL: '',
+  brandImagePreview: null as string | null,
   name: '',
   description: '',
   categoryID: '',
@@ -89,9 +92,12 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const effectiveSellerId = isSeller ? (isSubAccount ? (parentId || uid) : uid) : null;
 
   const productImageInputRef = useRef<HTMLInputElement>(null);
+  const brandImageInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [form, setForm] = useState(getInitialFormState());
+
+  const isEquipmentCategory = categoriesList.find(c => c.id === form.categoryID)?.name === 'Equipments';
 
   // Load categories
   useEffect(() => {
@@ -137,7 +143,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                       toast({ title: 'Error', description: `Variation ${i + 1} image is required`, variant: 'destructive' });
                       return;
                     }
-                    if (!variation.price || isNaN(Number(variation.price)) || Number(variation.price) <= 0) {
+                    if (!isEquipmentCategory && (!variation.price || isNaN(Number(variation.price)) || Number(variation.price) <= 0)) {
                       toast({ title: 'Error', description: `Variation ${i + 1} price is required`, variant: 'destructive' });
                       return;
                     }
@@ -167,6 +173,11 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
 
     if (!form.brand.trim()) {
       toast({ title: 'Error', description: 'Brand is required', variant: 'destructive' });
+      return;
+    }
+
+    if (!form.brandImageFile && !form.brandImageURL) {
+      toast({ title: 'Error', description: 'Brand image is required', variant: 'destructive' });
       return;
     }
 
@@ -208,10 +219,19 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         imageURL = await getDownloadURL(imgRef);
       }
 
+      // Upload brand image if provided
+      let brandImageURL = form.brandImageURL;
+      if (form.brandImageFile) {
+        const brandImgRef = storageRef(storage, `products/${effectiveSellerId}/brand/${Date.now()}_${form.brandImageFile.name}`);
+        await uploadBytes(brandImgRef, form.brandImageFile);
+        brandImageURL = await getDownloadURL(brandImgRef);
+      }
+
       // Create product - Always set to pending_qc for admin approval
       const productData = {
         sellerId: effectiveSellerId,
         brand: form.brand,
+        brandImage: brandImageURL || null,
         name: form.name,
         description: form.description,
         categoryID: form.categoryID,
@@ -314,10 +334,19 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         imageURL = await getDownloadURL(imgRef);
       }
 
+      // Upload brand image if provided
+      let brandImageURLDraft = form.brandImageURL;
+      if (form.brandImageFile) {
+        const brandImgRef = storageRef(storage, `products/${effectiveSellerId}/brand/${Date.now()}_${form.brandImageFile.name}`);
+        await uploadBytes(brandImgRef, form.brandImageFile);
+        brandImageURLDraft = await getDownloadURL(brandImgRef);
+      }
+
       // Create product as draft - no validation required
       const productData = {
         sellerId: effectiveSellerId,
         brand: form.brand || '',
+        brandImage: brandImageURLDraft || null,
         name: form.name || 'Untitled Product',
         description: form.description || '',
         categoryID: form.categoryID || '',
@@ -430,15 +459,6 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                   <Package className="w-5 h-5 text-teal-600" />
                   Basic Information
                 </h3>
-                <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
-                  <input
-                    type="checkbox"
-                    checked={form.allowInquiry}
-                    onChange={(e) => setForm({...form, allowInquiry: e.target.checked})}
-                    className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Allow Inquiry</span>
-                </label>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -451,6 +471,37 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   placeholder="Enter your brand name"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Brand Image <span className="text-red-500">*</span></label>
+                <div className="flex items-center gap-4">
+                  {(form.brandImagePreview || form.brandImageURL) && (
+                    <img
+                      src={form.brandImagePreview || form.brandImageURL}
+                      alt="Brand"
+                      className="w-16 h-16 rounded-lg object-cover border-2 border-gray-200"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => brandImageInputRef.current?.click()}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
+                  >
+                    {form.brandImageURL || form.brandImagePreview ? 'Change Image' : 'Upload Brand Image'}
+                  </button>
+                  <input
+                    ref={brandImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const preview = URL.createObjectURL(file);
+                      setForm({...form, brandImageFile: file, brandImagePreview: preview});
+                    }}
+                  />
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Product Name <span className="text-red-500">*</span></label>
@@ -507,7 +558,9 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 <select
                   value={form.categoryID}
                   onChange={(e) => {
-                    setForm({...form, categoryID: e.target.value, subCategoryID: ''});
+                    const selectedCat = categoriesList.find(c => c.id === e.target.value);
+                    const isEquip = selectedCat?.name === 'Equipments';
+                    setForm({...form, categoryID: e.target.value, subCategoryID: '', allowInquiry: isEquip});
                   }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 >
@@ -684,29 +737,31 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                         />
                       </div>
 
-                      {/* Price */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Price (₱) <span className="text-red-500">*</span>
-                          <span className="ml-2 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold align-middle">include VAT</span>
-                        </label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          pattern="[0-9.]*"
-                          value={variation.price}
-                          onChange={(e) => {
-                            let val = e.target.value.replace(/[^0-9.]/g, '');
-                            const parts = val.split('.');
-                            if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                            const updatedVariations = [...form.variations];
-                            updatedVariations[index] = { ...variation, price: val ? parseFloat(val) : 0 };
-                            setForm({ ...form, variations: updatedVariations });
-                          }}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="0.00"
-                        />
-                      </div>
+                      {/* Price — hidden for Equipment category */}
+                      {!isEquipmentCategory && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Price (₱) <span className="text-red-500">*</span>
+                            <span className="ml-2 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold align-middle">include VAT</span>
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9.]*"
+                            value={variation.price}
+                            onChange={(e) => {
+                              let val = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = val.split('.');
+                              if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+                              const updatedVariations = [...form.variations];
+                              updatedVariations[index] = { ...variation, price: val ? parseFloat(val) : 0 };
+                              setForm({ ...form, variations: updatedVariations });
+                            }}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      )}
 
                       {/* Pcs per Box */}
                       <div>

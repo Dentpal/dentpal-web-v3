@@ -514,7 +514,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       warrantyPolicy: product.warrantyPolicy || '',
       promoStart: product.promoStart || null,
       promoEnd: product.promoEnd || null,
-      allowInquiry: product.allowInquiry || false,
+      allowInquiry: categoryMap[product.category || ''] === 'Equipments',
       variations: variations,
     });
 
@@ -583,7 +583,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         warrantyType: editForm.warrantyType || null,
         warrantyDuration: editForm.warrantyDuration || null,
         warrantyPolicy: editForm.warrantyPolicy || '',
-        allowInquiry: editForm.allowInquiry,
+        allowInquiry: categoryMap[editForm.categoryID] === 'Equipments',
       } as any);
 
       // Update pricing
@@ -1063,17 +1063,19 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   Basic Information
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="md:col-span-2 flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={editForm.allowInquiry}
-                        onChange={(e) => setEditForm({...editForm, allowInquiry: e.target.checked})}
-                        className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
-                      />
-                      Allow Inquiry
-                    </label>
-                  </div>
+                  {categoryMap[editForm.categoryID] === 'Equipments' && (
+                    <div className="md:col-span-2 flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editForm.allowInquiry}
+                          onChange={(e) => setEditForm({...editForm, allowInquiry: e.target.checked})}
+                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                        />
+                        Allow Inquiry
+                      </label>
+                    </div>
+                  )}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Brand *</label>
                     <input
