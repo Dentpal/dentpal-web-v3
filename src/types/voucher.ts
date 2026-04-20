@@ -9,6 +9,7 @@ export interface Voucher {
   code: string;
   discountType: DiscountType;
   discountValue: number;       // 0 for free_delivery
+  maximumSpend?: number;       // only for percentage discounts
   minimumOrderAmount: number;
   maxUses: number;             // 0 = unlimited
   usedCount: number;
@@ -19,6 +20,8 @@ export interface Voucher {
   productIds?: string[];       // only when scope === 'specific'
   createdAt: string;
   updatedAt: string;
+  createdBy?: string;        // email of the user who created the voucher
+  createdByName?: string;    // display name of the creator
 }
 
 export interface CreateVoucherInput {
@@ -26,6 +29,7 @@ export interface CreateVoucherInput {
   code: string;
   discountType: DiscountType;
   discountValue: number;
+  maximumSpend?: number;
   minimumOrderAmount: number;
   maxUses: number;
   startDate: string;

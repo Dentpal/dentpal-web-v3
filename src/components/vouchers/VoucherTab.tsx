@@ -25,7 +25,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { DateRangePicker } from '@/components/ui/DateRangePicker';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -82,7 +81,8 @@ const discountTypeIcon = (t: DiscountType) => {
 };
 
 const VoucherTab = () => {
-  const { uid, isSubAccount } = useAuth();
+  const { uid, isSubAccount, parentId } = useAuth();
+  const sellerId = (isSubAccount && parentId) ? parentId : uid;
 
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,28 +116,25 @@ const VoucherTab = () => {
   const [formCode, setFormCode] = useState('');
   const [formDiscountType, setFormDiscountType] = useState<DiscountType>('percentage');
   const [formDiscountValue, setFormDiscountValue] = useState('');
+  const [formMaximumSpend, setFormMaximumSpend] = useState('');
   const [formMinOrder, setFormMinOrder] = useState('');
   const [formMaxUses, setFormMaxUses] = useState('');
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formScope, setFormScope] = useState<VoucherScope>('all');
 
-  if (isSubAccount) {
-    return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
-  }
-
   const fetchVouchers = useCallback(async () => {
-    if (!uid) return;
+    if (!sellerId) return;
     setLoading(true);
     try {
-      const data = await getSellerVouchers(uid);
+      const data = await getSellerVouchers(sellerId);
       setVouchers(data);
     } catch {
       setError('Failed to load vouchers');
     } finally {
       setLoading(false);
     }
-  }, [uid]);
+  }, [sellerId]);
 
   useEffect(() => {
     fetchVouchers();
@@ -233,6 +230,7 @@ const VoucherTab = () => {
     setFormCode('');
     setFormDiscountType('percentage');
     setFormDiscountValue('');
+    setFormMaximumSpend('');
     setFormMinOrder('');
     setFormMaxUses('');
     setFormStartDate('');
@@ -253,6 +251,7 @@ const VoucherTab = () => {
     setFormCode(v.code);
     setFormDiscountType(v.discountType);
     setFormDiscountValue(v.discountType === 'free_delivery' ? '0' : String(v.discountValue));
+    setFormMaximumSpend(v.maximumSpend ? String(v.maximumSpend) : '');
     setFormMinOrder(String(v.minimumOrderAmount));
     setFormMaxUses(String(v.maxUses));
     setFormStartDate(v.startDate.slice(0, 10));
@@ -263,7 +262,7 @@ const VoucherTab = () => {
   };
 
   const handleSave = async () => {
-    if (!uid) return;
+    if (!sellerId) return;
     setError(null);
 
     const name = formName.trim();
@@ -280,6 +279,12 @@ const VoucherTab = () => {
       if (formDiscountType === 'percentage' && discountValue > 100) { setError('Percentage cannot exceed 100'); return; }
     }
 
+    let maximumSpend: number | undefined;
+    if (formDiscountType === 'percentage' && formMaximumSpend) {
+      maximumSpend = parseFloat(formMaximumSpend);
+      if (isNaN(maximumSpend) || maximumSpend <= 0) { setError('Maximum spend must be greater than 0'); return; }
+    }
+
     const minimumOrderAmount = parseFloat(formMinOrder) || 0;
     const maxUses = parseInt(formMaxUses) || 0;
 
@@ -292,6 +297,7 @@ const VoucherTab = () => {
       code,
       discountType: formDiscountType,
       discountValue,
+      ...(maximumSpend !== undefined ? { maximumSpend } : {}),
       minimumOrderAmount,
       maxUses,
       startDate: new Date(formStartDate).toISOString(),
@@ -301,9 +307,9 @@ const VoucherTab = () => {
 
     let result;
     if (editingVoucher) {
-      result = await updateVoucher(uid, editingVoucher.id, input);
+      result = await updateVoucher(sellerId, editingVoucher.id, input);
     } else {
-      result = await createVoucher(uid, input);
+      result = await createVoucher(sellerId, input);
     }
 
     setSaving(false);
@@ -317,21 +323,21 @@ const VoucherTab = () => {
   };
 
   const handleEndEarly = async (v: Voucher) => {
-    if (!uid) return;
-    await updateVoucher(uid, v.id, { status: 'inactive' });
+    if (!sellerId) return;
+    await updateVoucher(sellerId, v.id, { status: 'inactive' });
     fetchVouchers();
   };
 
   const handleClone = async (v: Voucher) => {
-    if (!uid) return;
-    const result = await cloneVoucher(uid, v);
+    if (!sellerId) return;
+    const result = await cloneVoucher(sellerId, v);
     if (result.success) fetchVouchers();
     else setError(result.error || 'Failed to clone voucher');
   };
 
   const handleDelete = async (id: string) => {
-    if (!uid) return;
-    await deleteVoucher(uid, id);
+    if (!sellerId) return;
+    await deleteVoucher(sellerId, id);
     setConfirmDeleteId(null);
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -342,27 +348,27 @@ const VoucherTab = () => {
   };
 
   const handleBulkEnd = async () => {
-    if (!uid || selectedIds.size === 0) return;
+    if (!sellerId || selectedIds.size === 0) return;
     setBulkLoading(true);
-    await bulkEndVouchers(uid, Array.from(selectedIds));
+    await bulkEndVouchers(sellerId, Array.from(selectedIds));
     setSelectedIds(new Set());
     setBulkLoading(false);
     fetchVouchers();
   };
 
   const handleBulkDelete = async () => {
-    if (!uid || selectedIds.size === 0) return;
+    if (!sellerId || selectedIds.size === 0) return;
     setBulkLoading(true);
-    await bulkDeleteVouchers(uid, Array.from(selectedIds));
+    await bulkDeleteVouchers(sellerId, Array.from(selectedIds));
     setSelectedIds(new Set());
     setBulkLoading(false);
     fetchVouchers();
   };
 
   const handleBulkExtend = async () => {
-    if (!uid || selectedIds.size === 0 || !bulkExtendDate) return;
+    if (!sellerId || selectedIds.size === 0 || !bulkExtendDate) return;
     setBulkLoading(true);
-    await bulkExtendExpiry(uid, Array.from(selectedIds), new Date(bulkExtendDate).toISOString());
+    await bulkExtendExpiry(sellerId, Array.from(selectedIds), new Date(bulkExtendDate).toISOString());
     setSelectedIds(new Set());
     setBulkLoading(false);
     setShowBulkExtendModal(false);
@@ -764,6 +770,21 @@ const VoucherTab = () => {
               )}
             </div>
 
+            {/* Maximum Spend (only for percentage discount) */}
+            {formDiscountType === 'percentage' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Maximum Spend (₱)</label>
+                <input
+                  type="number"
+                  value={formMaximumSpend}
+                  onChange={(e) => setFormMaximumSpend(e.target.value)}
+                  placeholder="e.g. 500 (optional)"
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+            )}
+
             {/* Min Spend & Max Uses */}
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -790,38 +811,26 @@ const VoucherTab = () => {
               </div>
             </div>
 
-            {/* Validity Period */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Validity Period</label>
-              <DateRangePicker
-                value={{
-                  start: formStartDate ? new Date(formStartDate + 'T00:00:00') : null,
-                  end: formEndDate ? new Date(formEndDate + 'T00:00:00') : null,
-                }}
-                onChange={(range) => {
-                  setFormStartDate(range.start ? range.start.toISOString().slice(0, 10) : '');
-                  setFormEndDate(range.end ? range.end.toISOString().slice(0, 10) : '');
-                }}
-                label="Select start and end date"
-              />
-            </div>
-
-            {/* Scope */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Applies To</label>
-              <select
-                value={formScope}
-                onChange={(e) => setFormScope(e.target.value as VoucherScope)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                <option value="all">All Products</option>
-                <option value="specific">Specific Products</option>
-              </select>
-              {formScope === 'specific' && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Product-specific vouchers can be configured after creation.
-                </p>
-              )}
+            {/* Validity Period - Start & End Date */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={formStartDate}
+                  onChange={(e) => setFormStartDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={formEndDate}
+                  onChange={(e) => setFormEndDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
             </div>
           </div>
 
@@ -898,6 +907,9 @@ const VoucherTab = () => {
               <div className="text-xs text-gray-400">
                 Created {formatDate(detailVoucher.createdAt)}
                 {detailVoucher.updatedAt !== detailVoucher.createdAt && ` · Updated ${formatDate(detailVoucher.updatedAt)}`}
+                {(detailVoucher.createdByName || detailVoucher.createdBy) && (
+                  <> · Added by <span className="text-gray-500 font-medium">{detailVoucher.createdByName || detailVoucher.createdBy}</span></>
+                )}
               </div>
 
               <div className="flex gap-2 pt-2">

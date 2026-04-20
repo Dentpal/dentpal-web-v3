@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { ProductService } from '@/services/product';
 import CategoryService from '@/services/category';
-import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Archive, RotateCcw, MessageCircle } from 'lucide-react';
+import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Archive, RotateCcw, MessageCircle, Send } from 'lucide-react';
 import { storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs } from 'firebase/firestore';
@@ -95,6 +95,9 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     imageURL: string;
     imageFile?: File | null;
     imagePreview?: string | null;
+    brandImageURL: string;
+    brandImageFile?: File | null;
+    brandImagePreview?: string | null;
     status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'archive';
     dangerousGoods: 'none' | 'dangerous';
     warrantyType: string;
@@ -124,6 +127,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   } | null>(null);
   const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string }>>([]);
   const editImageInputRef = useRef<HTMLInputElement | null>(null);
+  const editBrandImageInputRef = useRef<HTMLInputElement | null>(null);
   const variationImageInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const currentSubcategoryUnsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -382,6 +386,19 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     }
   };
 
+  // Submit draft for QC review
+  const handleSubmitDraft = async (productId: string) => {
+    try {
+      setItems(prev => prev.map(i => i.id === productId ? ({ ...i, status: 'pending_qc' }) : i));
+      await ProductService.updateProduct(productId, { status: 'pending_qc' });
+      toast({ title: 'Success', description: 'Product submitted for review' });
+    } catch (error) {
+      console.error('Failed to submit draft:', error);
+      setItems(prev => prev.map(i => i.id === productId ? ({ ...i, status: 'draft' }) : i));
+      toast({ title: 'Error', description: 'Failed to submit product', variant: 'destructive' });
+    }
+  };
+
   // Delete handler
   const handleDeleteProduct = async () => {
     try {
@@ -507,6 +524,9 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       imageURL: product.imageUrl || '',
       imageFile: null,
       imagePreview: null,
+      brandImageURL: product.brandImage || '',
+      brandImageFile: null,
+      brandImagePreview: null,
       status: product.status || 'active',
       dangerousGoods: product.dangerousGoods || 'none',
       warrantyType: product.warrantyType || '',
@@ -559,6 +579,14 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         imageUrl = await getDownloadURL(sRef);
       }
 
+      let brandImageUrl = editForm.brandImageURL;
+      if (editForm.brandImageFile) {
+        const timestamp = Date.now();
+        const bRef = storageRef(storage, `products/${editingItem}/brand/${timestamp}_${editForm.brandImageFile.name}`);
+        await uploadBytes(bRef, editForm.brandImageFile);
+        brandImageUrl = await getDownloadURL(bRef);
+      }
+
       // If product is in violation, change status to pending_qc when saving
       // If product is archived, change status to inactive when saving
       const currentItem = items.find(item => item.id === editingItem);
@@ -573,6 +601,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       await ProductService.updateProduct(editingItem, {
         name: editForm.name,
         brand: editForm.brand,
+        brandImage: brandImageUrl || null,
         description: editForm.description,
         imageURL: imageUrl,
         categoryID: editForm.categoryID || null,
@@ -812,7 +841,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr className="text-left">
-              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRODUCT NAME</th>
+              <th className={`px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide ${catalogTab === 'draft' ? 'w-[28%]' : ''}`}>PRODUCT NAME</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
               {catalogTab === 'violation' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">REASON</th>
@@ -826,13 +855,16 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               {catalogTab === 'all' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STATUS</th>
               )}
-              {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
+              {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && catalogTab !== 'draft' && (
                 <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide">ACTIVE</th>
               )}
               {catalogTab === 'inactive' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">ARCHIVE</th>
               )}
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">{catalogTab === 'archive' ? 'RESTORE' : 'EDIT ITEM'}</th>
+              {catalogTab === 'draft' && (
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">SUBMIT</th>
+              )}
               {(catalogTab === 'draft' || catalogTab === 'archive') && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">DELETE</th>
               )}
@@ -844,6 +876,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               const isActive = status === 'active';
               const isDeleted = status === 'deleted';
               const isArchived = status === 'archive';
+              const isLockedInAllTab = catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc' || status === 'draft');
               // Get category name from subcategory mapping if available
               let displayCategory = item.categoryName || 'Uncategorized';
               if (item.subCategoryID && subcategoryToCategory[item.subCategoryID]) {
@@ -866,7 +899,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                         </div>
                       )}
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-900">{item.name}</div>
+                        <div className={`truncate font-medium text-gray-900 ${catalogTab === 'draft' ? 'max-w-[220px]' : ''}`}>{item.name}</div>
                       </div>
                     </div>
                   </td>
@@ -913,34 +946,24 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                     </td>
                   )}
                   {/* Active Toggle */}
-                  {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && (
+                  {catalogTab !== 'pending_qc' && catalogTab !== 'violation' && catalogTab !== 'archive' && catalogTab !== 'draft' && (
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <label className={`inline-flex items-center select-none ${isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                      <label className={`inline-flex items-center select-none ${isDeleted || isLockedInAllTab ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input
                           type="checkbox"
                           className="sr-only peer"
                           checked={isActive}
                           onChange={(e) => {
-                            // Show dialog for archive, violation, pending_qc statuses in "all" tab
-                            if (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) {
-                              setStatusDialog({
-                                open: true,
-                                productName: item.name,
-                                status: status as 'archive' | 'violation' | 'pending_qc',
-                                productId: item.id
-                              });
-                              return;
-                            }
-                            if (!isDeleted) {
+                            if (!isDeleted && !isLockedInAllTab) {
                               handleToggleActive(item.id, e.target.checked);
                             }
                           }}
-                          disabled={isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc'))}
+                          disabled={isDeleted || isLockedInAllTab}
                         />
                         <div
-                          className={`relative w-11 h-6 rounded-full ${isDeleted || (catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted && !(catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'peer-checked:bg-teal-600' : ''}
+                          className={`relative w-11 h-6 rounded-full ${isDeleted || isLockedInAllTab ? 'bg-gray-200' : 'bg-gray-300'} transition-colors duration-200 ease-in-out ${!isDeleted && !isLockedInAllTab ? 'peer-checked:bg-teal-600' : ''}
                                        after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow
-                                       after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted && !(catalogTab === 'all' && (status === 'archive' || status === 'violation' || status === 'pending_qc')) ? 'peer-checked:after:translate-x-5' : ''}`}
+                                       after:transform after:transition-transform after:duration-200 after:ease-in-out ${!isDeleted && !isLockedInAllTab ? 'peer-checked:after:translate-x-5' : ''}`}
                         />
                       </label>
                     </td>
@@ -984,6 +1007,17 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       </button>
                     )}
                   </td>
+                  {/* Submit Button - only in draft tab */}
+                  {catalogTab === 'draft' && (
+                    <td className="px-4 py-3" onClick={e => { e.stopPropagation(); handleSubmitDraft(item.id); }}>
+                      <button
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-teal-600 text-white hover:bg-teal-700"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Submit
+                      </button>
+                    </td>
+                  )}
                   {/* Delete Button - only in draft and archive tabs */}
                   {(catalogTab === 'draft' || catalogTab === 'archive') && (
                     <td className="px-4 py-3" onClick={e => { e.stopPropagation(); setDeleteDialog({ open: true, productId: item.id, productName: item.name }); }}>
@@ -1053,6 +1087,23 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                 }
               }}
             />
+            <input
+              ref={editBrandImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const preview = URL.createObjectURL(file);
+                  setEditForm(prev => prev ? {
+                    ...prev,
+                    brandImageFile: file,
+                    brandImagePreview: preview
+                  } : null);
+                }
+              }}
+            />
 
             {/* Modal Body */}
             <div className="p-6 space-y-6">
@@ -1085,6 +1136,25 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       placeholder="Enter your brand name"
                     />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Brand Image</label>
+                    <div className="flex items-center gap-4">
+                      {(editForm.brandImagePreview || editForm.brandImageURL) && (
+                        <img
+                          src={editForm.brandImagePreview || editForm.brandImageURL}
+                          alt="Brand"
+                          className="w-20 h-20 rounded-lg object-contain border-2 border-gray-200 bg-white"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => editBrandImageInputRef.current?.click()}
+                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
+                      >
+                        {editForm.brandImageURL || editForm.brandImagePreview ? 'Change Brand Image' : 'Upload Brand Image'}
+                      </button>
+                    </div>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>

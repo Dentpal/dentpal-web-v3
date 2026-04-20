@@ -6,6 +6,8 @@ type DateRange = { start: Date | null; end: Date | null };
 import DateRangePicker from '@/components/ui/DateRangePicker';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose } from '@/components/ui/sheet';
 
+const ITEMS_PER_PAGE = 15;
+
 const History: React.FC = () => {
 	const navigate = useNavigate();
 	const { logs, loading } = useAllLogsHistory();
@@ -13,6 +15,10 @@ const History: React.FC = () => {
 	const [dateRange, setDateRange] = useState<DateRange>({ start: null, end: null });
 	const [selectedLog, setSelectedLog] = useState<any | null>(null);
 	const [sheetOpen, setSheetOpen] = useState(false);
+	const [page, setPage] = useState(1);
+
+	// Reset to page 1 when filters change
+	React.useEffect(() => { setPage(1); }, [search, dateRange]);
 
 	// Filter logs by search, date, and adjustment !== 0 (but allow batch adjustments)
 	const filteredLogs = logs.filter(row => {
@@ -40,6 +46,10 @@ const History: React.FC = () => {
 					logDate >= dateRange.start && logDate <= dateRange.end);
 			return matchesSearch && inDateRange;
 		});
+
+	const totalPages = Math.max(1, Math.ceil(filteredLogs.length / ITEMS_PER_PAGE));
+	const safePage = Math.min(page, totalPages);
+	const paginatedLogs = filteredLogs.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
 
 	// Helper to format timestamp without milliseconds
 	function formatTimestamp(ts: string | number): string {
@@ -94,7 +104,7 @@ const History: React.FC = () => {
 						) : filteredLogs.length === 0 ? (
 							<tr><td colSpan={5} className="text-center py-8">No history found.</td></tr>
 						) : (
-							filteredLogs.map((row, idx) => {
+							paginatedLogs.map((row, idx) => {
 								const isBatchRow = row.isBatch;
 								const displayAdjustment = isBatchRow ? `${row.totalItemsAdjusted} items` : (row.adjustment > 0 ? `+${row.adjustment}` : row.adjustment);
 								
@@ -147,6 +157,31 @@ const History: React.FC = () => {
 					</tbody>
 				</table>
 			</div>
+
+		{/* Pagination */}
+		{totalPages > 1 && (
+			<div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50 rounded-b-xl">
+				<span className="text-xs text-gray-500">
+					Page {safePage} of {totalPages} ({filteredLogs.length} record{filteredLogs.length !== 1 ? 's' : ''})
+				</span>
+				<div className="flex gap-1">
+					<button
+						onClick={() => setPage(p => Math.max(1, p - 1))}
+						disabled={safePage === 1}
+						className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+					>
+						Previous
+					</button>
+					<button
+						onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+						disabled={safePage === totalPages}
+						className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+					>
+						Next
+					</button>
+				</div>
+			</div>
+		)}
 
 			{/* Side panel for log details */}
 			<Sheet open={sheetOpen} onOpenChange={setSheetOpen}>

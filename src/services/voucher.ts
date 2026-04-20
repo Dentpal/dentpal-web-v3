@@ -9,10 +9,10 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import type { Voucher, CreateVoucherInput, UpdateVoucherInput } from '@/types/voucher';
 
-const VOUCHERS_COLLECTION = 'vouchers';
+const VOUCHERS_COLLECTION = 'Vouchers';
 
 function vouchersCol() {
   return collection(db, VOUCHERS_COLLECTION);
@@ -39,6 +39,7 @@ export async function createVoucher(
       code: input.code.toUpperCase().trim(),
       discountType: input.discountType,
       discountValue: input.discountValue,
+      ...(input.maximumSpend !== undefined ? { maximumSpend: input.maximumSpend } : {}),
       minimumOrderAmount: input.minimumOrderAmount,
       maxUses: input.maxUses,
       usedCount: 0,
@@ -49,6 +50,8 @@ export async function createVoucher(
       ...(input.scope === 'specific' && input.productIds ? { productIds: input.productIds } : {}),
       createdAt: now,
       updatedAt: now,
+      ...(auth.currentUser?.email ? { createdBy: auth.currentUser.email } : {}),
+      ...(auth.currentUser?.displayName ? { createdByName: auth.currentUser.displayName } : {}),
     };
 
     const docRef = await addDoc(vouchersCol(), data);

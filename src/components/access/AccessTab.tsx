@@ -85,6 +85,7 @@ function normalizeTimestamp(value: any): number | null {
     categories: role === 'admin',
     policies: role === 'admin',
     chats: role === 'admin' || role === 'seller',
+    vouchers: role === 'seller',
   });
 
   // Normalize any loaded permissions to include all keys for the role
@@ -107,7 +108,8 @@ function normalizeTimestamp(value: any): number | null {
       'seller-orders': 'Orders',
       'add-product': 'Items',
       'policies': 'Policies',
-      'chats': 'Chat'
+      'chats': 'Chat',
+      'vouchers': 'Vouchers'
     };
     return labelMap[key] || key.replace('-', ' ');
   };
@@ -133,6 +135,7 @@ interface User {
     'add-product': boolean;
     policies: boolean;
     chats: boolean;
+    vouchers: boolean;
   };
   Platform_fee_percentage?: number; // Platform fee percentage (default 8.88%)
   lastLogin?: string;
@@ -172,6 +175,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         'add-product': true,
         policies: true,
         chats: true,
+        vouchers: false,
       },
       lastLogin: "2024-09-09T10:30:00Z",
       createdAt: "2024-01-15T00:00:00Z"
@@ -196,6 +200,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         'add-product': true,
         policies: false,
         chats: true,
+        vouchers: true,
       },
       lastLogin: "2024-09-09T09:15:00Z",
       createdAt: "2024-02-20T00:00:00Z"
@@ -220,6 +225,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         'add-product': true,
         policies: false,
         chats: true,
+        vouchers: true,
       },
       createdAt: "2024-09-08T00:00:00Z"
     }
@@ -322,6 +328,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       'add-product': false,
       policies: false,
       chats: false,
+      vouchers: false,
     },
     ops: {
       dashboard: true,
@@ -337,6 +344,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       'add-product': true,
       policies: false,
       chats: false,
+      vouchers: true,
     },
     custom: {
       dashboard: true,
@@ -352,6 +360,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       'add-product': false,
       policies: false,
       chats: false,
+      vouchers: false,
     }
   };
 
@@ -447,6 +456,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
   const [manageOpen, setManageOpen] = useState(false);
   const [members, setMembers] = useState<any[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const MEMBERS_PER_PAGE = 10;
+  const [membersPage, setMembersPage] = useState(1);
   const [editing, setEditing] = useState<any | null>(null);
   const [viewOnly, setViewOnly] = useState(false);
   const [subAccountToDelete, setSubAccountToDelete] = useState<any | null>(null);
@@ -1505,6 +1516,11 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
     </div>
   );
 
+  // Pagination for sub-accounts table
+  const membersTotalPages = Math.max(1, Math.ceil(members.length / MEMBERS_PER_PAGE));
+  const membersSafePage = Math.min(membersPage, membersTotalPages);
+  const paginatedMembers = members.slice((membersSafePage - 1) * MEMBERS_PER_PAGE, membersSafePage * MEMBERS_PER_PAGE);
+
   // Seller-only simplified view: show Sub-accounts section only
   if (isSeller && !isAdmin) {
     const allowedKeys = (Object.keys(subPerms) as Array<keyof User['permissions']>).filter(k => sellerPerms[k]);
@@ -1542,7 +1558,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 <div className="text-sm text-gray-500">No sub-accounts yet.</div>
               ) : (
                 <div className="divide-y rounded-md border">
-                  {members.map((m) => (
+                  {paginatedMembers.map((m) => (
                     <div key={m.id} className="flex items-center justify-between p-3 hover:bg-gray-50">
                       <div>
                         <div className="font-medium">{m.name || m.email}</div>
@@ -1567,6 +1583,29 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                 </div>
               )}
             </div>
+            {membersTotalPages > 1 && (
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-gray-500">
+                  Page {membersSafePage} of {membersTotalPages} ({members.length} sub-account{members.length !== 1 ? 's' : ''})
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setMembersPage(p => Math.max(1, p - 1))}
+                    disabled={membersSafePage === 1}
+                    className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setMembersPage(p => Math.min(membersTotalPages, p + 1))}
+                    disabled={membersSafePage === membersTotalPages}
+                    className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setManageOpen(false)}>Close</Button>
             </DialogFooter>
@@ -1779,7 +1818,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {members.map((member) => {
+                  {paginatedMembers.map((member) => {
                     const permissions = member.permissions || {};
                     const activePermissions = Object.keys(permissions)
                       .filter(key => {
@@ -1790,8 +1829,8 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                       .map(key => getPermissionLabel(key));
 
                     return (
-                      <tr 
-                        key={member.id} 
+                      <tr
+                        key={member.id}
                         className="hover:bg-gray-50 cursor-pointer transition-colors"
                         onClick={() => {
                           setEditing(member);
@@ -1812,9 +1851,9 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                           <div className="flex flex-wrap gap-1">
                             {activePermissions.length > 0 ? (
                               activePermissions.map((perm) => (
-                                <Badge 
-                                  key={perm} 
-                                  variant="outline" 
+                                <Badge
+                                  key={perm}
+                                  variant="outline"
                                   className="text-xs bg-teal-50 text-teal-700 border-teal-200"
                                 >
                                   {perm}
@@ -1832,6 +1871,31 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
               </table>
             )}
           </div>
+
+          {/* Pagination */}
+          {membersTotalPages > 1 && (
+            <div className="flex items-center justify-between px-6 py-3 border-t bg-gray-50">
+              <span className="text-xs text-gray-500">
+                Page {membersSafePage} of {membersTotalPages} ({members.length} sub-account{members.length !== 1 ? 's' : ''})
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setMembersPage(p => Math.max(1, p - 1))}
+                  disabled={membersSafePage === 1}
+                  className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setMembersPage(p => Math.min(membersTotalPages, p + 1))}
+                  disabled={membersSafePage === membersTotalPages}
+                  className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

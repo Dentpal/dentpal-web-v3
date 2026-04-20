@@ -351,9 +351,18 @@ export default function UsersTab() {
     return result;
   }, [users, filters, phProvinces]);
 
+  const ITEMS_PER_PAGE = 15;
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [filters]);
+
   if (loading) {
     return <div className="py-8 text-center">Loading users...</div>;
   }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
+
   const onSelect = (id:string, checked:boolean) => setSelected(prev => checked ? [...prev,id] : prev.filter(p=>p!==id));
   const onSelectAll = (checked:boolean) => setSelected(checked ? filtered.map(u=>u.id) : []);
   const onView = (u:User) => setSelectedUser(u);
@@ -396,7 +405,7 @@ export default function UsersTab() {
       </div>
       
       <UserTable
-        users={filtered}
+        users={paginated}
         selected={selected}
         onSelect={onSelect}
         onSelectAll={onSelectAll}
@@ -407,6 +416,32 @@ export default function UsersTab() {
         onToggleStatus={handleToggleUserStatus}
         onVerifyEmail={handleVerifyEmail}
       />
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border rounded-lg bg-gray-50">
+          <span className="text-xs text-gray-500">
+            Page {safePage} of {totalPages} ({filtered.length} user{filtered.length !== 1 ? 's' : ''})
+          </span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       <UserDetailsDialog user={selectedUser} open={!!selectedUser} onClose={()=>setSelectedUser(null)} />
       <ResetPointsDialog open={isResetOpen} label={selected.length ? `${selected.length} users` : 'user'} onCancel={()=>setResetOpen(false)} onConfirm={handleConfirmReset} />
     </div>

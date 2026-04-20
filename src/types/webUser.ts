@@ -19,6 +19,7 @@ export type WebUserPermissions = {
   categories?: boolean; // NEW: Admin Categories tab (optional, admin-only)
   chats: boolean; // NEW: Chat/messaging feature
   notifications: boolean; // NEW: Notifications feature
+  vouchers: boolean; // NEW: Vouchers tab
 };
 
 export interface WebUserProfile {

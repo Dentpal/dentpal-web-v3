@@ -134,7 +134,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     images: "images",
     users: "users",
     notifications: 'notifications',
-    vouchers: 'dashboard',
+    vouchers: 'vouchers',
     policies: "policies",
     chats: 'chats',
   };
@@ -148,6 +148,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     'items-all': 'items',
     'items-list': 'items',
     'items-add': 'items',
+    'items-bulk': 'items',
     'dashboard-summary': 'dashboard',
     'dashboard-item': 'dashboard',
     'dashboard-category': 'dashboard',
@@ -193,7 +194,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         if (isSubAccount) {
           permitted = permitted.filter((i) => i.id !== 'access' && i.id !== 'sub-accounts' && i.id !== 'profile');
           // Apply same ordering as sellers for sub-accounts
-          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'withdrawal'];
+          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'withdrawal', 'vouchers'];
           const map = new Map(permitted.map((i) => [i.id, i] as const));
           const ordered = subAccountOrder.map((id) => map.get(id)).filter(Boolean) as typeof permitted;
           return ordered;

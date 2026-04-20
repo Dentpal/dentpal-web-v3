@@ -32,9 +32,11 @@ const parsePrice = (value: any): number | undefined => {
 };
 
 const ProductQCTab: React.FC = () => {
+  const ITEMS_PER_PAGE = 15;
   const [tab, setTab] = useState<'pending' | 'approved' | 'violation'>('pending');
   const [rows, setRows] = useState<Row[]>([]);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [qcTime, setQcTime] = useState<string>('');
@@ -183,6 +185,13 @@ const ProductQCTab: React.FC = () => {
     return rows.filter(r => r.name.toLowerCase().includes(q) || r.sellerId?.toLowerCase().includes(q));
   }, [rows, search]);
 
+  // Reset page when tab or search changes
+  useEffect(() => { setPage(1); }, [tab, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
+
   const approve = async (id: string) => {
     try {
       await ProductService.approveProduct(id);
@@ -299,7 +308,7 @@ const ProductQCTab: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
+            {paginated.map((r) => (
               <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-700">
                   <div className="text-sm font-medium">{(r.sellerId && sellerNames[r.sellerId]) || r.sellerId || '—'}</div>
@@ -343,6 +352,31 @@ const ProductQCTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border rounded-lg bg-gray-50">
+          <span className="text-xs text-gray-500">
+            Page {safePage} of {totalPages} ({filtered.length} product{filtered.length !== 1 ? 's' : ''})
+          </span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="px-3 py-1 text-xs rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Preview Dialog: detailed high-UX card with product and variations */}
       {preview && (

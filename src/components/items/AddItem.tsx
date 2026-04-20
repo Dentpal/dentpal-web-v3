@@ -43,6 +43,22 @@ const toCm = (val: any, unit: string) => {
   }
 };
 
+const makeBlankVariation = () => ({
+  name: '',
+  SKU: '',
+  price: 0,
+  imageURL: '',
+  imageFile: null as File | null,
+  imagePreview: null as string | null,
+  weight: '' as number | '',
+  weightUnit: 'g',
+  dimensions: { length: '' as number | '', width: '' as number | '', height: '' as number | '' },
+  dimensionsUnit: 'cm',
+  pcsPerBox: '' as number | '',
+  isFragile: false,
+  isNew: true,
+});
+
 // Factory function for initial form state
 const getInitialFormState = () => ({
   brand: '',
@@ -64,7 +80,7 @@ const getInitialFormState = () => ({
   warrantyDuration: '',
   warrantyPolicy: '',
   allowInquiry: false,
-  variations: [] as Array<{
+  variations: [makeBlankVariation()] as Array<{
     name: string;
     SKU: string;
     price: number;
@@ -428,8 +444,31 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     }
   };
 
+  const goToTab = (tab: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.pushState({}, '', url.pathname + url.search);
+    window.dispatchEvent(new Event('popstate'));
+  };
+
   return (
     <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => goToTab('items-list')}
+            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium text-sm hover:bg-gray-200 transition"
+          >
+            ← Back to Item List
+          </button>
+          <button
+            type="button"
+            onClick={() => goToTab('items-bulk')}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold text-sm shadow hover:bg-indigo-700 transition"
+          >
+            Bulk Item
+          </button>
+        </div>
 
         <input
           ref={productImageInputRef}
@@ -525,7 +564,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Image <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Thumbnail Image <span className="text-red-500">*</span></label>
                 <div className="flex items-center gap-4">
                   {(form.imagePreview || form.imageURL) && (
                     <img
@@ -603,24 +642,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 onClick={() => {
                   setForm({
                     ...form,
-                    variations: [
-                      ...form.variations,
-                      {
-                        name: '',
-                        SKU: '',
-                        price: 0,
-                        imageURL: '',
-                        imageFile: null,
-                        imagePreview: null,
-                        weight: '',
-                        weightUnit: 'g',
-                        dimensions: { length: '', width: '', height: '' },
-                        dimensionsUnit: 'cm',
-                        pcsPerBox: '',
-                        isFragile: false,
-                        isNew: true
-                      }
-                    ]
+                    variations: [...form.variations, makeBlankVariation()]
                   });
                 }}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2 shadow-md"
@@ -975,6 +997,23 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                     </div>
                   </div>
                 ))}
+                {form.variations.length >= 2 && (
+                  <div className="flex justify-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm({
+                          ...form,
+                          variations: [...form.variations, makeBlankVariation()]
+                        });
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2 shadow-md"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Variation
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

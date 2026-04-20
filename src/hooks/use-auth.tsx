@@ -32,6 +32,8 @@ export const PERMISSIONS_BY_ROLE: Record<WebUserRole, WebUserPermissions> = {
     chats: true,
     // NEW: notifications enabled for admin
     notifications: true,
+    // Vouchers: admin doesn't use this
+    vouchers: false,
   },
   seller: {
     dashboard: true,
@@ -56,6 +58,8 @@ export const PERMISSIONS_BY_ROLE: Record<WebUserRole, WebUserPermissions> = {
     chats: true,
     // NEW: notifications enabled by default for sellers
     notifications: true,
+    // NEW: vouchers enabled by default for sellers
+    vouchers: true,
   }
 };
 
