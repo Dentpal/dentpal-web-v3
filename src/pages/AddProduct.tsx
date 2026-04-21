@@ -154,6 +154,8 @@ const AddProduct: React.FC = () => {
     warrantyDuration?: string;
     // New boolean: allow inquiry toggle
     allowInquiry: boolean;
+    // New boolean: insurance and evaluation required
+    insuranceAndEvaluation: boolean;
   }>({
     name: '',
     description: '',
@@ -179,12 +181,13 @@ const AddProduct: React.FC = () => {
     warrantyType: 'No warranty',
     warrantyDuration: '',
     allowInquiry: false,
+    insuranceAndEvaluation: false,
   });
 
   const resetNewItem = () => setNewItem({
     name: '', description: '', imageUrl: '', imageFile: null, imagePreview: null, category: '', subcategory: '', price: 0, specialPrice: 0, sku: '', weight: 0,
     dimensions: { length: 0, width: 0, height: 0 }, weightUnit: 'kg', dimensionUnit: 'cm', suggestedThreshold: 0, unit: '', inStock: 0, simpleVariantName: '',
-    dangerousGoods: 'none', warrantyType: 'No warranty', warrantyDuration: '', allowInquiry: false,
+    dangerousGoods: 'none', warrantyType: 'No warranty', warrantyDuration: '', allowInquiry: false, insuranceAndEvaluation: false,
   });
 
   const variantFileInputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -367,6 +370,8 @@ const AddProduct: React.FC = () => {
         warrantyDuration: (newItem.warrantyDuration || '').trim() || null,
         // New inquiry flag
         allowInquiry: newItem.allowInquiry,
+        // New insurance & evaluation flag
+        insuranceAndEvaluation: newItem.insuranceAndEvaluation,
       } as any);
 
       // Add variations (at least one)
@@ -873,6 +878,27 @@ const AddProduct: React.FC = () => {
           {/* Warranty & Compliance */}
           <div className="mt-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
             <h4 className="text-sm font-semibold text-gray-900 mb-3">Warranty & Compliance</h4>
+            <label className="flex items-center gap-2 mb-3 text-sm text-gray-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="accent-teal-600 h-4 w-4"
+                checked={newItem.insuranceAndEvaluation}
+                onChange={(e) => setNewItem(s => ({ ...s, insuranceAndEvaluation: e.target.checked }))}
+              />
+              <span>Insurance and Evaluation</span>
+              <span className="relative group inline-flex">
+                <span
+                  tabIndex={0}
+                  aria-label="What is Insurance and Evaluation?"
+                  className="inline-flex items-center justify-center h-4 w-4 rounded-full border border-gray-400 text-gray-500 text-[10px] font-semibold leading-none cursor-help focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  ?
+                </span>
+                <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block group-focus-within:block bg-gray-900 text-white text-xs rounded-md px-2 py-1 w-64 z-10 shadow-lg">
+                  Check if this item requires insurance coverage or a separate evaluation before shipping or use.
+                </span>
+              </span>
+            </label>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Dangerous Goods</label>

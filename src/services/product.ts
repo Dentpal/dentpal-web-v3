@@ -25,6 +25,8 @@ export type CreateProductInput = {
   warrantyPolicy?: string;
   // New: inquiry flag
   allowInquiry?: boolean;
+  // New: insurance & evaluation flag
+  insuranceAndEvaluation?: boolean;
   // Brand image URL
   brandImage?: string | null;
 };
@@ -174,6 +176,8 @@ export const ProductService = {
       warrantyPolicy: input.warrantyPolicy ?? '',
       // Persist inquiry flag
       allowInquiry: input.allowInquiry ?? false,
+      // Persist insurance & evaluation flag
+      insuranceAndEvaluation: input.insuranceAndEvaluation ?? false,
       // Brand image
       brandImage: input.brandImage ?? null,
       createdAt: serverTimestamp(),
@@ -573,6 +577,7 @@ export const ProductService = {
     warrantyDuration: string | null;
     warrantyPolicy: string;
     allowInquiry: boolean; // new
+    insuranceAndEvaluation: boolean; // new
   }>) {
     const pRef = doc(db, PRODUCT_COLLECTION, productId);
     const payload: any = {
@@ -591,6 +596,7 @@ export const ProductService = {
       ...(updates.warrantyDuration !== undefined ? { warrantyDuration: updates.warrantyDuration } : {}),
       ...(updates.warrantyPolicy !== undefined ? { warrantyPolicy: updates.warrantyPolicy } : {}),
       ...(updates.allowInquiry !== undefined ? { allowInquiry: !!updates.allowInquiry } : {}),
+      ...(updates.insuranceAndEvaluation !== undefined ? { insuranceAndEvaluation: !!updates.insuranceAndEvaluation } : {}),
       updatedAt: serverTimestamp(),
     };
     await updateDoc(pRef, payload);

@@ -47,6 +47,7 @@ interface InventoryItem {
   warrantyPolicy?: string;
   dangerousGoods?: string;
   allowInquiry?: boolean;
+  insuranceAndEvaluation?: boolean;
   clickCounter?: number;
 }
 
@@ -107,6 +108,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     promoStart: number | null;
     promoEnd: number | null;
     allowInquiry: boolean;
+    insuranceAndEvaluation: boolean;
     variations: Array<{
       id?: string;
       name: string;
@@ -224,6 +226,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         warrantyPolicy: r.warrantyPolicy || '',
         dangerousGoods: r.dangerousGoods || 'none',
         allowInquiry: r.allowInquiry || false,
+        insuranceAndEvaluation: r.insuranceAndEvaluation || false,
         clickCounter: r.clickCounter ?? 0,
       }));
       setItems(mapped as any);
@@ -537,6 +540,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       promoStart: product.promoStart || null,
       promoEnd: product.promoEnd || null,
       allowInquiry: categoryMap[product.category || ''] === 'Equipments',
+      insuranceAndEvaluation: !!product.insuranceAndEvaluation,
       variations: variations,
     });
 
@@ -615,6 +619,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         warrantyDuration: editForm.warrantyDuration || null,
         warrantyPolicy: editForm.warrantyPolicy || '',
         allowInquiry: categoryMap[editForm.categoryID] === 'Equipments',
+        insuranceAndEvaluation: editForm.insuranceAndEvaluation,
       } as any);
 
       // Update pricing
@@ -1628,6 +1633,27 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               {/* Warranty & Compliance Section */}
               <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Warranty & Compliance</h3>
+                <label className="flex items-center gap-2 mb-4 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="accent-green-600 h-4 w-4"
+                    checked={editForm.insuranceAndEvaluation}
+                    onChange={(e) => setEditForm({ ...editForm, insuranceAndEvaluation: e.target.checked })}
+                  />
+                  <span className="font-medium">Insurance and Evaluation</span>
+                  <span className="relative group inline-flex">
+                    <span
+                      tabIndex={0}
+                      aria-label="What is Insurance and Evaluation?"
+                      className="inline-flex items-center justify-center h-4 w-4 rounded-full border border-gray-400 text-gray-500 text-[10px] font-semibold leading-none cursor-help focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      ?
+                    </span>
+                    <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block group-focus-within:block bg-gray-900 text-white text-xs rounded-md px-2 py-1 w-64 z-10 shadow-lg">
+                      Check if this item requires insurance coverage or a separate evaluation before shipping or use.
+                    </span>
+                  </span>
+                </label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Warranty Type</label>
