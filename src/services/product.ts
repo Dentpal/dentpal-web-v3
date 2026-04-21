@@ -376,6 +376,7 @@ export const ProductService = {
       warrantyPolicy?: string;
       dangerousGoods?: string;
       allowInquiry?: boolean;
+      clickCounter?: number;
     }>) => void
   ) {
     const qRef = query(collection(db, PRODUCT_COLLECTION), where('sellerId', '==', sellerId));
@@ -426,6 +427,7 @@ export const ProductService = {
           warrantyPolicy: typeof pd.warrantyPolicy === 'string' ? pd.warrantyPolicy : undefined,
           dangerousGoods: typeof pd.dangerousGoods === 'string' ? pd.dangerousGoods : undefined,
           allowInquiry: typeof pd.allowInquiry === 'boolean' ? pd.allowInquiry : undefined,
+          clickCounter: typeof pd.clickCounter === 'number' ? pd.clickCounter : 0,
         };
       }));
       // sort name asc like before

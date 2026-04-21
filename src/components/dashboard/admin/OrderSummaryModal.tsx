@@ -3,7 +3,7 @@
  * pagination, row expansion, and PDF / Excel / Print exports.
  */
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Order } from '@/types/order';
 import { formatCurrency, formatDate } from '@/utils/dashboard/formatters';
 import {
@@ -114,12 +114,14 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
   };
 
   /* ── totals row ── */
+  const EXCLUDED_STATUSES = new Set(['cancelled', 'expired']);
   const totals = useMemo(() => {
-    const sub = filtered.reduce((s, o) => s + resolveSubtotal(o), 0);
-    const pf  = filtered.reduce((s, o) => s + resolvePaymentFee(o), 0);
-    const sf  = filtered.reduce((s, o) => s + resolveShipping(o), 0);
-    const plf = filtered.reduce((s, o) => s + resolvePlatformFee(o), 0);
-    return { sub, pf, sf, plf, net: sub - pf - sf - plf };
+    const successful = filtered.filter(o => !EXCLUDED_STATUSES.has((o.status || '').toLowerCase()));
+    const sub = successful.reduce((s, o) => s + resolveSubtotal(o), 0);
+    const pf  = successful.reduce((s, o) => s + resolvePaymentFee(o), 0);
+    const sf  = successful.reduce((s, o) => s + resolveShipping(o), 0);
+    const plf = successful.reduce((s, o) => s + resolvePlatformFee(o), 0);
+    return { sub, pf, sf, plf, net: sub - pf - sf - plf, successfulCount: successful.length };
   }, [filtered]);
 
   /* ── exports ── */
@@ -300,10 +302,23 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
 
           {/* ── Table ── */}
           <div className="flex-1 overflow-auto">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 900 }}>
+            <table className="w-full text-xs border-collapse" style={{ minWidth: 900, tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: 32 }} />      {/* expand */}
+                <col style={{ width: '13%' }} />   {/* order id */}
+                <col style={{ width: '12%' }} />   {/* customer */}
+                <col style={{ width: 95 }} />      {/* date */}
+                <col style={{ width: 88 }} />      {/* status */}
+                <col />                             {/* items – flex */}
+                <col style={{ width: 88 }} />      {/* payment */}
+                <col style={{ width: 82 }} />      {/* subtotal */}
+                <col style={{ width: 76 }} />      {/* pmt fee */}
+                <col style={{ width: 76 }} />      {/* plat fee */}
+                <col style={{ width: 88 }} />      {/* net payout */}
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="sticky top-0 bg-gray-100 z-10 border-b border-gray-300 px-3 py-2.5 text-left text-[11px] font-semibold w-6" />
+                  <th className="sticky top-0 bg-gray-100 z-10 border-b border-gray-300 px-2 py-2.5 text-left text-[11px] font-semibold" />
                   <Th k="id">Order ID</Th>
                   <Th k="customer">Customer</Th>
                   <Th k="date">Date</Th>
@@ -324,94 +339,97 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                   const st = getStatus(o.status);
                   const isExp = expandedId === o.id;
                   return (
-                    <tr key={o.id}>
-                      <td colSpan={11} className="p-0 border-b border-gray-100">
-                        {/* Main Row */}
-                        <div
-                          className={`grid cursor-pointer transition hover:bg-teal-50/40 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}
-                          style={{ gridTemplateColumns: '24px 1fr 1fr 100px 90px 1fr 90px 80px 80px 80px 90px' }}
-                          onClick={() => setExpandedId(isExp ? null : (o.id || null))}
-                        >
-                          <div className="flex items-center justify-center py-2.5">
-                            {isExp ? <ChevronUp className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
-                          </div>
-                          <div className="px-3 py-2.5 font-mono text-gray-600 truncate">{(o.id || '').slice(0, 12)}</div>
-                          <div className="px-3 py-2.5 text-gray-800 truncate">{o.customer?.name || '—'}</div>
-                          <div className="px-3 py-2.5 text-gray-600">{formatDate(o.createdAt || o.timestamp || '')}</div>
-                          <div className="px-3 py-2.5">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.bg} ${st.text}`}>{st.label}</span>
-                          </div>
-                          <div className="px-3 py-2.5 text-gray-600 truncate">{o.items?.map(it => `${it.name} x${it.quantity || 1}`).join(', ') || '—'}</div>
-                          <div className="px-3 py-2.5 text-gray-600 truncate">{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</div>
-                          <div className="px-3 py-2.5 text-right font-medium text-gray-900">{formatCurrency(resolveSubtotal(o))}</div>
-                          <div className="px-3 py-2.5 text-right text-red-600">{formatCurrency(resolvePaymentFee(o))}</div>
-                          <div className="px-3 py-2.5 text-right text-red-600">{formatCurrency(resolvePlatformFee(o))}</div>
-                          <div className="px-3 py-2.5 text-right font-semibold text-green-700">{formatCurrency(resolveNet(o))}</div>
-                        </div>
+                    <Fragment key={o.id}>
+                      {/* ── Main data row ── */}
+                      <tr
+                        className={`cursor-pointer transition-colors hover:bg-teal-50/40 border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}
+                        onClick={() => setExpandedId(isExp ? null : (o.id || null))}
+                      >
+                        <td className="px-2 py-2.5 text-center align-middle">
+                          {isExp
+                            ? <ChevronUp className="w-3.5 h-3.5 text-gray-500 mx-auto" />
+                            : <ChevronDown className="w-3.5 h-3.5 text-gray-400 mx-auto" />}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-gray-600 truncate align-middle">{(o.id || '').slice(0, 12)}</td>
+                        <td className="px-3 py-2.5 text-gray-800 truncate align-middle">{o.customer?.name || '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap align-middle">{formatDate(o.createdAt || o.timestamp || '')}</td>
+                        <td className="px-3 py-2.5 align-middle">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.bg} ${st.text}`}>{st.label}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 truncate align-middle">{o.items?.map(it => `${it.name} x${it.quantity || 1}`).join(', ') || '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-600 truncate align-middle">{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</td>
+                        <td className="px-3 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap align-middle">{formatCurrency(resolveSubtotal(o))}</td>
+                        <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePaymentFee(o))}</td>
+                        <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePlatformFee(o))}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-green-700 whitespace-nowrap align-middle">{formatCurrency(resolveNet(o))}</td>
+                      </tr>
 
-                        {/* Expanded Detail */}
-                        {isExp && (
-                          <div className="bg-blue-50/50 border-t border-blue-100 px-8 py-4 space-y-3 animate-fade-in">
-                            {/* Items sub-table */}
-                            {o.items && o.items.length > 0 && (
-                              <div>
-                                <h4 className="text-[11px] font-semibold text-gray-700 mb-2">Order Items ({o.items.length})</h4>
-                                <div className="overflow-x-auto rounded border border-blue-200">
-                                  <table className="w-full text-[11px]">
-                                    <thead>
-                                      <tr className="bg-blue-100/80 text-blue-800">
-                                        <th className="px-3 py-1.5 text-left font-semibold">#</th>
-                                        <th className="px-3 py-1.5 text-left font-semibold">Item</th>
-                                        <th className="px-3 py-1.5 text-left font-semibold">Category</th>
-                                        <th className="px-3 py-1.5 text-right font-semibold">Price</th>
-                                        <th className="px-3 py-1.5 text-center font-semibold">Qty</th>
-                                        <th className="px-3 py-1.5 text-right font-semibold">Line Total</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {o.items.map((it: any, idx: number) => (
-                                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-blue-50/40'}>
-                                          <td className="px-3 py-1.5 text-gray-500">{idx + 1}</td>
-                                          <td className="px-3 py-1.5 text-gray-900 font-medium">{it.name || 'Unknown'}</td>
-                                          <td className="px-3 py-1.5 text-gray-600">{it.category || '—'}</td>
-                                          <td className="px-3 py-1.5 text-right">{formatCurrency(it.price || 0)}</td>
-                                          <td className="px-3 py-1.5 text-center">{it.quantity || 1}</td>
-                                          <td className="px-3 py-1.5 text-right font-medium">{formatCurrency((it.price || 0) * (it.quantity || 1))}</td>
+                      {/* ── Expanded detail row ── */}
+                      {isExp && (
+                        <tr className="border-b border-blue-100">
+                          <td colSpan={11} className="p-0">
+                            <div className="bg-blue-50/50 border-t border-blue-100 px-8 py-4 space-y-3">
+                              {/* Items sub-table */}
+                              {o.items && o.items.length > 0 && (
+                                <div>
+                                  <h4 className="text-[11px] font-semibold text-gray-700 mb-2">Order Items ({o.items.length})</h4>
+                                  <div className="overflow-x-auto rounded border border-blue-200">
+                                    <table className="w-full text-[11px]">
+                                      <thead>
+                                        <tr className="bg-blue-100/80 text-blue-800">
+                                          <th className="px-3 py-1.5 text-left font-semibold">#</th>
+                                          <th className="px-3 py-1.5 text-left font-semibold">Item</th>
+                                          <th className="px-3 py-1.5 text-left font-semibold">Category</th>
+                                          <th className="px-3 py-1.5 text-right font-semibold">Price</th>
+                                          <th className="px-3 py-1.5 text-center font-semibold">Qty</th>
+                                          <th className="px-3 py-1.5 text-right font-semibold">Line Total</th>
                                         </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Financial + Shipping */}
-                            <div className="grid grid-cols-3 gap-3 text-[11px]">
-                              <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
-                                <div className="font-semibold text-gray-700 mb-1">Financials</div>
-                                <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(resolveSubtotal(o))}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">Shipping</span><span>{formatCurrency(resolveShipping(o))}</span></div>
-                                <div className="flex justify-between text-red-600"><span>Payment Fee</span><span>-{formatCurrency(resolvePaymentFee(o))}</span></div>
-                                <div className="flex justify-between text-red-600"><span>Platform Fee</span><span>-{formatCurrency(resolvePlatformFee(o))}</span></div>
-                                <div className="flex justify-between pt-1.5 border-t font-semibold text-green-700"><span>Net Payout</span><span>{formatCurrency(resolveNet(o))}</span></div>
-                              </div>
-                              <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
-                                <div className="font-semibold text-gray-700 mb-1">Payment</div>
-                                <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="capitalize">{(o as any).paymongo?.paymentStatus || o.status.replace(/_/g, ' ')}</span></div>
-                              </div>
-                              {o.region && (
-                                <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
-                                  <div className="font-semibold text-gray-700 mb-1">Location</div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Municipality</span><span>{o.region.municipality || '—'}</span></div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Province</span><span>{o.region.province || '—'}</span></div>
+                                      </thead>
+                                      <tbody>
+                                        {o.items.map((it: any, idx: number) => (
+                                          <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-blue-50/40'}>
+                                            <td className="px-3 py-1.5 text-gray-500">{idx + 1}</td>
+                                            <td className="px-3 py-1.5 text-gray-900 font-medium">{it.name || 'Unknown'}</td>
+                                            <td className="px-3 py-1.5 text-gray-600">{it.category || '—'}</td>
+                                            <td className="px-3 py-1.5 text-right">{formatCurrency(it.price || 0)}</td>
+                                            <td className="px-3 py-1.5 text-center">{it.quantity || 1}</td>
+                                            <td className="px-3 py-1.5 text-right font-medium">{formatCurrency((it.price || 0) * (it.quantity || 1))}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
                                 </div>
                               )}
+
+                              {/* Financial + Shipping */}
+                              <div className="grid grid-cols-3 gap-3 text-[11px]">
+                                <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+                                  <div className="font-semibold text-gray-700 mb-1">Financials</div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(resolveSubtotal(o))}</span></div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Shipping</span><span>{formatCurrency(resolveShipping(o))}</span></div>
+                                  <div className="flex justify-between text-red-600"><span>Payment Fee</span><span>-{formatCurrency(resolvePaymentFee(o))}</span></div>
+                                  <div className="flex justify-between text-red-600"><span>Platform Fee</span><span>-{formatCurrency(resolvePlatformFee(o))}</span></div>
+                                  <div className="flex justify-between pt-1.5 border-t font-semibold text-green-700"><span>Net Payout</span><span>{formatCurrency(resolveNet(o))}</span></div>
+                                </div>
+                                <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+                                  <div className="font-semibold text-gray-700 mb-1">Payment</div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</span></div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="capitalize">{(o as any).paymongo?.paymentStatus || o.status.replace(/_/g, ' ')}</span></div>
+                                </div>
+                                {o.region && (
+                                  <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+                                    <div className="font-semibold text-gray-700 mb-1">Location</div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Municipality</span><span>{o.region.municipality || '—'}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Province</span><span>{o.region.province || '—'}</span></div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -419,7 +437,9 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
               {filtered.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-100 font-semibold border-t-2 border-gray-300">
-                    <td colSpan={7} className="px-3 py-2.5 text-right text-[11px] text-gray-700">TOTAL ({filtered.length} orders)</td>
+                    <td colSpan={7} className="px-3 py-2.5 text-right text-[11px] text-gray-700">
+                      TOTAL ({totals.successfulCount} successful order{totals.successfulCount !== 1 ? 's' : ''})
+                    </td>
                     <td className="px-3 py-2.5 text-right text-[11px]">{formatCurrency(totals.sub)}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] text-red-600">{formatCurrency(totals.pf)}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] text-red-600">{formatCurrency(totals.plf)}</td>

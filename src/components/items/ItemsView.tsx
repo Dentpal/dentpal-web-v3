@@ -1,6 +1,6 @@
 /**
  * ItemsView - Combined Items view with list and inline add form
- * 
+ *
  * Shows item list by default with "Add Item" button
  * When clicked, shows the add item form inline (not as modal)
  */
@@ -20,29 +20,25 @@ const ItemsView: React.FC = () => {
   if (showAddForm) {
     return (
       <div>
-        {/* Back to List Button */}
-        <div style={{ marginBottom: 20 }}>
+        {/* Back to List + Bulk Item on the same row */}
+        <div className="flex items-center justify-between mb-5">
           <button
             onClick={() => setShowAddForm(false)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 20px',
-              background: '#6b7280',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'background 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#4b5563'}
-            onMouseLeave={(e) => e.currentTarget.style.background = '#6b7280'}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg text-sm font-semibold hover:bg-gray-600 transition"
           >
             <ArrowLeft size={18} />
             Back to Item List
+          </button>
+          <button
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('tab', 'items-bulk');
+              window.history.pushState({}, '', url.pathname + url.search);
+              window.dispatchEvent(new Event('popstate'));
+            }}
+            className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold text-sm shadow hover:bg-indigo-700 transition"
+          >
+            Bulk Item
           </button>
         </div>
 

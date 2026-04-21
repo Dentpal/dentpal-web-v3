@@ -47,6 +47,7 @@ interface InventoryItem {
   warrantyPolicy?: string;
   dangerousGoods?: string;
   allowInquiry?: boolean;
+  clickCounter?: number;
 }
 
 interface ItemsListProps {
@@ -223,6 +224,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         warrantyPolicy: r.warrantyPolicy || '',
         dangerousGoods: r.dangerousGoods || 'none',
         allowInquiry: r.allowInquiry || false,
+        clickCounter: r.clickCounter ?? 0,
       }));
       setItems(mapped as any);
       setLoading(false);
@@ -841,7 +843,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr className="text-left">
-              <th className={`px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide ${catalogTab === 'draft' ? 'w-[28%]' : ''}`}>PRODUCT NAME</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide" style={{ width: '25%', maxWidth: 260 }}>PRODUCT NAME</th>
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">CATEGORY</th>
               {catalogTab === 'violation' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">REASON</th>
@@ -851,6 +853,9 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">PRICE</th>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STOCK</th>
                 </>
+              )}
+              {catalogTab !== 'archive' && catalogTab !== 'violation' && (
+                <th className="px-4 py-3 text-center text-[11px] font-semibold text-gray-600 tracking-wide">CLICKS</th>
               )}
               {catalogTab === 'all' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">STATUS</th>
@@ -889,17 +894,17 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   onClick={() => !isDeleted && !isArchived && handleEditItem(item)}
                 >
                   {/* Product Name */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" style={{ maxWidth: 260 }}>
                     <div className="flex items-center gap-3 min-w-0">
                       {item.imageUrl ? (
-                        <img src={item.imageUrl} alt={item.name} className="h-10 w-10 rounded object-cover bg-gray-100" />
+                        <img src={item.imageUrl} alt={item.name} className="h-10 w-10 rounded object-cover bg-gray-100 flex-shrink-0" />
                       ) : (
-                        <div className="h-10 w-10 rounded bg-gray-100 flex items-center justify-center">
+                        <div className="h-10 w-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
                           <Package className="w-5 h-5 text-gray-400" />
                         </div>
                       )}
                       <div className="min-w-0">
-                        <div className={`truncate font-medium text-gray-900 ${catalogTab === 'draft' ? 'max-w-[220px]' : ''}`}>{item.name}</div>
+                        <div className="truncate font-medium text-gray-900 max-w-[180px]">{item.name}</div>
                       </div>
                     </div>
                   </td>
@@ -929,6 +934,12 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                         )}
                       </td>
                     </>
+                  )}
+                  {/* Click Counter */}
+                  {catalogTab !== 'archive' && catalogTab !== 'violation' && (
+                    <td className="px-4 py-3 text-center text-gray-700">
+                      {Number(item.clickCounter ?? 0)}
+                    </td>
                   )}
                   {/* Status Badge - only in "all" tab */}
                   {catalogTab === 'all' && (

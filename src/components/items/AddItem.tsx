@@ -444,31 +444,8 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     }
   };
 
-  const goToTab = (tab: string) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', tab);
-    window.history.pushState({}, '', url.pathname + url.search);
-    window.dispatchEvent(new Event('popstate'));
-  };
-
   return (
     <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => goToTab('items-list')}
-            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium text-sm hover:bg-gray-200 transition"
-          >
-            ← Back to Item List
-          </button>
-          <button
-            type="button"
-            onClick={() => goToTab('items-bulk')}
-            className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold text-sm shadow hover:bg-indigo-700 transition"
-          >
-            Bulk Item
-          </button>
-        </div>
 
         <input
           ref={productImageInputRef}

@@ -5,7 +5,9 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Save, ChevronDown, ChevronRight, ImageIcon, CheckCircle, XCircle, ClipboardPaste, Info } from 'lucide-react';
+import { Plus, Trash2, Save, ChevronDown, ChevronRight, ImageIcon, CheckCircle, XCircle, ClipboardPaste, Info, Download, Upload } from 'lucide-react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { ProductService } from '@/services/product';
@@ -238,6 +240,7 @@ const BulkAddItems: React.FC = () => {
   const [subcatsByCat, setSubcatsByCat] = useState<Record<string, Array<{ id: string; name: string }>>>({});
   const [showGuide, setShowGuide]       = useState(false);
   const containerRef                    = useRef<HTMLDivElement>(null);
+  const xlsxInputRef                    = useRef<HTMLInputElement>(null);
 
   /* live category data */
   useEffect(() => {
@@ -433,6 +436,255 @@ const BulkAddItems: React.FC = () => {
     window.dispatchEvent(new Event('popstate'));
   };
 
+  /* ── Shared helper: fetch subcats for a list of category IDs not yet in state ── */
+  const fetchMissingSubcats = (catIds: string[]): Promise<Record<string, Array<{ id: string; name: string }>>> =>
+    new Promise(resolve => {
+      const missing = catIds.filter(id => !subcatsByCat[id]);
+      if (missing.length === 0) { resolve({}); return; }
+      const result: Record<string, Array<{ id: string; name: string }>> = {};
+      let done = 0;
+      missing.forEach(catId => {
+        const unsub = CategoryService.listenSubcategories(catId, subs => {
+          result[catId] = subs.map(s => ({ id: s.id, name: s.name }));
+          unsub();
+          if (++done === missing.length) resolve(result);
+        });
+      });
+    });
+
+  /* ── Download Excel Template ── */
+  const downloadTemplate = async () => {
+    // Pre-fetch all subcategories so we can put them in the dropdown lists
+    const fetched = await fetchMissingSubcats(categories.map(c => c.id));
+    const allSubcats: Record<string, Array<{ id: string; name: string }>> = { ...subcatsByCat, ...fetched };
+    if (Object.keys(fetched).length) setSubcatsByCat(prev => ({ ...prev, ...fetched }));
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Products');
+
+    const tealFill: ExcelJS.Fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } };
+    const indigoFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    const whiteFg = { argb: 'FFFFFFFF' };
+
+    const colDefs = [
+      { header: 'Brand *',                     key: 'brand',            width: 16, fill: tealFill },
+      { header: 'Product Name *',              key: 'name',             width: 22, fill: tealFill },
+      { header: 'Description',                key: 'description',      width: 28, fill: tealFill },
+      { header: 'Category *',                 key: 'category',         width: 18, fill: tealFill },
+      { header: 'Subcategory *',              key: 'subcategory',      width: 18, fill: tealFill },
+      { header: 'Dangerous Goods',            key: 'dangerousGoods',   width: 18, fill: tealFill },
+      { header: 'Warranty Type *',            key: 'warrantyType',     width: 24, fill: tealFill },
+      { header: 'Warranty Duration (months)', key: 'warrantyDuration', width: 24, fill: tealFill },
+      { header: 'Warranty Policy',            key: 'warrantyPolicy',   width: 22, fill: tealFill },
+      { header: 'Variation Name *',           key: 'varName',          width: 18, fill: indigoFill },
+      { header: 'SKU *',                      key: 'sku',              width: 14, fill: indigoFill },
+      { header: 'Price *',                    key: 'price',            width: 10, fill: indigoFill },
+      { header: 'Pcs/Box *',                  key: 'pcsPerBox',        width: 10, fill: indigoFill },
+      { header: 'Weight (g) *',               key: 'weight',           width: 12, fill: indigoFill },
+      { header: 'Length (cm) *',              key: 'length',           width: 12, fill: indigoFill },
+      { header: 'Width (cm) *',               key: 'width',            width: 12, fill: indigoFill },
+      { header: 'Height (cm) *',              key: 'height',           width: 12, fill: indigoFill },
+    ];
+
+    ws.columns = colDefs.map(c => ({ header: c.header, key: c.key, width: c.width }));
+    const hRow = ws.getRow(1);
+    hRow.height = 22;
+    colDefs.forEach((c, i) => {
+      const cell = hRow.getCell(i + 1);
+      cell.fill = c.fill;
+      cell.font = { bold: true, color: whiteFg, size: 10 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+    ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }];
+
+    // Example row (update with a real category from the live list if possible)
+    const exCat    = categories[0]?.name ?? 'Consumables';
+    const exSubcat = (allSubcats[categories[0]?.id] ?? [])[0]?.name ?? 'Bonding Agents';
+    ws.addRow({
+      brand: 'DentalCo', name: 'Dental Mirror', description: 'High quality stainless steel mirror',
+      category: exCat, subcategory: exSubcat, dangerousGoods: 'none',
+      warrantyType: 'local_manufacturer', warrantyDuration: 12, warrantyPolicy: '1-year warranty',
+      varName: 'Standard', sku: 'SKU-001', price: 250, pcsPerBox: 10,
+      weight: 150, length: 20, width: 10, height: 5,
+    });
+
+    /* ── _Lists hidden sheet for dropdown data ── */
+    const wsList = wb.addWorksheet('_Lists');
+    wsList.state = 'veryHidden';
+
+    // Column A: category names
+    categories.forEach((c, i) => { wsList.getCell(i + 1, 1).value = c.name; });
+    const catCount = categories.length || 1;
+
+    // Column B: all subcategory names (flat, de-duped, sorted)
+    const allSubcatNames = [...new Set(
+      categories.flatMap(c => (allSubcats[c.id] ?? []).map(s => s.name))
+    )].sort((a, b) => a.localeCompare(b));
+    allSubcatNames.forEach((name, i) => { wsList.getCell(i + 1, 2).value = name; });
+    const subcatCount = allSubcatNames.length || 1;
+
+    // Columns C+: per-category subcategory lists (for per-category grouping reference)
+    categories.forEach((c, ci) => {
+      const subs = allSubcats[c.id] ?? [];
+      wsList.getCell(1, ci + 3).value = c.name; // header
+      subs.forEach((s, si) => { wsList.getCell(si + 2, ci + 3).value = s.name; });
+    });
+
+    /* ── Data Validations ── */
+    const MAX_ROWS = 500;
+
+    // Column D → Category dropdown
+    ws.dataValidations.add(`D2:D${MAX_ROWS}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: [`_Lists!$A$1:$A$${catCount}`],
+      showErrorMessage: true,
+      errorTitle: 'Invalid category',
+      error: 'Please select a category from the dropdown list.',
+    });
+
+    // Column E → Subcategory dropdown (all subcats flat list)
+    if (subcatCount > 0) {
+      ws.dataValidations.add(`E2:E${MAX_ROWS}`, {
+        type: 'list',
+        allowBlank: true,
+        formulae: [`_Lists!$B$1:$B$${subcatCount}`],
+        showErrorMessage: false,
+      });
+    }
+
+    // Column F → Dangerous Goods dropdown
+    ws.dataValidations.add(`F2:F${MAX_ROWS}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"none,battery,flammable,liquid"'],
+    });
+
+    // Column G → Warranty Type dropdown
+    ws.dataValidations.add(`G2:G${MAX_ROWS}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"local_manufacturer,international_manufacturer,local_supplier,local_supplier_refund,no_warranty,international_seller"'],
+    });
+
+    /* ── Valid Values reference sheet ── */
+    const ws2 = wb.addWorksheet('Valid Values');
+    ws2.columns = [
+      { header: 'Field', key: 'field', width: 28 },
+      { header: 'Valid Values', key: 'values', width: 60 },
+    ];
+    ws2.getRow(1).eachCell(cell => { cell.font = { bold: true }; });
+    [
+      ['Dangerous Goods', 'none | battery | flammable | liquid'],
+      ['Warranty Type', 'local_manufacturer | international_manufacturer | local_supplier | local_supplier_refund | no_warranty | international_seller'],
+      ['', ''],
+      ['Note', 'Each row = 1 product with 1 variation. To add more variations to the same product, upload first then click "+ Add Variation" in the table.'],
+    ].forEach(([field, values]) => ws2.addRow({ field, values }));
+
+    // Also list categories + subcategories for reference
+    ws2.addRow({});
+    ws2.addRow({ field: 'CATEGORIES & SUBCATEGORIES', values: '' });
+    const catLabelRow = ws2.lastRow;
+    if (catLabelRow) catLabelRow.getCell(1).font = { bold: true };
+    categories.forEach(c => {
+      const subs = (allSubcats[c.id] ?? []).map(s => s.name).join(' | ') || '(no subcategories)';
+      ws2.addRow({ field: c.name, values: subs });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      'dentpal_bulk_items_template.xlsx',
+    );
+  };
+
+  /* ── Upload Excel ── */
+  const handleExcelUpload = async (file: File) => {
+    try {
+      const arrayBuf = await file.arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(arrayBuf as unknown as Buffer);
+      const ws = wb.getWorksheet('Products') || wb.worksheets[0];
+      if (!ws) {
+        toast({ title: 'Error', description: 'Could not find a Products sheet in the file.', variant: 'destructive' });
+        return;
+      }
+
+      const cv = (row: ExcelJS.Row, col: number): string => {
+        const cell = row.getCell(col);
+        const v = cell.value;
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'object' && 'richText' in (v as any))
+          return (v as any).richText.map((r: any) => r.text).join('');
+        return String(v).trim();
+      };
+
+      // ── Pass 1: collect raw row data & resolve category IDs ──
+      type RawRow = { rowNum: number; cols: string[]; catID: string; catName: string; subcatName: string };
+      const rawRows: RawRow[] = [];
+      ws.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+        const cols = Array.from({ length: 17 }, (_, i) => cv(row, i + 1));
+        const [brandVal, nameVal] = [cols[0], cols[1]];
+        if (!brandVal && !nameVal) return;
+        const catName  = cols[3];
+        const catMatch = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+        rawRows.push({ rowNum, cols, catID: catMatch?.id ?? '', catName, subcatName: cols[4] });
+      });
+
+      if (rawRows.length === 0) {
+        toast({ title: 'No data', description: 'No product rows found in the file.', variant: 'destructive' });
+        return;
+      }
+
+      // ── Pre-fetch subcategories for any category IDs not yet in state ──
+      const uniqueCatIds = [...new Set(rawRows.map(r => r.catID).filter(Boolean))];
+      const freshSubcats = await fetchMissingSubcats(uniqueCatIds);
+      const resolvedSubcats: Record<string, Array<{ id: string; name: string }>> = {
+        ...subcatsByCat,
+        ...freshSubcats,
+      };
+      if (Object.keys(freshSubcats).length)
+        setSubcatsByCat(prev => ({ ...prev, ...freshSubcats }));
+
+      // ── Pass 2: build Product objects now that subcats are loaded ──
+      const imported: Product[] = rawRows.map(({ cols, catID, catName, subcatName }) => {
+        const subcatID = catID
+          ? (resolvedSubcats[catID] ?? []).find(s => s.name.toLowerCase() === subcatName.toLowerCase())?.id ?? ''
+          : '';
+
+        const rowErrors: Record<string, string> = {
+          ...(catID    ? {} : catName    ? { categoryID:    `Unknown category: "${catName}"` }    : {}),
+          ...(subcatID ? {} : subcatName && catID
+            ? { subCategoryID: `Unknown subcategory: "${subcatName}"` } : {}),
+        };
+
+        return {
+          ...emptyProduct(),
+          brand: cols[0], name: cols[1], description: cols[2],
+          categoryID: catID, subCategoryID: subcatID,
+          dangerousGoods: cols[5] || 'none',
+          warrantyType: cols[6], warrantyDuration: cols[7], warrantyPolicy: cols[8],
+          errors: rowErrors,
+          variations: [{
+            ...emptyVar(),
+            name: cols[9], sku: cols[10], price: cols[11],
+            pcsPerBox: cols[12], weight: cols[13],
+            length: cols[14], width: cols[15], height: cols[16],
+          }],
+        };
+      });
+
+      setProducts(imported);
+      toast({
+        title: `Imported ${imported.length} product${imported.length !== 1 ? 's' : ''}`,
+        description: 'Only 1 variation per product was imported. Add more variations directly in the table.',
+      });
+    } catch (e: any) {
+      toast({ title: 'Import failed', description: e?.message || 'Could not parse the Excel file.', variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3" ref={containerRef}>
 
@@ -461,6 +713,18 @@ const BulkAddItems: React.FC = () => {
           <ClipboardPaste className="w-3.5 h-3.5" /> Paste from Excel
           <Info className="w-3 h-3 opacity-60" />
         </button>
+        <button onClick={downloadTemplate}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition border border-green-200">
+          <Download className="w-3.5 h-3.5" /> Download Template
+        </button>
+        <button onClick={() => xlsxInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 text-xs font-semibold hover:bg-purple-100 transition border border-purple-200">
+          <Upload className="w-3.5 h-3.5" /> Upload Excel
+        </button>
+        <input
+          ref={xlsxInputRef} type="file" accept=".xlsx" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleExcelUpload(f); e.target.value = ''; }}
+        />
       </div>
 
       {/* ── Excel paste guide panel ── */}
@@ -561,10 +825,10 @@ const BulkAddItems: React.FC = () => {
           <colgroup>
             <col style={{ width: 28 }} />   {/* # */}
             <col style={{ width: 26 }} />   {/* expand */}
-            <col style={{ width: 50 }} />   {/* brand img */}
-            <col />                          {/* brand – flex */}
-            <col style={{ width: 50 }} />   {/* prod img */}
-            <col style={{ width: '14%' }} />{/* name */}
+            <col style={{ width: 50 }} />                    {/* brand img */}
+            <col style={{ width: '9%', minWidth: 80 }} />   {/* brand */}
+            <col style={{ width: 50 }} />                    {/* prod img */}
+            <col style={{ width: '12%' }} />                 {/* name */}
             <col style={{ width: '16%' }} />{/* description */}
             <col style={{ width: '10%' }} />{/* category */}
             <col style={{ width: '10%' }} />{/* subcategory */}
