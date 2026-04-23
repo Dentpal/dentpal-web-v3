@@ -21,6 +21,17 @@ const TAX_TYPE_CATALOG = [
 	'OTHER PERCENTAGE TAX',
 ];
 
+type LocationGroup = '' | 'NCR' | 'Luzon' | 'Visayas' | 'Mindanao';
+
+const regionToLocation = (name: string): LocationGroup => {
+	const n = (name || '').toUpperCase();
+	if (n.includes('NCR') || n.includes('NATIONAL CAPITAL')) return 'NCR';
+	if (/(ILOCOS|CAGAYAN|CENTRAL LUZON|CALABARZON|MIMAROPA|BICOL|CORDILLERA|CAR)/.test(n)) return 'Luzon';
+	if (/(WESTERN VISAYAS|CENTRAL VISAYAS|EASTERN VISAYAS|NEGROS ISLAND)/.test(n)) return 'Visayas';
+	if (/(ZAMBOANGA|NORTHERN MINDANAO|DAVAO|SOCCSKSARGEN|CARAGA|BARMM|BANGSAMORO|AUTONOMOUS REGION IN MUSLIM)/.test(n)) return 'Mindanao';
+	return '';
+};
+
 /**
  * SellerProfileTab
  * Streamlined seller profile tab focused on Vendor Enrollment.
@@ -103,7 +114,7 @@ const SellerProfileTab: React.FC = () => {
 		categories: [] as string[],
 		companyName: '',
 		storeName: '',
-		address: { street: '', barangay: '', municipality: '', province: '', zip: '' }, // split address
+		address: { street: '', barangay: '', municipality: '', province: '', region: '', location: '', zip: '' }, // split address
 		contactPerson: '',
 		landline: '',
 		mobile: '',
@@ -180,6 +191,8 @@ const SellerProfileTab: React.FC = () => {
 						barangay: v.company?.address?.line2 || '',
 						municipality: v.company?.address?.city || '',
 						province: v.company?.address?.province || '',
+						region: v.company?.address?.region || '',
+						location: v.company?.address?.location || '',
 						zip: v.company?.address?.zip || '',
 					},
 					contactPerson: v.contacts?.name || '',
@@ -221,6 +234,8 @@ const SellerProfileTab: React.FC = () => {
 
 	// Validation state
 	const [errors, setErrors] = useState<{ mobile: string; email: string; tin: string; tinOcr: string; zip?: string; regDate?: string }>({ mobile: '', email: '', tin: '', tinOcr: '' });
+	// Top-level location group (filters Region; NCR short-circuits Province)
+	const [location, setLocation] = useState<LocationGroup>('');
 	const [mapOpen, setMapOpen] = useState(false);
 	// NEW: Review dialog state
 	const [reviewOpen, setReviewOpen] = useState(false);
@@ -386,6 +401,7 @@ const SellerProfileTab: React.FC = () => {
 			vendor.companyName &&
 			vendor.storeName &&
 			vendor.contactPerson &&
+			location &&
 			vendor.address.street &&
 			vendor.address.barangay &&
 			vendor.address.municipality &&
@@ -393,7 +409,7 @@ const SellerProfileTab: React.FC = () => {
 			vendor.address.zip &&
 			!errors.zip
 		);
-	}, [vendor, errors.zip]);
+	}, [vendor, errors.zip, location]);
 
 	const step2Valid = useMemo(() => {
 		// Step 2: Contacts, Banking, and Additional Documents
@@ -460,10 +476,11 @@ const SellerProfileTab: React.FC = () => {
 				if (!vendor.companyName) missing.push('Company Name');
 				if (!vendor.storeName) missing.push('Store Name');
 				if (!vendor.contactPerson) missing.push('Customer Service Contact Person');
-				if (!vendor.address.street) missing.push('Street Address');
-				if (!vendor.address.barangay) missing.push('Barangay');
-				if (!vendor.address.municipality) missing.push('Municipality/City');
+				if (!location) missing.push('Location');
 				if (!vendor.address.province) missing.push('Province');
+				if (!vendor.address.municipality) missing.push('Municipality/City');
+				if (!vendor.address.barangay) missing.push('Barangay');
+				if (!vendor.address.street) missing.push('Street Address');
 				if (!vendor.address.zip || errors.zip) missing.push('Valid ZIP Code');
 				break;
 			case 2:
@@ -571,9 +588,6 @@ const SellerProfileTab: React.FC = () => {
 
 	// Completed summary view (read-only)
 	const renderCompletedSummary = () => {
-		// Compute the region name from the selected region code
-		const selectedRegionName = regions.find(r => r.code === selectedRegion)?.name || '';
-		
 		return (
 		<div className="space-y-4">
 			<div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
@@ -840,18 +854,24 @@ const SellerProfileTab: React.FC = () => {
 								<h3 className="font-semibold text-gray-900">Company Information</h3>
 							</div>
 							{!editingCompany ? (
-								<button 
-									onClick={() => setEditingCompany(true)}
+								<button
+									onClick={() => {
+										setEditingCompany(true);
+										hydrateAddressCascadeFromSaved();
+									}}
 									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
 								>
 									<Pencil className="w-3.5 h-3.5" /> Edit
 								</button>
 							) : (
 								<div className="flex gap-2">
-									<button 
+									<button
 										onClick={() => {
 											setVendor(originalVendor);
 											setEditingCompany(false);
+											setLocation('');
+											setSelectedRegion(''); setSelectedProvince(''); setSelectedCity(''); setSelectedBarangay('');
+											setProvinces([]); setCities([]); setBarangays([]);
 										}}
 										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
 									>
@@ -872,12 +892,17 @@ const SellerProfileTab: React.FC = () => {
 															line2: vendor.address.barangay,
 															city: vendor.address.municipality,
 															province: vendor.address.province,
+															region: vendor.address.region,
+															location: vendor.address.location,
 															zip: vendor.address.zip,
 														},
 													},
 												} as any);
 												setOriginalVendor(vendor);
 												setEditingCompany(false);
+												setLocation('');
+												setSelectedRegion(''); setSelectedProvince(''); setSelectedCity(''); setSelectedBarangay('');
+												setProvinces([]); setCities([]); setBarangays([]);
 											} catch (error: any) {
 												alert('Failed to save: ' + (error.message || 'Unknown error'));
 											} finally { 
@@ -895,8 +920,8 @@ const SellerProfileTab: React.FC = () => {
 							<div>
 								<div className="text-xs font-medium text-gray-500 mb-1">Company Name</div>
 								{editingCompany ? (
-									<Input 
-										value={vendor.companyName} 
+									<Input
+										value={vendor.companyName}
 										onChange={(e) => setField('companyName', e.target.value)}
 										className="h-8 text-sm"
 										placeholder="Company Name"
@@ -908,8 +933,8 @@ const SellerProfileTab: React.FC = () => {
 							<div>
 								<div className="text-xs font-medium text-gray-500 mb-1">Store Name</div>
 								{editingCompany ? (
-									<Input 
-										value={vendor.storeName} 
+									<Input
+										value={vendor.storeName}
 										onChange={(e) => setField('storeName', e.target.value)}
 										className="h-8 text-sm"
 										placeholder="Store Name"
@@ -918,11 +943,71 @@ const SellerProfileTab: React.FC = () => {
 									<div className="text-sm text-gray-900">{vendor.storeName || '-'}</div>
 								)}
 							</div>
+							{editingCompany && (
+								<div className="md:col-span-2">
+									<div className="text-xs font-medium text-gray-500 mb-1">Location</div>
+									<select value={location} onChange={(e)=> onLocationSelect(e.target.value as LocationGroup)} className="w-full text-sm p-2 border border-gray-200 rounded-lg h-8">
+										<option value="">Select location</option>
+										<option value="NCR">NCR</option>
+										<option value="Luzon">Luzon</option>
+										<option value="Visayas">Visayas</option>
+										<option value="Mindanao">Mindanao</option>
+									</select>
+								</div>
+							)}
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Region</div>
+								{editingCompany ? (
+									<select disabled={!location || location === 'NCR'} value={selectedRegion} onChange={(e)=> onRegionSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg h-8 disabled:bg-gray-50">
+										<option value="">Select region</option>
+										{regions.filter(r => location && regionToLocation(r.name) === location).map(r => (<option key={r.code} value={r.code}>{r.name}</option>))}
+									</select>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.region || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Province</div>
+								{editingCompany ? (
+									location === 'NCR' ? (
+										<Input value="Metro Manila" disabled className="h-8 text-sm bg-gray-50" />
+									) : (
+										<select disabled={!selectedRegion} value={selectedProvince} onChange={(e)=> onProvinceSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg h-8 disabled:bg-gray-50">
+											<option value="">Select province</option>
+											{provinces.map(p => (<option key={p.code} value={p.code}>{p.name}</option>))}
+										</select>
+									)
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.province || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Municipality/City</div>
+								{editingCompany ? (
+									<select disabled={location !== 'NCR' && !selectedProvince} value={selectedCity} onChange={(e)=> onCitySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg h-8 disabled:bg-gray-50">
+										<option value="">Select city/municipality</option>
+										{cities.map(c => (<option key={c.code} value={c.code}>{c.name}</option>))}
+									</select>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.municipality || '-'}</div>
+								)}
+							</div>
+							<div>
+								<div className="text-xs font-medium text-gray-500 mb-1">Barangay</div>
+								{editingCompany ? (
+									<select disabled={!selectedCity} value={selectedBarangay} onChange={(e)=> onBarangaySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg h-8 disabled:bg-gray-50">
+										<option value="">Select barangay</option>
+										{barangays.map(b => (<option key={b.code} value={b.code}>{b.name}</option>))}
+									</select>
+								) : (
+									<div className="text-sm text-gray-900">{vendor.address.barangay || '-'}</div>
+								)}
+							</div>
 							<div className="md:col-span-2">
 								<div className="text-xs font-medium text-gray-500 mb-1">Street</div>
 								{editingCompany ? (
-									<Input 
-										value={vendor.address.street} 
+									<Input
+										value={vendor.address.street}
 										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, street: e.target.value } }))}
 										className="h-8 text-sm"
 										placeholder="Street Address"
@@ -932,65 +1017,10 @@ const SellerProfileTab: React.FC = () => {
 								)}
 							</div>
 							<div>
-								<div className="text-xs font-medium text-gray-500 mb-1">Region</div>
-								{editingCompany ? (
-									<Input 
-										value={selectedRegionName} 
-										onChange={(e) => {
-											// For manual input - you may want to integrate with region selection
-										}}
-										className="h-8 text-sm"
-										placeholder="Region"
-										readOnly
-									/>
-								) : (
-									<div className="text-sm text-gray-900">{selectedRegionName || '-'}</div>
-								)}
-							</div>
-							<div>
-								<div className="text-xs font-medium text-gray-500 mb-1">Province</div>
-								{editingCompany ? (
-									<Input 
-										value={vendor.address.province} 
-										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, province: e.target.value } }))}
-										className="h-8 text-sm"
-										placeholder="Province"
-									/>
-								) : (
-									<div className="text-sm text-gray-900">{vendor.address.province || '-'}</div>
-								)}
-							</div>
-							<div>
-								<div className="text-xs font-medium text-gray-500 mb-1">Municipality/City</div>
-								{editingCompany ? (
-									<Input 
-										value={vendor.address.municipality} 
-										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, municipality: e.target.value } }))}
-										className="h-8 text-sm"
-										placeholder="Municipality/City"
-									/>
-								) : (
-									<div className="text-sm text-gray-900">{vendor.address.municipality || '-'}</div>
-								)}
-							</div>
-							<div>
-								<div className="text-xs font-medium text-gray-500 mb-1">Barangay</div>
-								{editingCompany ? (
-									<Input 
-										value={vendor.address.barangay} 
-										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, barangay: e.target.value } }))}
-										className="h-8 text-sm"
-										placeholder="Barangay"
-									/>
-								) : (
-									<div className="text-sm text-gray-900">{vendor.address.barangay || '-'}</div>
-								)}
-							</div>
-							<div>
 								<div className="text-xs font-medium text-gray-500 mb-1">ZIP Code</div>
 								{editingCompany ? (
-									<Input 
-										value={vendor.address.zip} 
+									<Input
+										value={vendor.address.zip}
 										onChange={(e) => setVendor(v => ({ ...v, address: { ...v.address, zip: e.target.value } }))}
 										className="h-8 text-sm"
 										placeholder="0000"
@@ -1432,6 +1462,8 @@ const SellerProfileTab: React.FC = () => {
 	const [provinces, setProvinces] = useState<Array<{ code: string; name: string }>>([]);
 	const [cities, setCities] = useState<Array<{ code: string; name: string }>>([]);
 	const [barangays, setBarangays] = useState<Array<{ code: string; name: string }>>([]);
+	// Map from province name (lowercased) to its parent region { code, name }
+	const [provinceToRegion, setProvinceToRegion] = useState<Record<string, { code: string; name: string }>>({});
 	// Selected codes for cascading selects
 	const [selectedRegion, setSelectedRegion] = useState('');
 	const [selectedProvince, setSelectedProvince] = useState('');
@@ -1480,6 +1512,14 @@ const SellerProfileTab: React.FC = () => {
 					})
 				);
 				setAllProvinces(provinceGroups.flat());
+				// Build province-name → parent region map for location hydration
+				const pMap: Record<string, { code: string; name: string }> = {};
+				regionsMapped.forEach((r, idx) => {
+					provinceGroups[idx]?.forEach(p => {
+						pMap[p.name.toLowerCase()] = { code: r.code, name: r.name };
+					});
+				});
+				setProvinceToRegion(pMap);
 			} catch (err) {
 				console.error('Failed loading regions/provinces', err);
 				setRegions([]);
@@ -1487,6 +1527,77 @@ const SellerProfileTab: React.FC = () => {
 			}
 		})();
 	}, []);
+
+	// Hydrate the full cascade (location → region → province → city → barangay)
+	// from the currently saved vendor address. Used when entering edit mode on
+	// the Company Information section of an existing profile.
+	const hydrateAddressCascadeFromSaved = async () => {
+		const prov = vendor.address.province;
+		const cityName = vendor.address.municipality;
+		const brgyName = vendor.address.barangay;
+		if (!prov || regions.length === 0) return;
+		try {
+			const api = await getAddressApi();
+			if (prov.toLowerCase() === 'metro manila') {
+				const ncr = regions.find(r => regionToLocation(r.name) === 'NCR');
+				if (!ncr) return;
+				setLocation('NCR');
+				setSelectedRegion(ncr.code);
+				setVendor(v => ({ ...v, address: { ...v.address, location: 'NCR', region: ncr.name } }));
+				const districts = await api.provinces(ncr.code);
+				const cityGroups = await Promise.all(
+					districts.map(async (d: any) => {
+						const dCode = d.province_code ?? d.code;
+						try {
+							const list = await api.cities(dCode);
+							return list.map((c: any) => ({ code: c.city_code ?? c.municipality_code ?? c.code, name: c.city_name ?? c.municipality_name ?? c.name }));
+						} catch { return [] as Array<{ code: string; name: string }>; }
+					})
+				);
+				const seen = new Set<string>();
+				const merged: Array<{ code: string; name: string }> = [];
+				for (const c of cityGroups.flat()) if (!seen.has(c.code)) { seen.add(c.code); merged.push(c); }
+				merged.sort((a, b) => a.name.localeCompare(b.name));
+				setCities(merged);
+				const cityMatch = merged.find(c => c.name.toLowerCase() === (cityName || '').toLowerCase());
+				if (cityMatch) {
+					setSelectedCity(cityMatch.code);
+					const bList = await api.barangays(cityMatch.code);
+					const brgys = bList.map((b: any) => ({ code: b.brgy_code ?? b.barangay_code ?? b.code, name: b.brgy_name ?? b.barangay_name ?? b.name }));
+					setBarangays(brgys);
+					const brgyMatch = brgys.find(b => b.name.toLowerCase() === (brgyName || '').toLowerCase());
+					if (brgyMatch) setSelectedBarangay(brgyMatch.code);
+				}
+				return;
+			}
+			const parent = provinceToRegion[prov.toLowerCase()];
+			if (!parent) return;
+			const group = regionToLocation(parent.name);
+			if (!group) return;
+			setLocation(group);
+			setSelectedRegion(parent.code);
+			setVendor(v => ({ ...v, address: { ...v.address, location: group, region: parent.name } }));
+			const pList = await api.provinces(parent.code);
+			const provs = pList.map((p: any) => ({ code: p.province_code ?? p.code, name: p.province_name ?? p.name }));
+			setProvinces(provs);
+			const provMatch = provs.find(p => p.name.toLowerCase() === prov.toLowerCase());
+			if (!provMatch) return;
+			setSelectedProvince(provMatch.code);
+			const cList = await api.cities(provMatch.code);
+			const cityOpts = cList.map((c: any) => ({ code: c.city_code ?? c.municipality_code ?? c.code, name: c.city_name ?? c.municipality_name ?? c.name }));
+			setCities(cityOpts);
+			const cityMatch = cityOpts.find(c => c.name.toLowerCase() === (cityName || '').toLowerCase());
+			if (!cityMatch) return;
+			setSelectedCity(cityMatch.code);
+			const bList = await api.barangays(cityMatch.code);
+			const brgys = bList.map((b: any) => ({ code: b.brgy_code ?? b.barangay_code ?? b.code, name: b.brgy_name ?? b.barangay_name ?? b.name }));
+			setBarangays(brgys);
+			const brgyMatch = brgys.find(b => b.name.toLowerCase() === (brgyName || '').toLowerCase());
+			if (brgyMatch) setSelectedBarangay(brgyMatch.code);
+		} catch (err) {
+			console.error('Failed hydrating address cascade', err);
+		}
+	};
 
 	// Auto-fill ZIP using Nominatim based on current address parts
 	const autoFillZipFromNames = async (municipalityName: string, provinceName: string, barangayName?: string) => {
@@ -1514,10 +1625,47 @@ const SellerProfileTab: React.FC = () => {
 		}
 	};
 
+	const onLocationSelect = async (loc: LocationGroup) => {
+		setLocation(loc);
+		setSelectedRegion(''); setSelectedProvince(''); setSelectedCity(''); setSelectedBarangay('');
+		setProvinces([]); setCities([]); setBarangays([]);
+		setVendor(v => ({ ...v, address: { ...v.address, location: loc, region: '', province: '', municipality: '', barangay: '', zip: '' } }));
+		if (!loc) return;
+		if (loc === 'NCR') {
+			const ncr = regions.find(r => regionToLocation(r.name) === 'NCR');
+			if (!ncr) return;
+			setSelectedRegion(ncr.code);
+			setVendor(v => ({ ...v, address: { ...v.address, region: ncr.name, province: 'Metro Manila' } }));
+			try {
+				const api = await getAddressApi();
+				const districts = await api.provinces(ncr.code);
+				const cityGroups = await Promise.all(
+					districts.map(async (d: any) => {
+						const dCode = d.province_code ?? d.code;
+						try {
+							const list = await api.cities(dCode);
+							return list.map((c: any) => ({ code: c.city_code ?? c.municipality_code ?? c.code, name: c.city_name ?? c.municipality_name ?? c.name }));
+						} catch { return [] as Array<{ code: string; name: string }>; }
+					})
+				);
+				const seen = new Set<string>();
+				const merged: Array<{ code: string; name: string }> = [];
+				for (const c of cityGroups.flat()) {
+					if (!seen.has(c.code)) { seen.add(c.code); merged.push(c); }
+				}
+				merged.sort((a, b) => a.name.localeCompare(b.name));
+				setCities(merged);
+			} catch (err) {
+				console.error('Failed loading NCR cities', err);
+			}
+		}
+	};
+
 	const onRegionSelect = async (code: string) => {
 		setSelectedRegion(code);
 		setSelectedProvince(''); setSelectedCity(''); setSelectedBarangay('');
-		setVendor(v => ({ ...v, address: { ...v.address, province: '', municipality: '', barangay: '' } }));
+		const regionName = regions.find(r => r.code === code)?.name || '';
+		setVendor(v => ({ ...v, address: { ...v.address, region: regionName, province: '', municipality: '', barangay: '' } }));
 		setProvinces([]); setCities([]); setBarangays([]);
 		if (!code) return;
 		try {
@@ -1594,7 +1742,7 @@ const SellerProfileTab: React.FC = () => {
 			// 2) Build vendor payload and persist to Firestore (Seller collection)
 			const payload: any = {
 				categories: vendor.categories,
-				company: { name: vendor.companyName, storeName: vendor.storeName, address: { line1: vendor.address.street, line2: vendor.address.barangay, city: vendor.address.municipality, province: vendor.address.province, zip: vendor.address.zip } },
+				company: { name: vendor.companyName, storeName: vendor.storeName, address: { line1: vendor.address.street, line2: vendor.address.barangay, city: vendor.address.municipality, province: vendor.address.province, region: vendor.address.region, location: vendor.address.location, zip: vendor.address.zip } },
 				contacts: { name: vendor.contactPerson, email: vendor.email, phone: vendor.mobile },
 				// 2303-derived
 				tin: vendor.tin,
@@ -2050,31 +2198,43 @@ const SellerProfileTab: React.FC = () => {
 										</div>
 										<div className="md:col-span-2">
 											<label className="block text-xs font-medium text-gray-600 mb-1">
-												Street <span className="text-red-500">*</span>
+												Location <span className="text-red-500">*</span>
 											</label>
-											<input ref={streetRef} disabled={!isEditing} value={vendor.address.street} onChange={(e)=> setAddressField('street', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+											<select disabled={!isEditing} value={location} onChange={(e)=> onLocationSelect(e.target.value as LocationGroup)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
+												<option value="">Select location</option>
+												<option value="NCR">NCR</option>
+												<option value="Luzon">Luzon</option>
+												<option value="Visayas">Visayas</option>
+												<option value="Mindanao">Mindanao</option>
+											</select>
 										</div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">Region</label>
-											<select disabled={!isEditing} value={selectedRegion} onChange={(e)=> onRegionSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
+											<select disabled={!isEditing || !location || location === 'NCR'} value={selectedRegion} onChange={(e)=> onRegionSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
 												<option value="">Select region</option>
-												{regions.map(r => (<option key={r.code} value={r.code}>{r.name}</option>))}
+												{regions
+													.filter(r => location && regionToLocation(r.name) === location)
+													.map(r => (<option key={r.code} value={r.code}>{r.name}</option>))}
 											</select>
 										</div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												Province <span className="text-red-500">*</span>
 											</label>
-											<select ref={provinceRef} disabled={!isEditing} value={selectedProvince} onChange={(e)=> onProvinceSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
-												<option value="">Select province</option>
-												{(selectedRegion ? provinces : allProvinces).map(p => (<option key={p.code} value={p.code}>{p.name}</option>))}
-											</select>
+											{location === 'NCR' ? (
+												<input disabled value="Metro Manila" className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50" />
+											) : (
+												<select ref={provinceRef} disabled={!isEditing || !selectedRegion} value={selectedProvince} onChange={(e)=> onProvinceSelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
+													<option value="">Select province</option>
+													{provinces.map(p => (<option key={p.code} value={p.code}>{p.name}</option>))}
+												</select>
+											)}
 										</div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												Municipality / City <span className="text-red-500">*</span>
 											</label>
-											<select ref={cityRef} disabled={!isEditing || !selectedProvince} value={selectedCity} onChange={(e)=> onCitySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
+											<select ref={cityRef} disabled={!isEditing || (location !== 'NCR' && !selectedProvince)} value={selectedCity} onChange={(e)=> onCitySelect(e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50">
 												<option value="">Select city/municipality</option>
 												{cities.map(c => (<option key={c.code} value={c.code}>{c.name}</option>))}
 											</select>
@@ -2088,6 +2248,12 @@ const SellerProfileTab: React.FC = () => {
 												{barangays.map(b => (<option key={b.code} value={b.code}>{b.name}</option>))}
 											</select>
 										</div>
+										<div className="md:col-span-2">
+											<label className="block text-xs font-medium text-gray-600 mb-1">
+												Street <span className="text-red-500">*</span>
+											</label>
+											<input ref={streetRef} disabled={!isEditing} value={vendor.address.street} onChange={(e)=> setAddressField('street', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+										</div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
 												ZIP Code <span className="text-red-500">*</span>
@@ -2095,35 +2261,6 @@ const SellerProfileTab: React.FC = () => {
 											<input ref={zipRef} disabled={!isEditing} value={vendor.address.zip} onChange={onZipChange} inputMode="numeric" maxLength={4} placeholder="e.g. 1000" className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 											{zipLoading && <p className="mt-1 text-xs text-gray-500">Auto-filling ZIP…</p>}
 											{errors.zip && <p className="mt-1 text-xs text-red-600">{errors.zip}</p>}
-										</div>
-										<div className="md:col-span-2 flex items-center gap-2">
-											<button
-												type="button"
-												disabled={!isEditing || !addressReady}
-												onClick={() => setMapOpen(true)}
-												className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
-											>
-												Verify on map
-											</button>
-											{addressReady ? (
-												<a
-													className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50"
-													href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
-													target="_blank"
-													rel="noreferrer"
-												>
-													View in Google Maps
-												</a>
-											) : (
-												<button
-													type="button"
-													disabled
-													className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-gray-200 disabled:opacity-40"
-												>
-													View in Google Maps
-												</button>
-											)}
-											<span className="text-xs text-gray-500">We will open a map with the entered address for quick verification.</span>
 										</div>
 									</div>
 								</>

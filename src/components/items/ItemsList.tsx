@@ -875,7 +875,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               {catalogTab === 'draft' && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">SUBMIT</th>
               )}
-              {(catalogTab === 'draft' || catalogTab === 'archive') && (
+              {(catalogTab === 'draft' || catalogTab === 'archive' || catalogTab === 'violation') && (
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-600 tracking-wide">DELETE</th>
               )}
             </tr>
@@ -1034,8 +1034,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                       </button>
                     </td>
                   )}
-                  {/* Delete Button - only in draft and archive tabs */}
-                  {(catalogTab === 'draft' || catalogTab === 'archive') && (
+                  {/* Delete Button - draft, archive, and violation tabs */}
+                  {(catalogTab === 'draft' || catalogTab === 'archive' || catalogTab === 'violation') && (
                     <td className="px-4 py-3" onClick={e => { e.stopPropagation(); setDeleteDialog({ open: true, productId: item.id, productName: item.name }); }}>
                       <button
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg shadow-sm transition bg-red-600 text-white hover:bg-red-700"

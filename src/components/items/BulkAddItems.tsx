@@ -1,11 +1,11 @@
 /**
  * BulkAddItems – Excel-style two-level table.
  * Product table on top; variations expand inline as a nested sub-table.
- * Saves everything as draft.
+ * Submits each product as pending_qc (same wiring as single Add Item).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Save, ChevronDown, ChevronRight, ImageIcon, CheckCircle, XCircle, ClipboardPaste, Info, Download, Upload } from 'lucide-react';
+import { Plus, Trash2, Send, ChevronDown, ChevronRight, ImageIcon, CheckCircle, XCircle, Download, Upload } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { useAuth } from '@/hooks/use-auth';
@@ -48,6 +48,7 @@ type Variation = {
   length: string;
   width: string;
   height: string;
+  isFragile: boolean;
   errors: Record<string, string>;
 };
 
@@ -66,6 +67,7 @@ type Product = {
   warrantyType: string;
   warrantyDuration: string;
   warrantyPolicy: string;
+  insuranceAndEvaluation: boolean;
   variations: Variation[];
   expanded: boolean;
   saveStatus: null | { ok: boolean; msg: string };
@@ -80,6 +82,7 @@ const emptyVar = (): Variation => ({
   id: gid(), imgFile: null, imgPreview: null,
   name: '', sku: '', price: '', pcsPerBox: '',
   weight: '', length: '', width: '', height: '',
+  isFragile: false,
   errors: {},
 });
 
@@ -90,6 +93,7 @@ const emptyProduct = (): Product => ({
   name: '', description: '',
   categoryID: '', subCategoryID: '',
   dangerousGoods: 'none', warrantyType: '', warrantyDuration: '', warrantyPolicy: '',
+  insuranceAndEvaluation: false,
   variations: [emptyVar()],
   expanded: true,
   saveStatus: null,
@@ -101,6 +105,8 @@ const emptyProduct = (): Product => ({
 const validateAll = (products: Product[]): Product[] =>
   products.map(p => {
     const pe: Record<string, string> = {};
+    if (!p.brandImgFile)           pe.brandImg = 'Required';
+    if (!p.prodImgFile)            pe.prodImg = 'Required';
     if (!p.brand.trim())           pe.brand = 'Required';
     if (!p.name.trim())            pe.name = 'Required';
     if (!p.description.trim())     pe.description = 'Required';
@@ -115,6 +121,7 @@ const validateAll = (products: Product[]): Product[] =>
     const skuSet = new Set<string>();
     const validatedVars = p.variations.map(v => {
       const ve: Record<string, string> = {};
+      if (!v.imgFile)      ve.img = 'Required';
       if (!v.name.trim())  ve.name = 'Required';
       if (!v.sku.trim())   ve.sku = 'Required';
       else {
@@ -139,56 +146,74 @@ const validateAll = (products: Product[]): Product[] =>
 const hasErrors = (p: Product) =>
   Object.keys(p.errors).length > 0 || p.variations.some(v => Object.keys(v.errors).length > 0);
 
+/* ─── Image compression ──────────────────────────────────────────── */
+
+/**
+ * Resize + re-encode a user-selected image before upload.
+ * Keeps GIFs untouched (they'd lose animation). Returns the original file
+ * if compression would be larger (e.g. already-small thumbnails).
+ */
+const compressImage = async (
+  file: File,
+  opts: { maxDim?: number; quality?: number; targetKB?: number } = {},
+): Promise<{ blob: Blob; ext: string }> => {
+  const { maxDim = 1600, quality = 0.82, targetKB = 500 } = opts;
+  const origExt = (file.name.split('.').pop() || 'bin').toLowerCase();
+  if (!file.type.startsWith('image/') || file.type.includes('gif')) {
+    return { blob: file, ext: origExt };
+  }
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const i = new Image();
+    i.onload = () => { URL.revokeObjectURL(url); resolve(i); };
+    i.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+    i.src = url;
+  }).catch(() => null);
+  if (!img) return { blob: file, ext: origExt };
+
+  const ratio = Math.min(maxDim / img.width, maxDim / img.height, 1);
+  const w = Math.max(1, Math.round(img.width * ratio));
+  const h = Math.max(1, Math.round(img.height * ratio));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return { blob: file, ext: origExt };
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const toBlob = (mime: string, q: number) =>
+    new Promise<Blob | null>(res => canvas.toBlob(b => res(b), mime, q));
+
+  let mime = 'image/webp';
+  let ext: 'webp' | 'jpeg' = 'webp';
+  let q = quality;
+  let blob = await toBlob(mime, q);
+  if (!blob) { mime = 'image/jpeg'; ext = 'jpeg'; blob = await toBlob(mime, q); }
+  if (!blob) return { blob: file, ext: origExt };
+
+  const target = targetKB * 1024;
+  let tries = 0;
+  while (blob.size > target && q > 0.3 && tries < 6) {
+    q = Math.max(0.3, q - 0.1);
+    const next = await toBlob(mime, q);
+    if (!next) break;
+    blob = next;
+    tries++;
+  }
+
+  if (blob.size >= file.size) return { blob: file, ext: origExt };
+  return { blob, ext };
+};
+
 /* ─── Upload helper ──────────────────────────────────────────────── */
 
 const uploadIfFile = async (file: File | null, path: string): Promise<string> => {
   if (!file) return '';
-  const r = storageRef(storage, path);
-  await uploadBytes(r, file);
+  const { blob, ext } = await compressImage(file);
+  const finalPath = /\.[^/.]+$/.test(path) ? path.replace(/\.[^/.]+$/, '.' + ext) : `${path}.${ext}`;
+  const r = storageRef(storage, finalPath);
+  await uploadBytes(r, blob, { contentType: blob.type || file.type || 'application/octet-stream' });
   return getDownloadURL(r);
 };
-
-/* ─── Excel paste helpers ────────────────────────────────────────── */
-
-/**
- * Parse clipboard TSV text into a 2-D string array.
- * Handles quoted cells (Excel wraps cells with commas/newlines in "…").
- */
-const parseTSV = (text: string): string[][] => {
-  return text
-    .split(/\r?\n/)
-    .filter(line => line.trim() !== '')
-    .map(line => line.split('\t').map(c => c.trim()));
-};
-
-/**
- * PRODUCT paste column order (match your table left→right, skip image cols):
- * 0  Brand
- * 1  Product Name
- * 2  Description
- * 3  Category  (name, case-insensitive)
- * 4  Subcategory (name, case-insensitive)
- * 5  Dangerous Goods (none | battery | flammable | liquid)
- * 6  Warranty Type   (local_manufacturer | international_manufacturer | local_supplier | local_supplier_refund | no_warranty | international_seller)
- * 7  Warranty Duration (months, numeric)
- * 8  Warranty Policy
- */
-const PRODUCT_PASTE_COLS = ['brand','name','description','_catName','_subcatName','dangerousGoods','warrantyType','warrantyDuration','warrantyPolicy'] as const;
-type ProductPasteKey = typeof PRODUCT_PASTE_COLS[number];
-
-/**
- * VARIATION paste column order:
- * 0  Variation Name
- * 1  SKU
- * 2  Price
- * 3  Pcs/Box
- * 4  Weight (g)
- * 5  Length (cm)
- * 6  Width  (cm)
- * 7  Height (cm)
- */
-const VARIATION_PASTE_COLS = ['name','sku','price','pcsPerBox','weight','length','width','height'] as const;
-type VariationPasteKey = typeof VARIATION_PASTE_COLS[number];
 
 /* ─── Shared cell styles ─────────────────────────────────────────── */
 
@@ -202,19 +227,22 @@ const selectCls = (err?: string) =>
 
 /* ─── Image upload cell ──────────────────────────────────────────── */
 
-const ImgUpload: React.FC<{ preview: string | null; onFile: (f: File) => void; size?: number }> = ({
-  preview, onFile, size = 38,
+const ImgUpload: React.FC<{ preview: string | null; onFile: (f: File) => void; size?: number; error?: boolean }> = ({
+  preview, onFile, size = 38, error,
 }) => {
   const ref = useRef<HTMLInputElement>(null);
+  const borderCls = error
+    ? 'border-red-400 bg-red-50 ring-1 ring-red-300'
+    : 'border-gray-300 bg-gray-50 hover:bg-teal-50';
   return (
     <div className="flex items-center justify-center py-0.5">
       <button type="button" onClick={() => ref.current?.click()}
         style={{ width: size, height: size }}
-        className="rounded border border-dashed border-gray-300 bg-gray-50 hover:bg-teal-50 flex items-center justify-center overflow-hidden flex-shrink-0 transition"
-        title="Click to upload image">
+        className={`rounded border border-dashed ${borderCls} flex items-center justify-center overflow-hidden flex-shrink-0 transition`}
+        title={error ? 'Image is required' : 'Click to upload image'}>
         {preview
           ? <img src={preview} alt="" className="w-full h-full object-cover" />
-          : <ImageIcon className="text-gray-400" style={{ width: size * 0.44, height: size * 0.44 }} />}
+          : <ImageIcon className={error ? 'text-red-400' : 'text-gray-400'} style={{ width: size * 0.44, height: size * 0.44 }} />}
       </button>
       <input ref={ref} type="file" accept="image/*" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
@@ -227,7 +255,7 @@ const R = () => <span className="text-red-400 ml-px">*</span>;
 
 /* ─── Main component ─────────────────────────────────────────────── */
 
-const PRODUCT_COL_COUNT = 15; // total cols in product table (including meta + actions)
+const PRODUCT_COL_COUNT = 16; // total cols in product table (including meta + actions)
 
 const BulkAddItems: React.FC = () => {
   const { uid: userId, isSeller, isSubAccount, parentId } = useAuth();
@@ -238,8 +266,6 @@ const BulkAddItems: React.FC = () => {
   const [saving, setSaving]             = useState(false);
   const [categories, setCategories]     = useState<Array<{ id: string; name: string }>>([]);
   const [subcatsByCat, setSubcatsByCat] = useState<Record<string, Array<{ id: string; name: string }>>>({});
-  const [showGuide, setShowGuide]       = useState(false);
-  const containerRef                    = useRef<HTMLDivElement>(null);
   const xlsxInputRef                    = useRef<HTMLInputElement>(null);
 
   /* live category data */
@@ -249,99 +275,6 @@ const BulkAddItems: React.FC = () => {
     );
     return () => unsub();
   }, []);
-
-  /* ── Excel paste handler ── */
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const handlePaste = (e: ClipboardEvent) => {
-      // Only intercept if focus is inside our container
-      if (!el.contains(document.activeElement)) return;
-
-      const raw = e.clipboardData?.getData('text/plain') ?? '';
-      if (!raw.trim()) return;
-
-      const rows = parseTSV(raw);
-      if (rows.length === 0) return;
-
-      // ── Detect zone via data attributes on focused element ──
-      const focused = document.activeElement as HTMLElement | null;
-      const zoneEl  = focused?.closest<HTMLElement>('[data-paste-zone]');
-      const zone    = zoneEl?.dataset.pasteZone ?? 'product';
-      const pIdxStr = zoneEl?.dataset.productIdx;
-      const vIdxStr = zoneEl?.dataset.variationIdx;
-      const startP  = pIdxStr !== undefined ? parseInt(pIdxStr, 10) : 0;
-      const startV  = vIdxStr !== undefined ? parseInt(vIdxStr, 10) : 0;
-
-      if (zone === 'variation') {
-        // Fill variations starting at startV for product startP
-        e.preventDefault();
-        setProducts(prev => {
-          const next = [...prev];
-          const product = { ...next[startP], variations: [...next[startP].variations] };
-          rows.forEach((cols, ri) => {
-            const vIdx = startV + ri;
-            const patch: Partial<Variation> = {};
-            (VARIATION_PASTE_COLS as readonly VariationPasteKey[]).forEach((key, ci) => {
-              const val = cols[ci] ?? '';
-              (patch as any)[key] = val;
-            });
-            if (vIdx < product.variations.length) {
-              product.variations[vIdx] = { ...product.variations[vIdx], ...patch, errors: {} };
-            } else {
-              product.variations.push({ ...emptyVar(), ...patch });
-            }
-          });
-          product.expanded = true;
-          next[startP] = product;
-          return next;
-        });
-        toast({ title: `Pasted ${rows.length} variation${rows.length > 1 ? 's' : ''}`, description: 'Review the filled rows below.' });
-      } else {
-        // Fill products starting at startP
-        e.preventDefault();
-        setProducts(prev => {
-          const next = [...prev];
-          rows.forEach((cols, ri) => {
-            const pIdx = startP + ri;
-            const catName    = cols[PRODUCT_PASTE_COLS.indexOf('_catName' as any)]    ?? '';
-            const subcatName = cols[PRODUCT_PASTE_COLS.indexOf('_subcatName' as any)] ?? '';
-
-            // Resolve category ID by name
-            const catMatch = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
-            const catID    = catMatch?.id ?? '';
-
-            // Build product patch for plain string fields
-            const patch: Partial<Product> = {};
-            (PRODUCT_PASTE_COLS as readonly ProductPasteKey[]).forEach((key, ci) => {
-              if (key === '_catName' || key === '_subcatName') return;
-              (patch as any)[key] = cols[ci] ?? '';
-            });
-            patch.categoryID    = catID;
-            patch.subCategoryID = ''; // resolved after subcats load
-
-            // Store raw subcat name in a temp field we resolve below
-            const resolvedSubcat = catID
-              ? (subcatsByCat[catID] ?? []).find(s => s.name.toLowerCase() === subcatName.toLowerCase())?.id ?? ''
-              : '';
-            patch.subCategoryID = resolvedSubcat;
-
-            if (pIdx < next.length) {
-              next[pIdx] = { ...next[pIdx], ...patch, saveStatus: null, errors: {} };
-            } else {
-              next.push({ ...emptyProduct(), ...patch });
-            }
-          });
-          return next;
-        });
-        toast({ title: `Pasted ${rows.length} product${rows.length > 1 ? 's' : ''}`, description: 'Review and add variation details.' });
-      }
-    };
-
-    el.addEventListener('paste', handlePaste);
-    return () => el.removeEventListener('paste', handlePaste);
-  }, [categories, subcatsByCat, toast]);
 
   /* lazy-load subcategories */
   useEffect(() => {
@@ -380,8 +313,8 @@ const BulkAddItems: React.FC = () => {
   const toggleExpand   = (i: number) =>
     setProducts(prev => prev.map((p, idx) => idx === i ? { ...p, expanded: !p.expanded } : p));
 
-  /* save all as draft */
-  const saveAllAsDraft = async () => {
+  /* submit all for QC */
+  const submitAll = async () => {
     if (!sellerId) { toast({ title: 'Error', description: 'No seller ID', variant: 'destructive' }); return; }
     const validated = validateAll(products);
     if (validated.some(hasErrors)) {
@@ -401,11 +334,12 @@ const BulkAddItems: React.FC = () => {
           sellerId, brand: p.brand, brandImage: brandImageURL || null,
           name: p.name, description: p.description,
           categoryID: p.categoryID, subCategoryID: p.subCategoryID || '',
-          imageURL: productImageURL || '', status: 'draft',
+          imageURL: productImageURL || '', status: 'pending_qc' as const,
           dangerousGoods: (p.dangerousGoods && p.dangerousGoods !== 'none') ? 'dangerous' : 'none',
           warrantyType: p.warrantyType || null,
           warrantyDuration: p.warrantyDuration ? `${p.warrantyDuration} month` : null,
           warrantyPolicy: p.warrantyPolicy || null,
+          insuranceAndEvaluation: p.insuranceAndEvaluation,
         } as any);
         const vars = await Promise.all(p.variations.map(async v => {
           const varImgURL = await uploadIfFile(v.imgFile, `products/${sellerId}/variations/${Date.now()}_${v.imgFile?.name || 'var'}`);
@@ -414,19 +348,23 @@ const BulkAddItems: React.FC = () => {
             weight: v.weight ? Number(v.weight) : null, weightUnit: 'g',
             dimensions: { length: v.length ? Number(v.length) : null, width: v.width ? Number(v.width) : null, height: v.height ? Number(v.height) : null },
             dimensionsUnit: 'cm', pcsPerBox: v.pcsPerBox ? Number(v.pcsPerBox) : null,
+            isFragile: v.isFragile || false,
           };
         }));
         if (vars.length) await ProductService.addVariations(productId, vars);
-        updated[i] = { ...p, saveStatus: { ok: true, msg: `Saved (${productId.slice(0, 6)}…)` } };
+        updated[i] = { ...p, saveStatus: { ok: true, msg: `Submitted (${productId.slice(0, 6)}…)` } };
       } catch (e: any) {
-        updated[i] = { ...p, saveStatus: { ok: false, msg: e?.message || 'Save failed' }, expanded: true };
+        updated[i] = { ...p, saveStatus: { ok: false, msg: e?.message || 'Submit failed' }, expanded: true };
       }
       setProducts([...updated]);
     }
     setSaving(false);
     const ok  = updated.filter(p => p.saveStatus?.ok).length;
     const bad = updated.filter(p => p.saveStatus && !p.saveStatus.ok).length;
-    toast({ title: 'Done', description: `${ok} saved as draft${bad ? `, ${bad} failed` : ''}` });
+    toast({
+      title: 'Done',
+      description: `${ok} submitted for admin approval${bad ? `, ${bad} failed` : ''}. They will appear in Pending QC.`,
+    });
   };
 
   const goBack = () => {
@@ -476,6 +414,7 @@ const BulkAddItems: React.FC = () => {
       { header: 'Warranty Type *',            key: 'warrantyType',     width: 24, fill: tealFill },
       { header: 'Warranty Duration (months)', key: 'warrantyDuration', width: 24, fill: tealFill },
       { header: 'Warranty Policy',            key: 'warrantyPolicy',   width: 22, fill: tealFill },
+      { header: 'Insurance & Evaluation',     key: 'insurance',        width: 22, fill: tealFill },
       { header: 'Variation Name *',           key: 'varName',          width: 18, fill: indigoFill },
       { header: 'SKU *',                      key: 'sku',              width: 14, fill: indigoFill },
       { header: 'Price *',                    key: 'price',            width: 10, fill: indigoFill },
@@ -484,6 +423,7 @@ const BulkAddItems: React.FC = () => {
       { header: 'Length (cm) *',              key: 'length',           width: 12, fill: indigoFill },
       { header: 'Width (cm) *',               key: 'width',            width: 12, fill: indigoFill },
       { header: 'Height (cm) *',              key: 'height',           width: 12, fill: indigoFill },
+      { header: 'Fragile',                    key: 'fragile',          width: 10, fill: indigoFill },
     ];
 
     ws.columns = colDefs.map(c => ({ header: c.header, key: c.key, width: c.width }));
@@ -504,8 +444,9 @@ const BulkAddItems: React.FC = () => {
       brand: 'DentalCo', name: 'Dental Mirror', description: 'High quality stainless steel mirror',
       category: exCat, subcategory: exSubcat, dangerousGoods: 'none',
       warrantyType: 'local_manufacturer', warrantyDuration: 12, warrantyPolicy: '1-year warranty',
+      insurance: 'No',
       varName: 'Standard', sku: 'SKU-001', price: 250, pcsPerBox: 10,
-      weight: 150, length: 20, width: 10, height: 5,
+      weight: 150, length: 20, width: 10, height: 5, fragile: 'No',
     });
 
     /* ── _Lists hidden sheet for dropdown data ── */
@@ -567,6 +508,20 @@ const BulkAddItems: React.FC = () => {
       formulae: ['"local_manufacturer,international_manufacturer,local_supplier,local_supplier_refund,no_warranty,international_seller"'],
     });
 
+    // Column J → Insurance & Evaluation dropdown
+    ws.dataValidations.add(`J2:J${MAX_ROWS}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"Yes,No"'],
+    });
+
+    // Column S → Fragile dropdown
+    ws.dataValidations.add(`S2:S${MAX_ROWS}`, {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"Yes,No"'],
+    });
+
     /* ── Valid Values reference sheet ── */
     const ws2 = wb.addWorksheet('Valid Values');
     ws2.columns = [
@@ -577,6 +532,8 @@ const BulkAddItems: React.FC = () => {
     [
       ['Dangerous Goods', 'none | battery | flammable | liquid'],
       ['Warranty Type', 'local_manufacturer | international_manufacturer | local_supplier | local_supplier_refund | no_warranty | international_seller'],
+      ['Insurance & Evaluation', 'Yes | No'],
+      ['Fragile', 'Yes | No'],
       ['', ''],
       ['Note', 'Each row = 1 product with 1 variation. To add more variations to the same product, upload first then click "+ Add Variation" in the table.'],
     ].forEach(([field, values]) => ws2.addRow({ field, values }));
@@ -624,7 +581,7 @@ const BulkAddItems: React.FC = () => {
       const rawRows: RawRow[] = [];
       ws.eachRow((row, rowNum) => {
         if (rowNum === 1) return;
-        const cols = Array.from({ length: 17 }, (_, i) => cv(row, i + 1));
+        const cols = Array.from({ length: 19 }, (_, i) => cv(row, i + 1));
         const [brandVal, nameVal] = [cols[0], cols[1]];
         if (!brandVal && !nameVal) return;
         const catName  = cols[3];
@@ -647,6 +604,11 @@ const BulkAddItems: React.FC = () => {
       if (Object.keys(freshSubcats).length)
         setSubcatsByCat(prev => ({ ...prev, ...freshSubcats }));
 
+      const parseBool = (s: string): boolean => {
+        const v = s.trim().toLowerCase();
+        return v === 'yes' || v === 'true' || v === '1' || v === 'y';
+      };
+
       // ── Pass 2: build Product objects now that subcats are loaded ──
       const imported: Product[] = rawRows.map(({ cols, catID, catName, subcatName }) => {
         const subcatID = catID
@@ -665,12 +627,14 @@ const BulkAddItems: React.FC = () => {
           categoryID: catID, subCategoryID: subcatID,
           dangerousGoods: cols[5] || 'none',
           warrantyType: cols[6], warrantyDuration: cols[7], warrantyPolicy: cols[8],
+          insuranceAndEvaluation: parseBool(cols[9]),
           errors: rowErrors,
           variations: [{
             ...emptyVar(),
-            name: cols[9], sku: cols[10], price: cols[11],
-            pcsPerBox: cols[12], weight: cols[13],
-            length: cols[14], width: cols[15], height: cols[16],
+            name: cols[10], sku: cols[11], price: cols[12],
+            pcsPerBox: cols[13], weight: cols[14],
+            length: cols[15], width: cols[16], height: cols[17],
+            isFragile: parseBool(cols[18]),
           }],
         };
       });
@@ -686,16 +650,14 @@ const BulkAddItems: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-3" ref={containerRef}>
+    <div className="flex flex-col gap-3">
 
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center">
         <button onClick={goBack}
           className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 transition">
           ← Back to Item List
         </button>
-        <h2 className="text-base font-semibold text-gray-800">Items – Bulk Item</h2>
-        <div className="w-36" />
       </div>
 
       {/* Toolbar */}
@@ -704,14 +666,9 @@ const BulkAddItems: React.FC = () => {
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 transition shadow-sm">
           <Plus className="w-3.5 h-3.5" /> Add Product
         </button>
-        <button onClick={saveAllAsDraft} disabled={saving}
+        <button onClick={submitAll} disabled={saving}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 disabled:opacity-50 transition shadow-sm">
-          <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : 'Save All as Draft'}
-        </button>
-        <button onClick={() => setShowGuide(g => !g)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition border border-blue-200">
-          <ClipboardPaste className="w-3.5 h-3.5" /> Paste from Excel
-          <Info className="w-3 h-3 opacity-60" />
+          <Send className="w-3.5 h-3.5" /> {saving ? 'Submitting…' : 'Submit'}
         </button>
         <button onClick={downloadTemplate}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition border border-green-200">
@@ -727,97 +684,6 @@ const BulkAddItems: React.FC = () => {
         />
       </div>
 
-      {/* ── Excel paste guide panel ── */}
-      {showGuide && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="font-bold text-sm flex items-center gap-2">
-              <ClipboardPaste className="w-4 h-4" /> How to paste from Excel
-            </p>
-            <button onClick={() => setShowGuide(false)} className="text-blue-400 hover:text-blue-700 text-base leading-none">✕</button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Product columns */}
-            <div>
-              <p className="font-semibold mb-1 text-teal-700">📋 Product rows — click any product cell, then paste</p>
-              <table className="w-full border border-blue-200 rounded overflow-hidden text-[10px]">
-                <thead className="bg-teal-700 text-white">
-                  <tr>
-                    <th className="px-2 py-1 text-left">Col</th>
-                    <th className="px-2 py-1 text-left">Field</th>
-                    <th className="px-2 py-1 text-left">Example</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['A','Brand','DentalCo'],
-                    ['B','Product Name','Dental Mirror'],
-                    ['C','Description','High quality…'],
-                    ['D','Category','Consumables'],
-                    ['E','Subcategory','Bonding Agents'],
-                    ['F','Dangerous Goods','none'],
-                    ['G','Warranty Type','local_manufacturer'],
-                    ['H','Duration (months)','12'],
-                    ['I','Warranty Policy','1-year warranty'],
-                  ].map(([col, field, ex]) => (
-                    <tr key={col} className="border-t border-blue-100 odd:bg-white even:bg-blue-50/60">
-                      <td className="px-2 py-0.5 font-mono font-bold text-teal-700">{col}</td>
-                      <td className="px-2 py-0.5">{field}</td>
-                      <td className="px-2 py-0.5 text-gray-500 italic">{ex}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Variation columns */}
-            <div>
-              <p className="font-semibold mb-1 text-indigo-700">📋 Variation rows — click any variation cell, then paste</p>
-              <table className="w-full border border-blue-200 rounded overflow-hidden text-[10px]">
-                <thead className="bg-indigo-700 text-white">
-                  <tr>
-                    <th className="px-2 py-1 text-left">Col</th>
-                    <th className="px-2 py-1 text-left">Field</th>
-                    <th className="px-2 py-1 text-left">Example</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['A','Variation Name','Small / Blue'],
-                    ['B','SKU','SKU-001'],
-                    ['C','Price','250'],
-                    ['D','Pcs/Box','10'],
-                    ['E','Weight (g)','150'],
-                    ['F','Length (cm)','20'],
-                    ['G','Width (cm)','10'],
-                    ['H','Height (cm)','5'],
-                  ].map(([col, field, ex]) => (
-                    <tr key={col} className="border-t border-blue-100 odd:bg-white even:bg-blue-50/60">
-                      <td className="px-2 py-0.5 font-mono font-bold text-indigo-700">{col}</td>
-                      <td className="px-2 py-0.5">{field}</td>
-                      <td className="px-2 py-0.5 text-gray-500 italic">{ex}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="bg-white border border-blue-200 rounded-lg p-2.5 text-[11px] space-y-1 text-gray-600">
-            <p>💡 <strong>Tips:</strong></p>
-            <ul className="list-disc ml-4 space-y-0.5">
-              <li>Select and copy multiple rows in Excel — each row will fill one product or one variation.</li>
-              <li>Click <strong>inside any text field</strong> in the product row before pasting to set the starting row.</li>
-              <li>For variations: expand the product first, click inside a variation field, then paste.</li>
-              <li>Category &amp; Subcategory must match existing names exactly (case-insensitive).</li>
-              <li>Dangerous Goods values: <code className="bg-gray-100 px-1 rounded">none</code> · <code className="bg-gray-100 px-1 rounded">battery</code> · <code className="bg-gray-100 px-1 rounded">flammable</code> · <code className="bg-gray-100 px-1 rounded">liquid</code></li>
-              <li>Warranty Type values: <code className="bg-gray-100 px-1 rounded">local_manufacturer</code> · <code className="bg-gray-100 px-1 rounded">no_warranty</code> · etc.</li>
-            </ul>
-          </div>
-        </div>
-      )}
-
       {/* ═══════════════ PRODUCT TABLE ═══════════════ */}
       <div className="overflow-x-auto rounded-lg shadow-sm border border-gray-300">
         <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed', minWidth: 980 }} className="text-[11px]">
@@ -826,16 +692,17 @@ const BulkAddItems: React.FC = () => {
             <col style={{ width: 28 }} />   {/* # */}
             <col style={{ width: 26 }} />   {/* expand */}
             <col style={{ width: 50 }} />                    {/* brand img */}
-            <col style={{ width: '9%', minWidth: 80 }} />   {/* brand */}
+            <col style={{ width: '8%', minWidth: 80 }} />   {/* brand */}
             <col style={{ width: 50 }} />                    {/* prod img */}
-            <col style={{ width: '12%' }} />                 {/* name */}
-            <col style={{ width: '16%' }} />{/* description */}
-            <col style={{ width: '10%' }} />{/* category */}
-            <col style={{ width: '10%' }} />{/* subcategory */}
-            <col style={{ width: '9%' }} /> {/* dg */}
-            <col style={{ width: '11%' }} />{/* warranty type */}
+            <col style={{ width: '11%' }} />                 {/* name */}
+            <col style={{ width: '14%' }} />{/* description */}
+            <col style={{ width: '9%' }} />{/* category */}
+            <col style={{ width: '9%' }} />{/* subcategory */}
+            <col style={{ width: '8%' }} /> {/* dg */}
+            <col style={{ width: '10%' }} />{/* warranty type */}
             <col style={{ width: 58 }} />   {/* duration */}
-            <col style={{ width: '10%' }} />{/* policy */}
+            <col style={{ width: '9%' }} />{/* policy */}
+            <col style={{ width: 64 }} />   {/* insurance */}
             <col style={{ width: 60 }} />   {/* actions */}
           </colgroup>
 
@@ -843,7 +710,7 @@ const BulkAddItems: React.FC = () => {
           <thead>
             <tr>
               <th colSpan={2} className="border border-gray-400 bg-gray-700 py-1" />
-              <th colSpan={11} className="border border-gray-400 bg-teal-700 text-white text-center py-1 text-[10px] font-bold tracking-widest uppercase">
+              <th colSpan={12} className="border border-gray-400 bg-teal-700 text-white text-center py-1 text-[10px] font-bold tracking-widest uppercase">
                 Product Information
               </th>
               <th className="border border-gray-400 bg-gray-700 py-1" />
@@ -863,6 +730,7 @@ const BulkAddItems: React.FC = () => {
               <th className={`${cellBase} py-1.5 px-1`}>Warranty Type<R /></th>
               <th className={`${cellBase} py-1.5 px-1`}>Dur(mo)<R /></th>
               <th className={`${cellBase} py-1.5 px-1`}>Policy<R /></th>
+              <th className={`${cellBase} py-1.5 px-1 text-center`}>Ins. &amp; Eval.</th>
               <th className={`${cellBase} py-1.5 px-1 text-center`}>Actions</th>
             </tr>
           </thead>
@@ -888,7 +756,7 @@ const BulkAddItems: React.FC = () => {
                 <React.Fragment key={p.id}>
 
                   {/* ── PRODUCT ROW ── */}
-                  <tr className={rowBg} data-paste-zone="product" data-product-idx={pIdx}>
+                  <tr className={rowBg}>
                     <td className={`${cellBase} text-center text-gray-500 font-mono py-1 font-semibold`}>{pIdx + 1}</td>
                     <td className={`${cellBase} text-center py-1`}>
                       <button onClick={() => toggleExpand(pIdx)} title={p.expanded ? 'Collapse variations' : 'Expand variations'}
@@ -899,7 +767,7 @@ const BulkAddItems: React.FC = () => {
                       </button>
                     </td>
                     <td className={`${cellBase} p-0.5 align-middle`}>
-                      <ImgUpload preview={p.brandImgPreview} size={36}
+                      <ImgUpload preview={p.brandImgPreview} size={36} error={!!pe.brandImg}
                         onFile={f => updP(pIdx, { brandImgFile: f, brandImgPreview: URL.createObjectURL(f) })} />
                     </td>
                     <td className={`${cellBase} p-0 align-middle ${pe.brand ? 'border-red-400' : ''}`}>
@@ -908,7 +776,7 @@ const BulkAddItems: React.FC = () => {
                         className={inputCls(pe.brand)} />
                     </td>
                     <td className={`${cellBase} p-0.5 align-middle`}>
-                      <ImgUpload preview={p.prodImgPreview} size={36}
+                      <ImgUpload preview={p.prodImgPreview} size={36} error={!!pe.prodImg}
                         onFile={f => updP(pIdx, { prodImgFile: f, prodImgPreview: URL.createObjectURL(f) })} />
                     </td>
                     <td className={`${cellBase} p-0 align-middle ${pe.name ? 'border-red-400' : ''}`}>
@@ -958,6 +826,15 @@ const BulkAddItems: React.FC = () => {
                         onChange={e => updP(pIdx, { warrantyPolicy: e.target.value })}
                         className={inputCls(pe.warrantyPolicy)} />
                     </td>
+                    <td className={`${cellBase} p-0 text-center align-middle`}>
+                      <input
+                        type="checkbox"
+                        checked={p.insuranceAndEvaluation}
+                        onChange={e => updP(pIdx, { insuranceAndEvaluation: e.target.checked })}
+                        className="h-3.5 w-3.5 accent-teal-600 cursor-pointer"
+                        title="Insurance & Evaluation"
+                      />
+                    </td>
                     <td className={`${cellBase} py-1 px-1 text-center align-middle`}>
                       <div className="flex items-center justify-center gap-1.5">
                         {p.saveStatus?.ok  && <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
@@ -990,7 +867,7 @@ const BulkAddItems: React.FC = () => {
                             {/* Variation zone banner */}
                             <thead>
                               <tr>
-                                <th colSpan={11}
+                                <th colSpan={12}
                                   className="border border-indigo-400 bg-indigo-700 text-white text-center py-1 text-[10px] font-bold tracking-widest uppercase">
                                   Variation Details — Product {pIdx + 1}: {p.name || '(unnamed)'}
                                 </th>
@@ -1006,6 +883,7 @@ const BulkAddItems: React.FC = () => {
                                 <th className="border border-indigo-200 py-1.5 px-1 w-14">L (cm)<R /></th>
                                 <th className="border border-indigo-200 py-1.5 px-1 w-14">W (cm)<R /></th>
                                 <th className="border border-indigo-200 py-1.5 px-1 w-14">H (cm)<R /></th>
+                                <th className="border border-indigo-200 py-1.5 px-1 w-12 text-center">Fragile</th>
                                 <th className="border border-indigo-200 py-1.5 px-1 w-8 text-center"></th>
                               </tr>
                             </thead>
@@ -1013,7 +891,7 @@ const BulkAddItems: React.FC = () => {
                             <tbody>
                               {p.variations.length === 0 && (
                                 <tr>
-                                  <td colSpan={11} className="border border-indigo-200 text-center text-gray-400 py-5 text-xs bg-white">
+                                  <td colSpan={12} className="border border-indigo-200 text-center text-gray-400 py-5 text-xs bg-white">
                                     No variations yet. Click <strong>"+ Add Variation"</strong> below.
                                   </td>
                                 </tr>
@@ -1023,12 +901,12 @@ const BulkAddItems: React.FC = () => {
                                 const ve = v.errors;
                                 const vBg = Object.keys(ve).length > 0 ? 'bg-red-50/60' : vIdx % 2 === 0 ? 'bg-white' : 'bg-indigo-50/30';
                                 return (
-                                  <tr key={v.id} className={vBg} data-paste-zone="variation" data-product-idx={pIdx} data-variation-idx={vIdx}>
+                                  <tr key={v.id} className={vBg}>
                                     <td className="border border-indigo-200 text-center text-gray-500 font-mono py-1 text-[10px] w-6">
                                       {vIdx + 1}
                                     </td>
-                                    <td className="border border-indigo-200 p-0.5 align-middle w-10">
-                                      <ImgUpload preview={v.imgPreview} size={32}
+                                    <td className={`border p-0.5 align-middle w-10 ${ve.img ? 'border-red-400' : 'border-indigo-200'}`}>
+                                      <ImgUpload preview={v.imgPreview} size={32} error={!!ve.img}
                                         onFile={f => updV(pIdx, vIdx, { imgFile: f, imgPreview: URL.createObjectURL(f) })} />
                                     </td>
                                                     <td className={`border p-0 align-middle ${ve.name ? 'border-red-400' : 'border-indigo-200'}`}>
@@ -1071,6 +949,15 @@ const BulkAddItems: React.FC = () => {
                                         onChange={e => updV(pIdx, vIdx, { height: e.target.value })}
                                         className={inputCls(ve.height)} />
                                     </td>
+                                    <td className="border border-indigo-200 p-0 text-center align-middle w-12">
+                                      <input
+                                        type="checkbox"
+                                        checked={v.isFragile}
+                                        onChange={e => updV(pIdx, vIdx, { isFragile: e.target.checked })}
+                                        className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
+                                        title="Fragile"
+                                      />
+                                    </td>
                                     <td className="border border-indigo-200 py-1 px-1 text-center align-middle w-8">
                                       <button onClick={() => removeVariation(pIdx, vIdx)}
                                         className="text-red-400 hover:text-red-600" title="Remove variation">
@@ -1085,7 +972,7 @@ const BulkAddItems: React.FC = () => {
                             {/* Add Variation footer row */}
                             <tfoot>
                               <tr>
-                                <td colSpan={11} className="border border-dashed border-indigo-300 bg-indigo-50/60 py-1.5 px-3">
+                                <td colSpan={12} className="border border-dashed border-indigo-300 bg-indigo-50/60 py-1.5 px-3">
                                   <button onClick={() => addVariation(pIdx)}
                                     className="inline-flex items-center gap-1.5 text-indigo-700 hover:text-indigo-900 text-[11px] font-semibold">
                                     <Plus className="w-3.5 h-3.5" />
@@ -1115,8 +1002,8 @@ const BulkAddItems: React.FC = () => {
       </div>
 
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        All products saved from this page are stored as <strong>drafts</strong>.
-        Complete and submit for admin QC review from the Draft tab.
+        Each product submitted from this page is sent to <strong>Pending QC</strong> for admin review,
+        the same as a single Add Item submission.
       </p>
     </div>
   );
