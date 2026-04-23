@@ -343,6 +343,8 @@ export const OrderTab: React.FC<OrderTabProps> = ({
         ? `${order.region.barangay || ''}, ${order.region.municipality || ''}, ${order.region.province || ''} ${order.region.zip || ''}`
         : 'No address available';
 
+      const packagingSize = order.summary?.packagingSize || order.shippingInfo?.packagingSize || '—';
+
       // Generate items list with variation
       const itemsHTML = order.items && order.items.length > 0
         ? order.items.map(item => {
@@ -372,6 +374,10 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             <div class="info-row">
               <span class="label">Address:</span>
               <span class="value">${address}</span>
+            </div>
+            <div class="info-row packaging-row">
+              <span class="label">Packaging:</span>
+              <span class="value packaging-value">${packagingSize}</span>
             </div>
           </div>
           <div class="items-section">
@@ -493,6 +499,10 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     .info-row .value {
       color: #1f2937;
       flex: 1;
+    }
+    .packaging-value {
+      font-weight: 700;
+      color: #0d9488;
     }
     .items-section {
       background: #f9fafb;
@@ -1600,6 +1610,14 @@ export const OrderTab: React.FC<OrderTabProps> = ({
                       <div className="text-xs text-gray-500">Date</div>
                       <div className="text-sm font-medium text-gray-900">{selectedOrder.timestamp}</div>
                     </div>
+                    {(selectedOrder.summary?.packagingSize || selectedOrder.shippingInfo?.packagingSize) && (
+                      <div>
+                        <div className="text-xs text-gray-500">Packaging</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {selectedOrder.summary?.packagingSize || selectedOrder.shippingInfo?.packagingSize}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <div className="text-xs text-gray-500">Buyer</div>
                       <div className="text-sm font-medium text-gray-900">{selectedOrder.customer.name || '—'}</div>

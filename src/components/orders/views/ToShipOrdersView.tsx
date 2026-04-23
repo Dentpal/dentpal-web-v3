@@ -48,11 +48,11 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
         : undefined;
 
       return (
-        <OrderRow 
-          key={o.id} 
-          order={o} 
-          onDetails={() => onSelectOrder?.(o)} 
-          isToShip={true} 
+        <OrderRow
+          key={o.id}
+          order={o}
+          onDetails={() => onSelectOrder?.(o)}
+          isToShip={true}
           onMoveToArrangement={onMoveToArrangement}
           onMoveToHandOver={onMoveToHandOver}
           onConfirmHandover={onConfirmHandover}

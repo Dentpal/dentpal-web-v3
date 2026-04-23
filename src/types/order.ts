@@ -108,6 +108,7 @@ export interface Order {
     sellerShippingCharge?: number;
     buyerShippingCharge?: number;
     shippingSplitRule?: string;
+    packagingSize?: string;
   };
   feesBreakdown?: {
     paymentProcessingFee?: number;
@@ -130,6 +131,7 @@ export interface Order {
     postalCode?: string;
     country?: string;
     phoneNumber?: string;
+    packagingSize?: string;
     jrs?: {
       trackingId?: string;
       trackingNumber?: string;

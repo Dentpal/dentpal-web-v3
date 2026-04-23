@@ -270,6 +270,7 @@ const mapDocToOrder = (id: string, data: any): Order => {
       sellerShippingCharge: data.summary.sellerShippingCharge != null ? Number(data.summary.sellerShippingCharge) : undefined,
       buyerShippingCharge: data.summary.buyerShippingCharge != null ? Number(data.summary.buyerShippingCharge) : undefined,
       shippingSplitRule: data.summary.shippingSplitRule ? String(data.summary.shippingSplitRule) : undefined,
+      packagingSize: data.summary.packagingSize ? String(data.summary.packagingSize) : undefined,
     } : undefined,
     feesBreakdown: data.fees ? {
       paymentProcessingFee: data.fees.paymentProcessingFee != null ? Number(data.fees.paymentProcessingFee) : undefined,
@@ -300,6 +301,7 @@ const mapDocToOrder = (id: string, data: any): Order => {
       postalCode: data.shippingInfo.postalCode ? String(data.shippingInfo.postalCode) : undefined,
       country: data.shippingInfo.country ? String(data.shippingInfo.country) : undefined,
       phoneNumber: data.shippingInfo.phoneNumber ? String(data.shippingInfo.phoneNumber) : undefined,
+      packagingSize: data.shippingInfo.packagingSize ? String(data.shippingInfo.packagingSize) : undefined,
       jrs: data.shippingInfo.jrs ? {
         trackingId: data.shippingInfo.jrs.trackingId ? String(data.shippingInfo.jrs.trackingId) : undefined,
         trackingNumber: data.shippingInfo.jrs.trackingNumber ? String(data.shippingInfo.jrs.trackingNumber) : undefined,

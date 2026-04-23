@@ -310,32 +310,39 @@ const fetchSellerData = async (sellerId: string) => {
 };
 
 const calculateShipmentItems = (orderItems: any[]): ShipmentItem[] => {
-  // No defaultDimensions: missing values are set to -1 (invalid) to trigger determineProductName's guard
+  // Order items are stored with dimensions as top-level fields
+  // (length/width/height/weight in cm/cm/cm/grams) by the checkout flow.
+  // Legacy orders may nest them under `item.dimensions` with weight in kg.
 
   const items: ShipmentItem[] = [];
 
   for (const item of orderItems) {
     const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
-    let length: number = -1;
-    let width: number = -1;
-    let height: number = -1;
-    let unitWeightGrams: number = -1;
-    const unitDeclaredValue = item.price || 100;
 
-    if (item.dimensions) {
-      length = typeof item.dimensions.length === "number" ? item.dimensions.length : -1;
-      width = typeof item.dimensions.width === "number" ? item.dimensions.width : -1;
-      height = typeof item.dimensions.height === "number" ? item.dimensions.height : -1;
-      unitWeightGrams = typeof item.dimensions.weight === "number" ? item.dimensions.weight * 1000 : -1;
-    } else {
-      // Log warning if dimensions are missing
-      logger.warn("Order item missing dimensions, applying -1 for determineProductName auto-selection", {
-        orderId: item.orderId || "unknown",
-        itemId: item.productId || item.id || "unknown",
-        itemName: item.name || item.productName || "unknown",
-      });
-      // All fields remain -1
+    // Prefer top-level dimensions (current shape)
+    let length = typeof item.length === "number" ? item.length : -1;
+    let width = typeof item.width === "number" ? item.width : -1;
+    let height = typeof item.height === "number" ? item.height : -1;
+    let unitWeightGrams = typeof item.weight === "number" ? item.weight : -1;
+
+    // Fallback to nested `dimensions` object (legacy shape, weight in kg)
+    if ((length < 0 || width < 0 || height < 0 || unitWeightGrams < 0) && item.dimensions) {
+      if (length < 0 && typeof item.dimensions.length === "number") length = item.dimensions.length;
+      if (width < 0 && typeof item.dimensions.width === "number") width = item.dimensions.width;
+      if (height < 0 && typeof item.dimensions.height === "number") height = item.dimensions.height;
+      if (unitWeightGrams < 0 && typeof item.dimensions.weight === "number") {
+        unitWeightGrams = item.dimensions.weight * 1000;
+      }
     }
+
+    if (length < 0 || width < 0 || height < 0 || unitWeightGrams < 0) {
+      logger.warn("Order item missing dimensions, applying -1 for determineProductName auto-selection", {
+        itemId: item.productId || item.id || "unknown",
+        itemName: item.productName || item.name || "unknown",
+      });
+    }
+
+    const unitDeclaredValue = item.price || 100;
 
     // Expand each order line into per-unit ShipmentItem entries so that
     // determineProductName correctly sums totalHeight (stacked items) and
@@ -920,18 +927,55 @@ export const createJRSShipping = onRequest({
     }
 
     // Prepare JRS API request
-    // Determine the best JRS packaging type based on item dimensions and weight
-    const resolvedProductName = determineProductName(shipmentItems);
-    logger.info(`📦 JRS packaging for order ${payload.orderId}: ${resolvedProductName ?? "auto (API determines)"}`, {
+    //
+    // Express / insurance / valuation / packagingSize are taken from the order
+    // document so the actual shipment matches what was calculated and charged
+    // at checkout time. See createCheckoutSession.ts for the write path.
+    //
+    // For multi-seller orders, the shipment is created per seller (sellerIds[0]),
+    // so prefer that seller's per-breakdown values and fall back to the
+    // order-level defaults.
+    const shipperSellerId: string | undefined = orderData.sellerIds?.[0];
+    const sellerBreakdown = Array.isArray(orderData.sellerFeeBreakdowns)
+      ? orderData.sellerFeeBreakdowns.find((b: any) => b.sellerId === shipperSellerId)
+      : undefined;
+
+    const orderExpress: boolean =
+      typeof orderData.summary?.isExpressDelivery === 'boolean'
+        ? orderData.summary.isExpressDelivery
+        : typeof orderData.shippingInfo?.isExpress === 'boolean'
+          ? orderData.shippingInfo.isExpress
+          : true;
+
+    // Insurance & valuation are product-driven: only enabled when the seller
+    // has at least one item with product.insuranceAndEvaluation === true.
+    const orderInsuranceAndValuation: boolean =
+      sellerBreakdown?.hasInsuranceAndEvaluation === true;
+
+    // Packaging was already determined at checkout. Prefer the stored value;
+    // only fall back to local calculation for legacy orders that lack it.
+    const storedPackagingName: string | undefined =
+      sellerBreakdown?.packagingSize ||
+      orderData.shippingInfo?.packagingSize ||
+      orderData.summary?.packagingSize ||
+      undefined;
+    const resolvedProductName = storedPackagingName || determineProductName(shipmentItems);
+
+    logger.info(`📦 JRS shipment for order ${payload.orderId}`, {
+      sellerId: shipperSellerId,
+      packaging: resolvedProductName ?? "auto (API determines)",
+      packagingSource: storedPackagingName ? "order" : (resolvedProductName ? "local-fallback" : "api-auto"),
+      express: orderExpress,
+      insuranceAndValuation: orderInsuranceAndValuation,
       itemCount: shipmentItems.length,
     });
 
     const jrsRequest: JRSShippingRequest = {
       requestType: "shipfromecom",
       apiShippingRequest: {
-        express: true,
-        insurance: true,
-        valuation: true,
+        express: orderExpress,
+        insurance: orderInsuranceAndValuation,
+        valuation: orderInsuranceAndValuation,
         ...(resolvedProductName ? { productName: resolvedProductName } : {}),
         createdByUserEmail: payload.createdByUserEmail || sellerData?.email || "admin@dentpal.ph",
         shipmentItems: shipmentItems,

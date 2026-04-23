@@ -206,30 +206,36 @@ const fetchSellerData = async (sellerId) => {
     return null;
 };
 const calculateShipmentItems = (orderItems) => {
-    // No defaultDimensions: missing values are set to -1 (invalid) to trigger determineProductName's guard
+    // Order items are stored with dimensions as top-level fields
+    // (length/width/height/weight in cm/cm/cm/grams) by the checkout flow.
+    // Legacy orders may nest them under `item.dimensions` with weight in kg.
     const items = [];
     for (const item of orderItems) {
         const quantity = typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1;
-        let length = -1;
-        let width = -1;
-        let height = -1;
-        let unitWeightGrams = -1;
-        const unitDeclaredValue = item.price || 100;
-        if (item.dimensions) {
-            length = typeof item.dimensions.length === "number" ? item.dimensions.length : -1;
-            width = typeof item.dimensions.width === "number" ? item.dimensions.width : -1;
-            height = typeof item.dimensions.height === "number" ? item.dimensions.height : -1;
-            unitWeightGrams = typeof item.dimensions.weight === "number" ? item.dimensions.weight * 1000 : -1;
+        // Prefer top-level dimensions (current shape)
+        let length = typeof item.length === "number" ? item.length : -1;
+        let width = typeof item.width === "number" ? item.width : -1;
+        let height = typeof item.height === "number" ? item.height : -1;
+        let unitWeightGrams = typeof item.weight === "number" ? item.weight : -1;
+        // Fallback to nested `dimensions` object (legacy shape, weight in kg)
+        if ((length < 0 || width < 0 || height < 0 || unitWeightGrams < 0) && item.dimensions) {
+            if (length < 0 && typeof item.dimensions.length === "number")
+                length = item.dimensions.length;
+            if (width < 0 && typeof item.dimensions.width === "number")
+                width = item.dimensions.width;
+            if (height < 0 && typeof item.dimensions.height === "number")
+                height = item.dimensions.height;
+            if (unitWeightGrams < 0 && typeof item.dimensions.weight === "number") {
+                unitWeightGrams = item.dimensions.weight * 1000;
+            }
         }
-        else {
-            // Log warning if dimensions are missing
+        if (length < 0 || width < 0 || height < 0 || unitWeightGrams < 0) {
             logger.warn("Order item missing dimensions, applying -1 for determineProductName auto-selection", {
-                orderId: item.orderId || "unknown",
                 itemId: item.productId || item.id || "unknown",
-                itemName: item.name || item.productName || "unknown",
+                itemName: item.productName || item.name || "unknown",
             });
-            // All fields remain -1
         }
+        const unitDeclaredValue = item.price || 100;
         // Expand each order line into per-unit ShipmentItem entries so that
         // determineProductName correctly sums totalHeight (stacked items) and
         // totalWeight across all physical units.
@@ -541,7 +547,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
 }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, _44;
     // Add explicit CORS headers
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -756,17 +762,47 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 : "FRAGILE ITEMS - Handle with care";
         }
         // Prepare JRS API request
-        // Determine the best JRS packaging type based on item dimensions and weight
-        const resolvedProductName = determineProductName(shipmentItems);
-        logger.info(`📦 JRS packaging for order ${payload.orderId}: ${resolvedProductName !== null && resolvedProductName !== void 0 ? resolvedProductName : "auto (API determines)"}`, {
+        //
+        // Express / insurance / valuation / packagingSize are taken from the order
+        // document so the actual shipment matches what was calculated and charged
+        // at checkout time. See createCheckoutSession.ts for the write path.
+        //
+        // For multi-seller orders, the shipment is created per seller (sellerIds[0]),
+        // so prefer that seller's per-breakdown values and fall back to the
+        // order-level defaults.
+        const shipperSellerId = (_16 = orderData.sellerIds) === null || _16 === void 0 ? void 0 : _16[0];
+        const sellerBreakdown = Array.isArray(orderData.sellerFeeBreakdowns)
+            ? orderData.sellerFeeBreakdowns.find((b) => b.sellerId === shipperSellerId)
+            : undefined;
+        const orderExpress = typeof ((_17 = orderData.summary) === null || _17 === void 0 ? void 0 : _17.isExpressDelivery) === 'boolean'
+            ? orderData.summary.isExpressDelivery
+            : typeof ((_18 = orderData.shippingInfo) === null || _18 === void 0 ? void 0 : _18.isExpress) === 'boolean'
+                ? orderData.shippingInfo.isExpress
+                : true;
+        // Insurance & valuation are product-driven: only enabled when the seller
+        // has at least one item with product.insuranceAndEvaluation === true.
+        const orderInsuranceAndValuation = (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.hasInsuranceAndEvaluation) === true;
+        // Packaging was already determined at checkout. Prefer the stored value;
+        // only fall back to local calculation for legacy orders that lack it.
+        const storedPackagingName = (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.packagingSize) ||
+            ((_19 = orderData.shippingInfo) === null || _19 === void 0 ? void 0 : _19.packagingSize) ||
+            ((_20 = orderData.summary) === null || _20 === void 0 ? void 0 : _20.packagingSize) ||
+            undefined;
+        const resolvedProductName = storedPackagingName || determineProductName(shipmentItems);
+        logger.info(`📦 JRS shipment for order ${payload.orderId}`, {
+            sellerId: shipperSellerId,
+            packaging: resolvedProductName !== null && resolvedProductName !== void 0 ? resolvedProductName : "auto (API determines)",
+            packagingSource: storedPackagingName ? "order" : (resolvedProductName ? "local-fallback" : "api-auto"),
+            express: orderExpress,
+            insuranceAndValuation: orderInsuranceAndValuation,
             itemCount: shipmentItems.length,
         });
         const jrsRequest = {
             requestType: "shipfromecom",
             apiShippingRequest: {
-                express: true,
-                insurance: true,
-                valuation: true,
+                express: orderExpress,
+                insurance: orderInsuranceAndValuation,
+                valuation: orderInsuranceAndValuation,
                 ...(resolvedProductName ? { productName: resolvedProductName } : {}),
                 createdByUserEmail: payload.createdByUserEmail || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) || "admin@dentpal.ph",
                 shipmentItems: shipmentItems,
@@ -807,7 +843,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             hasPickupSchedule: !!payload.requestedPickupSchedule,
             hasFragileItems: hasFragileItems,
             remarks: remarks,
-            paymentMethod: ((_16 = orderData.paymongo) === null || _16 === void 0 ? void 0 : _16.paymentMethod) || ((_17 = orderData.paymentInfo) === null || _17 === void 0 ? void 0 : _17.method) || 'unknown',
+            paymentMethod: ((_21 = orderData.paymongo) === null || _21 === void 0 ? void 0 : _21.paymentMethod) || ((_22 = orderData.paymentInfo) === null || _22 === void 0 ? void 0 : _22.method) || 'unknown',
         });
         // Make API call to JRS
         let response;
@@ -824,16 +860,16 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         }
         catch (axiosError) {
             logger.error("JRS API error", {
-                status: (_18 = axiosError.response) === null || _18 === void 0 ? void 0 : _18.status,
-                statusText: (_19 = axiosError.response) === null || _19 === void 0 ? void 0 : _19.statusText,
+                status: (_23 = axiosError.response) === null || _23 === void 0 ? void 0 : _23.status,
+                statusText: (_24 = axiosError.response) === null || _24 === void 0 ? void 0 : _24.statusText,
                 orderId: payload.orderId,
                 shippingReferenceNo,
-                errorCode: ((_21 = (_20 = axiosError.response) === null || _20 === void 0 ? void 0 : _20.data) === null || _21 === void 0 ? void 0 : _21.ErrorCode) || axiosError.code,
-                errorMessage: ((_23 = (_22 = axiosError.response) === null || _22 === void 0 ? void 0 : _22.data) === null || _23 === void 0 ? void 0 : _23.ErrorMessage) || "Network error",
+                errorCode: ((_26 = (_25 = axiosError.response) === null || _25 === void 0 ? void 0 : _25.data) === null || _26 === void 0 ? void 0 : _26.ErrorCode) || axiosError.code,
+                errorMessage: ((_28 = (_27 = axiosError.response) === null || _27 === void 0 ? void 0 : _27.data) === null || _28 === void 0 ? void 0 : _28.ErrorMessage) || "Network error",
             });
             res.status(400).json({
                 error: "JRS API request failed",
-                details: ((_24 = axiosError.response) === null || _24 === void 0 ? void 0 : _24.data) || axiosError.message,
+                details: ((_29 = axiosError.response) === null || _29 === void 0 ? void 0 : _29.data) || axiosError.message,
                 shippingReferenceNo,
             });
             return;
@@ -875,8 +911,8 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         logger.info("JRS API success with shipping charges", {
             orderId: payload.orderId,
             shippingReferenceNo,
-            trackingId: (_25 = responseData.ShippingRequestEntityDto) === null || _25 === void 0 ? void 0 : _25.TrackingId,
-            totalShippingAmount: (_26 = responseData.ShippingRequestEntityDto) === null || _26 === void 0 ? void 0 : _26.TotalShippingAmount,
+            trackingId: (_30 = responseData.ShippingRequestEntityDto) === null || _30 === void 0 ? void 0 : _30.TrackingId,
+            totalShippingAmount: (_31 = responseData.ShippingRequestEntityDto) === null || _31 === void 0 ? void 0 : _31.TotalShippingAmount,
             sellerShippingCharge,
             buyerShippingCharge,
             totalShippingCost,
@@ -895,7 +931,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                         sellerId: orderData.sellerIds[0],
                         shippingCharge: sellerShippingCharge,
                         shippingReferenceNo,
-                        trackingId: (_27 = responseData.ShippingRequestEntityDto) === null || _27 === void 0 ? void 0 : _27.TrackingId,
+                        trackingId: (_32 = responseData.ShippingRequestEntityDto) === null || _32 === void 0 ? void 0 : _32.TrackingId,
                     });
                     logger.info("Successfully created seller payout adjustment", {
                         orderId: payload.orderId,
@@ -930,15 +966,15 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                     jrs: {
                         response: responseData,
                         shippingReferenceNo: shippingReferenceNo,
-                        trackingId: (_28 = responseData.ShippingRequestEntityDto) === null || _28 === void 0 ? void 0 : _28.TrackingId,
+                        trackingId: (_33 = responseData.ShippingRequestEntityDto) === null || _33 === void 0 ? void 0 : _33.TrackingId,
                         requestedAt: new Date(),
-                        totalShippingAmount: (_29 = responseData.ShippingRequestEntityDto) === null || _29 === void 0 ? void 0 : _29.TotalShippingAmount,
+                        totalShippingAmount: (_34 = responseData.ShippingRequestEntityDto) === null || _34 === void 0 ? void 0 : _34.TotalShippingAmount,
                         pickupSchedule: jrsRequest.apiShippingRequest.requestedPickupSchedule,
                         // Include COD information
                         cashOnDelivery: {
                             isCOD: isCODOrder,
                             codAmount: codAmount,
-                            paymentMethod: ((_30 = orderData.paymongo) === null || _30 === void 0 ? void 0 : _30.paymentMethod) || ((_31 = orderData.paymentInfo) === null || _31 === void 0 ? void 0 : _31.method) || 'unknown',
+                            paymentMethod: ((_35 = orderData.paymongo) === null || _35 === void 0 ? void 0 : _35.paymentMethod) || ((_36 = orderData.paymentInfo) === null || _36 === void 0 ? void 0 : _36.method) || 'unknown',
                         },
                         // Include shipping charge allocation info
                         shippingCharges: {
@@ -964,7 +1000,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             logger.info("Order updated successfully in Firestore", {
                 orderId: payload.orderId,
                 collection: orderResult.collection,
-                trackingId: (_32 = responseData.ShippingRequestEntityDto) === null || _32 === void 0 ? void 0 : _32.TrackingId,
+                trackingId: (_37 = responseData.ShippingRequestEntityDto) === null || _37 === void 0 ? void 0 : _37.TrackingId,
             });
         }
         catch (firestoreError) {
@@ -980,7 +1016,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 error: "Order shipping succeeded but failed to update order status",
                 message: "JRS shipping request was successful, but we couldn't update the order in our database. Please contact support.",
                 shippingReferenceNo,
-                trackingId: (_33 = responseData.ShippingRequestEntityDto) === null || _33 === void 0 ? void 0 : _33.TrackingId,
+                trackingId: (_38 = responseData.ShippingRequestEntityDto) === null || _38 === void 0 ? void 0 : _38.TrackingId,
                 firestoreError: firestoreError instanceof Error ? firestoreError.message : 'Unknown error'
             });
             return;
@@ -989,8 +1025,8 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         res.status(200).json({
             success: true,
             shippingReferenceNo,
-            trackingId: (_34 = responseData.ShippingRequestEntityDto) === null || _34 === void 0 ? void 0 : _34.TrackingId,
-            totalShippingAmount: (_35 = responseData.ShippingRequestEntityDto) === null || _35 === void 0 ? void 0 : _35.TotalShippingAmount,
+            trackingId: (_39 = responseData.ShippingRequestEntityDto) === null || _39 === void 0 ? void 0 : _39.TrackingId,
+            totalShippingAmount: (_40 = responseData.ShippingRequestEntityDto) === null || _40 === void 0 ? void 0 : _40.TotalShippingAmount,
             shippingCharges: {
                 sellerCharge: sellerShippingCharge,
                 buyerCharge: buyerShippingCharge,
@@ -1000,7 +1036,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             cashOnDelivery: {
                 isCOD: isCODOrder,
                 codAmount: codAmount,
-                paymentMethod: ((_36 = orderData.paymongo) === null || _36 === void 0 ? void 0 : _36.paymentMethod) || ((_37 = orderData.paymentInfo) === null || _37 === void 0 ? void 0 : _37.method) || 'unknown',
+                paymentMethod: ((_41 = orderData.paymongo) === null || _41 === void 0 ? void 0 : _41.paymentMethod) || ((_42 = orderData.paymentInfo) === null || _42 === void 0 ? void 0 : _42.method) || 'unknown',
             },
             jrsResponse: responseData,
             message: isCODOrder
@@ -1012,14 +1048,14 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 orderId: payload.orderId,
                 recipient: `${recipientInfo.firstName} ${recipientInfo.lastName}`,
                 shipper: `${shipperInfo.firstName} ${shipperInfo.lastName}`,
-                items: ((_38 = orderData.items) === null || _38 === void 0 ? void 0 : _38.length) || 0,
+                items: ((_43 = orderData.items) === null || _43 === void 0 ? void 0 : _43.length) || 0,
             },
         });
     }
     catch (error) {
         logger.error("Error in createJRSShipping", {
             error: error instanceof Error ? error.message : "Unknown error",
-            orderId: (_39 = req.body) === null || _39 === void 0 ? void 0 : _39.orderId,
+            orderId: (_44 = req.body) === null || _44 === void 0 ? void 0 : _44.orderId,
             stack: error instanceof Error ? error.stack : undefined,
         });
         res.status(500).json({

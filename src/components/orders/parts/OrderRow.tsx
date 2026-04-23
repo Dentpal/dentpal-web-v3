@@ -1,6 +1,6 @@
 import React from 'react';
 import { Order } from '@/types/order';
-import { ChevronDown, ChevronUp, Printer, FileText, Download, Eye, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Printer, FileText, Download, Eye, Loader2, Package } from 'lucide-react';
 import QRCode from 'qrcode';
 import dentpalLogo from '@/assets/dentpal_logo.png';
 
@@ -321,7 +321,7 @@ const OrderRow: React.FC<OrderRowProps> = ({
           )}
           {/* Order ID and items */}
           <div className="flex-1 min-w-[200px]" data-items-menu>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <p className="font-medium text-gray-900">Order #{order.id}</p>
               {Array.isArray(order.items) && order.items.length >= 1 && (
                 <button
@@ -333,6 +333,15 @@ const OrderRow: React.FC<OrderRowProps> = ({
                   {itemsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   {order.items.length} {order.items.length === 1 ? 'item' : 'items'}
                 </button>
+              )}
+              {(order.summary?.packagingSize || order.shippingInfo?.packagingSize) && (
+                <span
+                  className="text-[11px] px-2 py-0.5 border border-teal-200 rounded-md bg-teal-50 text-teal-700 flex items-center gap-1"
+                  title="Packaging size"
+                >
+                  <Package className="w-3 h-3" />
+                  {order.summary?.packagingSize || order.shippingInfo?.packagingSize}
+                </span>
               )}
             </div>
             {/* Expanded items inline with animation */}
