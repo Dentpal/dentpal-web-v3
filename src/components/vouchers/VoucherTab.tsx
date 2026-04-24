@@ -15,7 +15,7 @@ import {
   bulkDeleteVouchers,
   bulkExtendExpiry,
 } from '@/services/voucher';
-import type { Voucher, CreateVoucherInput, DiscountType, VoucherScope } from '@/types/voucher';
+import type { Voucher, CreateVoucherInput, DiscountType, VoucherScope, ShippingOption } from '@/types/voucher';
 import {
   Dialog,
   DialogContent,
@@ -122,6 +122,7 @@ const VoucherTab = () => {
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formScope, setFormScope] = useState<VoucherScope>('all');
+  const [formShippingOption, setFormShippingOption] = useState<ShippingOption[]>([]);
 
   const fetchVouchers = useCallback(async () => {
     if (!sellerId) return;
@@ -236,6 +237,7 @@ const VoucherTab = () => {
     setFormStartDate('');
     setFormEndDate('');
     setFormScope('all');
+    setFormShippingOption([]);
     setError(null);
   };
 
@@ -257,6 +259,7 @@ const VoucherTab = () => {
     setFormStartDate(v.startDate.slice(0, 10));
     setFormEndDate(v.endDate.slice(0, 10));
     setFormScope(v.scope);
+    setFormShippingOption(v.shippingOption ?? []);
     setError(null);
     setShowModal(true);
   };
@@ -277,6 +280,11 @@ const VoucherTab = () => {
       discountValue = parseFloat(formDiscountValue);
       if (isNaN(discountValue) || discountValue <= 0) { setError('Discount value must be greater than 0'); return; }
       if (formDiscountType === 'percentage' && discountValue > 100) { setError('Percentage cannot exceed 100'); return; }
+    }
+
+    if (formDiscountType === 'free_delivery' && formShippingOption.length === 0) {
+      setError('Select at least one shipping option');
+      return;
     }
 
     let maximumSpend: number | undefined;
@@ -303,6 +311,9 @@ const VoucherTab = () => {
       startDate: new Date(formStartDate).toISOString(),
       endDate: new Date(formEndDate).toISOString(),
       scope: formScope,
+      ...(formDiscountType === 'free_delivery' && formShippingOption.length > 0
+        ? { shippingOption: formShippingOption }
+        : {}),
     };
 
     let result;
@@ -766,6 +777,28 @@ const VoucherTab = () => {
                     max={formDiscountType === 'percentage' ? '100' : undefined}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
+                </div>
+              )}
+              {formDiscountType === 'free_delivery' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Shipping Option</label>
+                  <div className="flex items-center gap-3 h-[38px]">
+                    {(['express', 'standard', 'both'] as ShippingOption[]).map((opt) => (
+                      <label key={opt} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formShippingOption.includes(opt)}
+                          onChange={(e) => {
+                            setFormShippingOption((prev) =>
+                              e.target.checked ? [...prev, opt] : prev.filter((o) => o !== opt),
+                            );
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        />
+                        <span className="capitalize">{opt}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

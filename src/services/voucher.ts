@@ -48,6 +48,9 @@ export async function createVoucher(
       status: 'active' as const,
       scope: input.scope,
       ...(input.scope === 'specific' && input.productIds ? { productIds: input.productIds } : {}),
+      ...(input.discountType === 'free_delivery' && input.shippingOption && input.shippingOption.length > 0
+        ? { shippingOption: input.shippingOption }
+        : {}),
       createdAt: now,
       updatedAt: now,
       ...(auth.currentUser?.email ? { createdBy: auth.currentUser.email } : {}),
@@ -129,6 +132,7 @@ export async function cloneVoucher(
     endDate: source.endDate,
     scope: source.scope,
     productIds: source.productIds,
+    shippingOption: source.shippingOption,
   });
 }
 
