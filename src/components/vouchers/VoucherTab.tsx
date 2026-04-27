@@ -14,6 +14,7 @@ import {
   bulkEndVouchers,
   bulkDeleteVouchers,
   bulkExtendExpiry,
+  generateVoucherTerms,
 } from '@/services/voucher';
 import type { Voucher, CreateVoucherInput, DiscountType, VoucherScope, ShippingOption } from '@/types/voucher';
 import {
@@ -89,6 +90,7 @@ const VoucherTab = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [detailVoucher, setDetailVoucher] = useState<Voucher | null>(null);
+  const [detailTab, setDetailTab] = useState<'details' | 'terms'>('details');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -886,14 +888,41 @@ const VoucherTab = () => {
       </Dialog>
 
       {/* ── Voucher Details Modal ── */}
-      <Dialog open={!!detailVoucher} onOpenChange={(open) => { if (!open) setDetailVoucher(null); }}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={!!detailVoucher}
+        onOpenChange={(open) => {
+          if (!open) setDetailVoucher(null);
+          else setDetailTab('details');
+        }}
+      >
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Voucher Details</DialogTitle>
             <DialogDescription className="sr-only">Detailed information about this voucher</DialogDescription>
           </DialogHeader>
           {detailVoucher && (
             <div className="space-y-4 py-2">
+              <div className="flex items-center gap-1 border-b border-gray-200 -mt-2">
+                {([
+                  { key: 'details', label: 'Details' },
+                  { key: 'terms', label: 'Terms & Conditions' },
+                ] as const).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setDetailTab(t.key)}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      detailTab === t.key
+                        ? 'border-green-600 text-green-700'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {detailTab === 'details' ? (
+                <>
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-gray-900 text-base">{detailVoucher.name}</h3>
@@ -967,6 +996,12 @@ const VoucherTab = () => {
                   </button>
                 )}
               </div>
+                </>
+              ) : (
+                <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-[60vh] overflow-y-auto">
+                  {detailVoucher.termsAndCondition ?? generateVoucherTerms(detailVoucher)}
+                </pre>
+              )}
             </div>
           )}
         </DialogContent>

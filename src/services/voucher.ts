@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   addDoc,
+  getDoc,
   getDocs,
   updateDoc,
   deleteDoc,
@@ -11,6 +12,90 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import type { Voucher, CreateVoucherInput, UpdateVoucherInput } from '@/types/voucher';
+
+const formatTermsDate = (iso: string): string => {
+  if (!iso) return iso;
+  try {
+    return new Date(iso).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return iso;
+  }
+};
+
+export function generateVoucherTerms(v: {
+  name: string;
+  code: string;
+  discountType: Voucher['discountType'];
+  discountValue: number;
+  maximumSpend?: number;
+  minimumOrderAmount: number;
+  maxUses: number;
+  usedCount: number;
+  startDate: string;
+  endDate: string;
+  status: Voucher['status'];
+  scope: Voucher['scope'];
+  sellerId: string;
+  createdAt: string;
+  updatedAt: string;
+}): string {
+  const valueText =
+    v.discountType === 'free_delivery'
+      ? 'Free Delivery'
+      : `${v.discountValue}${v.discountType === 'percentage' ? '%' : ' PHP'}`;
+
+  const usageLimitText =
+    v.maxUses === 0
+      ? 'This voucher has no usage limit.'
+      : `This voucher can only be used ${v.maxUses} times.`;
+
+  const scopeText = v.scope === 'all' ? 'All products and categories.' : 'Specific products only.';
+
+  const maxSpendText = v.maximumSpend !== undefined ? String(v.maximumSpend) : '—';
+
+  return `Voucher Name: ${v.name}
+
+Promo Code: ${v.code}
+
+1. Discount Details
+This voucher provides a ${valueText} discount on eligible purchases.
+
+2. Validity Period
+This promo is valid from ${formatTermsDate(v.startDate)} until ${formatTermsDate(v.endDate)} only.
+
+3. Minimum Purchase Requirement
+A minimum order amount of PHP ${v.minimumOrderAmount} is required to use this voucher.
+
+4. Maximum Spend Cap
+This voucher is applicable only for orders up to PHP ${maxSpendText}.
+
+5. Usage Limit
+${usageLimitText}
+
+6. Redemption Count
+This voucher has currently been used ${v.usedCount} time(s).
+
+7. Scope of Application
+This voucher is applicable for:
+${scopeText}
+
+8. Seller Restriction
+This voucher is issued by seller ID: ${v.sellerId} and may only be used on eligible items from this seller.
+
+9. Status
+This voucher is currently ${v.status} and may be modified or withdrawn at any time without prior notice.
+
+10. General Conditions
+- This voucher cannot be exchanged for cash.
+- This voucher cannot be combined with other promotions unless stated otherwise.
+- Only one voucher may be used per transaction.
+- The platform reserves the right to cancel orders that violate voucher policies.
+- Any abuse or misuse of the voucher may result in account suspension.
+
+11. System Notes
+- Voucher creation date: ${formatTermsDate(v.createdAt)}
+- Last updated: ${formatTermsDate(v.updatedAt)}`;
+}
 
 const VOUCHERS_COLLECTION = 'Vouchers';
 
@@ -57,7 +142,8 @@ export async function createVoucher(
       ...(auth.currentUser?.displayName ? { createdByName: auth.currentUser.displayName } : {}),
     };
 
-    const docRef = await addDoc(vouchersCol(), data);
+    const termsAndCondition = generateVoucherTerms(data);
+    const docRef = await addDoc(vouchersCol(), { ...data, termsAndCondition });
     return { success: true, id: docRef.id };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to create voucher' };
@@ -89,7 +175,17 @@ export async function updateVoucher(
     }
     if (input.name) input.name = input.name.trim();
 
-    await updateDoc(voucherDoc(voucherId), { ...input, updatedAt: new Date().toISOString() });
+    const updatedAt = new Date().toISOString();
+    const updatePayload: Record<string, unknown> = { ...input, updatedAt };
+
+    const existingSnap = await getDoc(voucherDoc(voucherId));
+    if (existingSnap.exists()) {
+      const existing = existingSnap.data() as Voucher;
+      const merged = { ...existing, ...input, updatedAt };
+      updatePayload.termsAndCondition = generateVoucherTerms(merged);
+    }
+
+    await updateDoc(voucherDoc(voucherId), updatePayload);
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to update voucher' };

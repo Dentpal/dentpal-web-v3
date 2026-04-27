@@ -24,6 +24,7 @@ export interface Voucher {
   updatedAt: string;
   createdBy?: string;        // email of the user who created the voucher
   createdByName?: string;    // display name of the creator
+  termsAndCondition?: string;
 }
 
 export interface CreateVoucherInput {
