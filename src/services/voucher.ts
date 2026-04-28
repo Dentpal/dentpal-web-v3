@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import type { Voucher, CreateVoucherInput, UpdateVoucherInput } from '@/types/voucher';
+import SellersService from '@/services/sellers';
 
 const formatTermsDate = (iso: string): string => {
   if (!iso) return iso;
@@ -36,65 +37,68 @@ export function generateVoucherTerms(v: {
   status: Voucher['status'];
   scope: Voucher['scope'];
   sellerId: string;
+  sellerName?: string;
   createdAt: string;
   updatedAt: string;
 }): string {
   const valueText =
     v.discountType === 'free_delivery'
-      ? 'Free Delivery'
-      : `${v.discountValue}${v.discountType === 'percentage' ? '%' : ' PHP'}`;
+      ? 'free delivery'
+      : v.discountType === 'percentage'
+        ? `${v.discountValue}% off`
+        : `PHP ${v.discountValue} off`;
 
   const usageLimitText =
     v.maxUses === 0
-      ? 'This voucher has no usage limit.'
-      : `This voucher can only be used ${v.maxUses} times.`;
+      ? 'This voucher has no maximum redemption limit, unless otherwise specified.'
+      : `This voucher may be redeemed up to ${v.maxUses} times in total across all users, unless otherwise specified.`;
 
-  const scopeText = v.scope === 'all' ? 'All products and categories.' : 'Specific products only.';
+  const scopeText =
+    v.scope === 'all'
+      ? 'This voucher is valid for all products and categories offered by the specified seller, unless otherwise excluded.'
+      : 'This voucher is valid only for selected products from the specified seller.';
 
-  const maxSpendText = v.maximumSpend !== undefined ? String(v.maximumSpend) : '—';
+  const maxSpendText =
+    v.maximumSpend !== undefined
+      ? `This voucher is applicable only to orders with a total value of up to PHP ${v.maximumSpend}.\nOrders exceeding this amount will not qualify for the discount.`
+      : 'No maximum order value restriction applies to this voucher.';
+
+  const sellerLabel = v.sellerName?.trim() || v.sellerId;
 
   return `Voucher Name: ${v.name}
-
 Promo Code: ${v.code}
 
-1. Discount Details
-This voucher provides a ${valueText} discount on eligible purchases.
+1. Discount Offer
+This voucher entitles the user to ${valueText} on eligible items from the specified seller.
 
 2. Validity Period
-This promo is valid from ${formatTermsDate(v.startDate)} until ${formatTermsDate(v.endDate)} only.
+This voucher is valid from ${formatTermsDate(v.startDate)} to ${formatTermsDate(v.endDate)}, inclusive.
+Redemptions outside this period will not be honored.
 
 3. Minimum Purchase Requirement
-A minimum order amount of PHP ${v.minimumOrderAmount} is required to use this voucher.
+A minimum purchase of PHP ${v.minimumOrderAmount} is required to apply this voucher.
 
-4. Maximum Spend Cap
-This voucher is applicable only for orders up to PHP ${maxSpendText}.
+4. Maximum Order Value Eligibility
+${maxSpendText}
 
 5. Usage Limit
 ${usageLimitText}
 
-6. Redemption Count
-This voucher has currently been used ${v.usedCount} time(s).
-
-7. Scope of Application
-This voucher is applicable for:
+6. Applicable Scope
 ${scopeText}
 
-8. Seller Restriction
-This voucher is issued by seller ID: ${v.sellerId} and may only be used on eligible items from this seller.
+7. Seller Restriction
+This voucher is valid only for purchases made from ${sellerLabel} on the platform.
 
-9. Status
-This voucher is currently ${v.status} and may be modified or withdrawn at any time without prior notice.
-
-10. General Conditions
-- This voucher cannot be exchanged for cash.
-- This voucher cannot be combined with other promotions unless stated otherwise.
+8. General Conditions
+- This voucher is non-transferable and cannot be exchanged for cash.
 - Only one voucher may be used per transaction.
-- The platform reserves the right to cancel orders that violate voucher policies.
-- Any abuse or misuse of the voucher may result in account suspension.
+- This voucher cannot be combined with other promotions unless explicitly stated.
+- The platform reserves the right to reject or cancel orders found to be fraudulent or in violation of these terms.
+- Abuse, misuse, or suspicious activity may result in account suspension or restriction.
 
-11. System Notes
-- Voucher creation date: ${formatTermsDate(v.createdAt)}
-- Last updated: ${formatTermsDate(v.updatedAt)}`;
+9. Changes and Termination
+The platform reserves the right to amend, suspend, or terminate this voucher at its discretion, subject to applicable laws and regulations.`;
 }
 
 const VOUCHERS_COLLECTION = 'Vouchers';
@@ -142,7 +146,9 @@ export async function createVoucher(
       ...(auth.currentUser?.displayName ? { createdByName: auth.currentUser.displayName } : {}),
     };
 
-    const termsAndCondition = generateVoucherTerms(data);
+    const sellerProfile = await SellersService.get(sellerId).catch(() => null);
+    const sellerName = sellerProfile?.name?.trim() || sellerId;
+    const termsAndCondition = generateVoucherTerms({ ...data, sellerName });
     const docRef = await addDoc(vouchersCol(), { ...data, termsAndCondition });
     return { success: true, id: docRef.id };
   } catch (err: any) {
@@ -182,7 +188,9 @@ export async function updateVoucher(
     if (existingSnap.exists()) {
       const existing = existingSnap.data() as Voucher;
       const merged = { ...existing, ...input, updatedAt };
-      updatePayload.termsAndCondition = generateVoucherTerms(merged);
+      const sellerProfile = await SellersService.get(merged.sellerId).catch(() => null);
+      const sellerName = sellerProfile?.name?.trim() || merged.sellerId;
+      updatePayload.termsAndCondition = generateVoucherTerms({ ...merged, sellerName });
     }
 
     await updateDoc(voucherDoc(voucherId), updatePayload);

@@ -75,7 +75,7 @@ const History: React.FC = () => {
 					placeholder="Search..."
 					value={search}
 					onChange={e => setSearch(e.target.value)}
-					className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-blue-200"
+					className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-green-200"
 				/>
 				
 				<DateRangePicker value={dateRange} onChange={setDateRange} label="Select date range" />
@@ -114,17 +114,17 @@ const History: React.FC = () => {
 										className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer group"
 										onClick={() => { setSelectedLog(row); setSheetOpen(true); }}
 										style={{
-											background: isBatchRow ? '#f0f9ff' : 'transparent'
+											background: isBatchRow ? '#f0fdf4' : 'transparent'
 										}}
 									>
 										<td className="px-5 py-3">{formatTimestamp(row.timestampRaw)}</td>
 										<td className="px-5 py-3">
 											{isBatchRow ? (
-												<span style={{ 
-													background: '#dbeafe', 
-													color: '#1e40af', 
-													padding: '4px 10px', 
-													borderRadius: 6, 
+												<span style={{
+													background: '#dcfce7',
+													color: '#15803d',
+													padding: '4px 10px',
+													borderRadius: 6,
 													fontSize: 13,
 													fontWeight: 600,
 													display: 'inline-flex',
@@ -140,7 +140,7 @@ const History: React.FC = () => {
 										<td className="px-5 py-3">{row.modifiedByName}</td>
 										<td className="px-5 py-3">
 											{isBatchRow ? (
-												<span style={{ fontWeight: 600, color: '#1e40af' }}>
+												<span style={{ fontWeight: 600, color: '#15803d' }}>
 													{row.productName}
 												</span>
 											) : (
@@ -186,11 +186,11 @@ const History: React.FC = () => {
 			{/* Side panel for log details */}
 			<Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
 				<SheetContent side="right" style={{ minWidth: 450, maxWidth: 550, padding: 0, background: 'linear-gradient(to bottom, #f8fafc 0%, #f1f5f9 100%)' }}>
-					<SheetHeader style={{ 
-						padding: '28px 28px 24px 28px', 
-						borderBottom: '2px solid #e2e8f0', 
-						background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
-						boxShadow: '0 4px 12px rgba(37, 99, 235, 0.15)'
+					<SheetHeader style={{
+						padding: '28px 28px 24px 28px',
+						borderBottom: '2px solid #e2e8f0',
+						background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+						boxShadow: '0 4px 12px rgba(22, 163, 74, 0.18)'
 					}}>
 						<SheetTitle style={{ 
 							fontSize: 24, 
@@ -205,27 +205,27 @@ const History: React.FC = () => {
 						<div style={{ padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', maxHeight: 'calc(100vh - 180px)' }}>
 							{/* Batch ID Badge - Only show if it's a batch */}
 							{selectedLog.isBatch && selectedLog.batchId && (
-								<div style={{ 
-									background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-									borderRadius: 12, 
+								<div style={{
+									background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+									borderRadius: 12,
 								padding: '20px 24px',
-								boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
-								border: '2px solid #60a5fa'
+								boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)',
+								border: '2px solid #86efac'
 							}}>
 								<div style={{ marginBottom: 12 }}>
 									<span style={{ fontSize: 20, fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>Batch Adjustment</span>
 									</div>
-									<div style={{ 
-										fontSize: 14, 
-										fontWeight: 600, 
+									<div style={{
+										fontSize: 14,
+										fontWeight: 600,
 										color: '#fff',
 									fontFamily: 'monospace'
 								}}>
 									{selectedLog.batchId}
 								</div>
-								<div style={{ 
-									fontSize: 13, 
-									color: '#dbeafe',
+								<div style={{
+									fontSize: 13,
+									color: '#dcfce7',
 										marginTop: 4
 									}}>
 										{selectedLog.totalItemsAdjusted} product variations adjusted
@@ -250,24 +250,24 @@ const History: React.FC = () => {
 							</div>
 
 							{/* Action & Type Card */}
-							<div style={{ 
-								background: selectedLog.action === 'Loss/Damage' ? '#fef2f2' : 
-											selectedLog.action === 'Receive Items' ? '#f0fdf4' : '#f0f9ff',
-								borderRadius: 12, 
+							<div style={{
+								background: selectedLog.action === 'Loss/Damage' ? '#fef2f2' :
+											selectedLog.action === 'Receive Items' ? '#f0fdf4' : '#f8fafc',
+								borderRadius: 12,
 								padding: '16px 20px',
 								boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-								border: `2px solid ${selectedLog.action === 'Loss/Damage' ? '#fecaca' : 
-														selectedLog.action === 'Receive Items' ? '#bbf7d0' : '#bfdbfe'}`
+								border: `2px solid ${selectedLog.action === 'Loss/Damage' ? '#fecaca' :
+														selectedLog.action === 'Receive Items' ? '#bbf7d0' : '#cbd5e1'}`
 							}}>
 							<div style={{ marginBottom: 8 }}>
 									<span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.8 }}>Action Type</span>
 								</div>
-								<div style={{ 
-									fontSize: 18, 
-									fontWeight: 700, 
+								<div style={{
+									fontSize: 18,
+									fontWeight: 700,
 
-									color: selectedLog.action === 'Loss/Damage' ? '#dc2626' : 
-										   selectedLog.action === 'Receive Items' ? '#16a34a' : '#2563eb'
+									color: selectedLog.action === 'Loss/Damage' ? '#dc2626' :
+										   selectedLog.action === 'Receive Items' ? '#16a34a' : '#334155'
 								}}>
 									{selectedLog.action}
 								</div>
