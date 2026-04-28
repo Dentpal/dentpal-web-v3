@@ -79,107 +79,6 @@ const verifyAdminAccess = async (adminUid, actionDescription) => {
         throw new AdminAccessError("Unauthorized. Admin access required.");
     }
 };
-/**
- * Determine the JRS product name (packaging type) based on shipment weight and dimensions.
- *
- * Rules are checked in order from smallest to largest package.
- * Weight thresholds are MAXIMUM capacities (the item must weigh at or below the limit).
- * Dimension checks are orientation-independent (item can be rotated to fit).
- * If no rule matches, returns undefined so the JRS API determines the product automatically.
- *
- * All dimensions are in centimeters, all weights are in grams.
- */
-function determineProductName(shipmentItems) {
-    if (!shipmentItems || shipmentItems.length === 0) {
-        return undefined;
-    }
-    // Validate that every item has positive dimensions and weight.
-    // If any item is missing data we cannot reliably choose a package,
-    // so return undefined and let the JRS API auto-select.
-    for (const item of shipmentItems) {
-        if (item.width == null || item.width <= 0 ||
-            item.length == null || item.length <= 0 ||
-            item.height == null || item.height <= 0 ||
-            item.weight == null || item.weight <= 0) {
-            logger.info("📦 Skipping manual packaging — item has missing/invalid dimensions", {
-                width: item.width,
-                length: item.length,
-                height: item.height,
-                weight: item.weight,
-                itemCount: shipmentItems.length,
-            });
-            return undefined;
-        }
-    }
-    const totalWeight = shipmentItems.reduce((sum, item) => sum + item.weight, 0);
-    // Get the aggregate dimensions across all items
-    // For each item, sort its 2D footprint (width × length) so the larger is always "long" and smaller is "short"
-    // This makes the check orientation-independent
-    // Footprint (maxShort/maxLong) = largest single-item footprint (items share the same base)
-    // Height (totalHeight) = sum of all item heights (items stack on top of each other)
-    let maxShort = 0;
-    let maxLong = 0;
-    let totalHeight = 0;
-    for (const item of shipmentItems) {
-        const short = Math.min(item.width, item.length);
-        const long = Math.max(item.width, item.length);
-        maxShort = Math.max(maxShort, short);
-        maxLong = Math.max(maxLong, long);
-        totalHeight += item.height;
-    }
-    logger.info("📐 determineProductName input:", {
-        totalWeight, maxShort, maxLong, totalHeight,
-        itemCount: shipmentItems.length,
-    });
-    // Named constants for thickness limits (cm) per JRS docs
-    const EXPRESS_LETTER_MAX_THICK = 0.5; // 0.5 cm
-    const ONE_POUNDER_MAX_THICK = 2.0; // 2.0 cm
-    const THREE_POUNDER_MAX_THICK = 3.0; // 3.0 cm
-    const FIVE_POUNDER_MAX_THICK = 5.0; // 5.0 cm
-    // Helper: check if items fit in a 2D envelope/pouch (orientation-independent)
-    const fitsIn2D = (pkgDim1, pkgDim2, pkgMaxThickness) => {
-        const pkgShort = Math.min(pkgDim1, pkgDim2);
-        const pkgLong = Math.max(pkgDim1, pkgDim2);
-        return maxShort <= pkgShort && maxLong <= pkgLong && totalHeight <= pkgMaxThickness;
-    };
-    // Helper: check if items fit in a 3D box (orientation-independent)
-    const fitsIn3D = (pkgDim1, pkgDim2, pkgDim3) => {
-        const pkgDims = [pkgDim1, pkgDim2, pkgDim3].sort((a, b) => a - b);
-        const itemDims = [maxShort, maxLong, totalHeight].sort((a, b) => a - b);
-        return itemDims[0] <= pkgDims[0] && itemDims[1] <= pkgDims[1] && itemDims[2] <= pkgDims[2];
-    };
-    // Rule 1: Express Letter (max 100g, fits 24.13 × 16.00 × 0.5 cm)
-    if (totalWeight <= 100 && fitsIn2D(24.13, 16.00, EXPRESS_LETTER_MAX_THICK)) {
-        logger.info("📦 Matched: Express Letter");
-        return "Express Letter";
-    }
-    // Rule 2: 1 Pounder (max 500g, fits 38.10 × 27.94 × 2.0 cm)
-    if (totalWeight <= 500 && fitsIn2D(38.10, 27.94, ONE_POUNDER_MAX_THICK)) {
-        logger.info("📦 Matched: 1 Pounder");
-        return "1 Pounder";
-    }
-    // Rule 3: 3 Pounder (max 1500g, fits 45.72 × 35.56 × 3.0 cm)
-    if (totalWeight <= 1500 && fitsIn2D(45.72, 35.56, THREE_POUNDER_MAX_THICK)) {
-        logger.info("📦 Matched: 3 Pounder");
-        return "3 Pounder";
-    }
-    // Rule 4: Bulilit Box — checked BEFORE 5 Pounder (specialized small box)
-    // (max 2500g, fits 20.32 × 29.21 × 10.16 cm)
-    if (totalWeight <= 2500 && fitsIn3D(20.32, 29.21, 10.16)) {
-        logger.info("📦 Matched: Bulilit Box");
-        return "Bulilit Box";
-    }
-    // Rule 5: 5 Pounder (max 2500g, fits 50.80 × 35.56 × 5.0 cm)
-    if (totalWeight <= 2500 && fitsIn2D(50.80, 35.56, FIVE_POUNDER_MAX_THICK)) {
-        logger.info("📦 Matched: 5 Pounder");
-        return "5 Pounder";
-    }
-    // No rule matched — let the JRS API determine automatically
-    logger.info("📦 No manual rule matched — API will determine productName automatically", {
-        totalWeight, maxShort, maxLong, totalHeight,
-    });
-    return undefined;
-}
 // Helper functions
 const fetchOrderData = async (orderId) => {
     const collections = ["Order", "orders"];
@@ -744,13 +643,11 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         const isCODOrder = ((_9 = orderData.paymentInfo) === null || _9 === void 0 ? void 0 : _9.method) === 'cod' ||
             ((_10 = orderData.paymongo) === null || _10 === void 0 ? void 0 : _10.paymentMethod) === 'cash_on_delivery' ||
             ((_11 = orderData.metadata) === null || _11 === void 0 ? void 0 : _11.paymentMethod) === 'cash_on_delivery';
-        const codAmount = payload.codAmountToCollect ||
-            (isCODOrder ? ((_12 = orderData.summary) === null || _12 === void 0 ? void 0 : _12.total) || 0 : 0);
         // Check if order has fragile items
-        const hasFragileItems = ((_13 = orderData.metadata) === null || _13 === void 0 ? void 0 : _13.hasFragileItems) === true ||
-            ((_14 = orderData.items) === null || _14 === void 0 ? void 0 : _14.some((item) => item.isFragile === true));
+        const hasFragileItems = ((_12 = orderData.metadata) === null || _12 === void 0 ? void 0 : _12.hasFragileItems) === true ||
+            ((_13 = orderData.items) === null || _13 === void 0 ? void 0 : _13.some((item) => item.isFragile === true));
         // Build remarks with FRAGILE prefix if needed
-        let remarks = payload.remarks || ((_15 = orderData.shippingInfo) === null || _15 === void 0 ? void 0 : _15.notes) || "";
+        let remarks = payload.remarks || ((_14 = orderData.shippingInfo) === null || _14 === void 0 ? void 0 : _14.notes) || "";
         if (hasFragileItems && !remarks.toUpperCase().startsWith("FRAGILE")) {
             remarks = remarks ? `FRAGILE - ${remarks}` : "FRAGILE - Handle with care";
         }
@@ -770,10 +667,20 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         // For multi-seller orders, the shipment is created per seller (sellerIds[0]),
         // so prefer that seller's per-breakdown values and fall back to the
         // order-level defaults.
-        const shipperSellerId = (_16 = orderData.sellerIds) === null || _16 === void 0 ? void 0 : _16[0];
+        const shipperSellerId = (_15 = orderData.sellerIds) === null || _15 === void 0 ? void 0 : _15[0];
         const sellerBreakdown = Array.isArray(orderData.sellerFeeBreakdowns)
             ? orderData.sellerFeeBreakdowns.find((b) => b.sellerId === shipperSellerId)
             : undefined;
+        const sellerCodTotal = typeof (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.totalChargedToBuyer) === 'number'
+            ? sellerBreakdown.totalChargedToBuyer
+            : undefined;
+        const orderCodTotal = typeof ((_16 = orderData.summary) === null || _16 === void 0 ? void 0 : _16.total) === 'number'
+            ? orderData.summary.total
+            : 0;
+        // COD amount should reflect what the buyer pays (exclude seller-paid shipping).
+        const codAmount = Math.max(0, typeof payload.codAmountToCollect === 'number'
+            ? payload.codAmountToCollect
+            : (isCODOrder ? (sellerCodTotal !== null && sellerCodTotal !== void 0 ? sellerCodTotal : orderCodTotal) : 0));
         const orderExpress = typeof ((_17 = orderData.summary) === null || _17 === void 0 ? void 0 : _17.isExpressDelivery) === 'boolean'
             ? orderData.summary.isExpressDelivery
             : typeof ((_18 = orderData.shippingInfo) === null || _18 === void 0 ? void 0 : _18.isExpress) === 'boolean'
@@ -783,16 +690,16 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         // has at least one item with product.insuranceAndEvaluation === true.
         const orderInsuranceAndValuation = (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.hasInsuranceAndEvaluation) === true;
         // Packaging was already determined at checkout. Prefer the stored value;
-        // only fall back to local calculation for legacy orders that lack it.
+        // if missing, omit productName so the JRS API auto-selects.
         const storedPackagingName = (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.packagingSize) ||
             ((_19 = orderData.shippingInfo) === null || _19 === void 0 ? void 0 : _19.packagingSize) ||
             ((_20 = orderData.summary) === null || _20 === void 0 ? void 0 : _20.packagingSize) ||
             undefined;
-        const resolvedProductName = storedPackagingName || determineProductName(shipmentItems);
+        const resolvedProductName = storedPackagingName;
         logger.info(`📦 JRS shipment for order ${payload.orderId}`, {
             sellerId: shipperSellerId,
             packaging: resolvedProductName !== null && resolvedProductName !== void 0 ? resolvedProductName : "auto (API determines)",
-            packagingSource: storedPackagingName ? "order" : (resolvedProductName ? "local-fallback" : "api-auto"),
+            packagingSource: storedPackagingName ? "order" : "api-auto",
             express: orderExpress,
             insuranceAndValuation: orderInsuranceAndValuation,
             itemCount: shipmentItems.length,
