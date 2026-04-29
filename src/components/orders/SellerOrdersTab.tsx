@@ -93,14 +93,18 @@ export const OrderTab: React.FC<OrderTabProps> = ({
 
   // Selection state for bulk actions in To Hand Over tab
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
-  
+
   // Selection state for bulk JRS shipping in To Arrangement tab
   const [selectedArrangementOrderIds, setSelectedArrangementOrderIds] = useState<Set<string>>(new Set());
+
+  // Selection state for bulk pack list in To Pack tab
+  const [selectedPackOrderIds, setSelectedPackOrderIds] = useState<Set<string>>(new Set());
 
   // Clear selection when switching tabs or sub-tabs
   useEffect(() => {
     setSelectedOrderIds(new Set());
     setSelectedArrangementOrderIds(new Set());
+    setSelectedPackOrderIds(new Set());
   }, [activeSubTab, toShipSubTab]);
 
   // Close date picker when clicking outside
@@ -273,21 +277,28 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
-  // Handle Print Pack List - moves all orders from to-pack to to-arrangement
+  // Handle Print Pack List - prints and moves selected orders (or all if none selected)
   const handlePrintPackList = async () => {
-    const toPackOrders = dateFilteredOrders.filter(o => 
-      mapOrderToStage(o) === 'to-ship' && 
+    const allToPackOrders = dateFilteredOrders.filter(o =>
+      mapOrderToStage(o) === 'to-ship' &&
       (o.fulfillmentStage || 'to-pack') === 'to-pack'
     );
-    
+
+    const hasSelection = selectedPackOrderIds.size > 0;
+    const toPackOrders = hasSelection
+      ? allToPackOrders.filter(o => selectedPackOrderIds.has(o.id))
+      : allToPackOrders;
+
     if (toPackOrders.length === 0) {
-      alert('No orders in To Pack stage.');
+      alert(hasSelection
+        ? 'Selected orders are no longer in To Pack stage.'
+        : 'No orders in To Pack stage.');
       return;
     }
 
     // Open print window first
     const printWindow = printPackList(toPackOrders);
-    
+
     if (!printWindow) {
       alert('Unable to open print window. Please check your popup blocker settings.');
       return;
@@ -298,26 +309,27 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     const checkWindowClosed = setInterval(async () => {
       if (printWindow.closed) {
         clearInterval(checkWindowClosed);
-        
+
         // Ask user to confirm they printed the pack list
         const confirmPrinted = confirm(
           `Did you print or save the pack list?\n\n` +
-          `Click OK to move ${toPackOrders.length} order(s) to Arrangement stage.\n` +
+          `Click OK to move ${toPackOrders.length} ${hasSelection ? 'selected ' : ''}order(s) to Arrangement stage.\n` +
           `Click Cancel to keep orders in To Pack stage.`
         );
-        
+
         if (confirmPrinted) {
           try {
-            // Move all orders to arrangement
-            const updatePromises = toPackOrders.map(order => 
+            // Move the printed orders to arrangement
+            const updatePromises = toPackOrders.map(order =>
               OrdersService.updateFulfillmentStage(order.id, 'to-arrangement')
             );
-            
+
             await Promise.all(updatePromises);
-            
-            // Switch to arrangement tab to show the moved orders
+
+            // Clear selection and switch to arrangement tab to show the moved orders
+            setSelectedPackOrderIds(new Set());
             setToShipSubTab('to-arrangement');
-            
+
             alert(`Successfully moved ${toPackOrders.length} order(s) to Arrangement stage.`);
             onRefresh?.();
           } catch (error) {
@@ -327,6 +339,16 @@ export const OrderTab: React.FC<OrderTabProps> = ({
         }
       }
     }, 500);
+  };
+
+  // Toggle selection for a pack order
+  const handleTogglePackOrderSelection = (order: Order) => {
+    setSelectedPackOrderIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(order.id)) newSet.delete(order.id);
+      else newSet.add(order.id);
+      return newSet;
+    });
   };
 
   // Print pack list for multiple orders with detailed information
@@ -1356,17 +1378,39 @@ export const OrderTab: React.FC<OrderTabProps> = ({
               })}
             </div>
             
-            {/* Print Pack List button - only show on To Pack tab */}
-            {toShipSubTab === 'to-pack' && countsByToShipSubTab['to-pack'] > 0 && (
-              <button
-                type="button"
-                onClick={handlePrintPackList}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm"
-              >
-                <Printer className="w-4 h-4" />
-                Print Pack List & Move All to Arrangement
-              </button>
-            )}
+            {/* Print Pack List buttons - only show on To Pack tab */}
+            {toShipSubTab === 'to-pack' && countsByToShipSubTab['to-pack'] > 0 && (() => {
+              const visiblePackIds = filtered.map(o => o.id);
+              const allVisibleSelected = visiblePackIds.length > 0 && visiblePackIds.every(id => selectedPackOrderIds.has(id));
+              const hasSelection = selectedPackOrderIds.size > 0;
+              return (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (allVisibleSelected) {
+                        setSelectedPackOrderIds(new Set());
+                      } else {
+                        setSelectedPackOrderIds(new Set(visiblePackIds));
+                      }
+                    }}
+                    className="px-3 py-2 text-sm font-medium rounded-lg border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 transition"
+                  >
+                    {allVisibleSelected ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrintPackList}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm"
+                  >
+                    <Printer className="w-4 h-4" />
+                    {hasSelection
+                      ? `Print Pack List & Move Selected (${selectedPackOrderIds.size})`
+                      : 'Print Pack List & Move All to Arrangement'}
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Bulk Complete Handover button - only show on To Hand Over tab when orders are selected */}
             {toShipSubTab === 'to-hand-over' && selectedOrderIds.size > 0 && (
@@ -1417,6 +1461,8 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             onToggleOrderSelection={handleToggleOrderSelection}
             selectedArrangementOrderIds={selectedArrangementOrderIds}
             onToggleArrangementOrderSelection={handleToggleArrangementOrderSelection}
+            selectedPackOrderIds={selectedPackOrderIds}
+            onTogglePackOrderSelection={handleTogglePackOrderSelection}
           />
         )
         : (!loading && pagedOrders.length === 0 && activeSubTab !== 'return-refund'
