@@ -180,7 +180,7 @@ export const ItemsView = ({ itemMetrics, onExportCSV }: ItemsViewProps) => {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
                         <div className="text-xs text-gray-500 mt-1">
-                          Net Payout: <span className="font-semibold text-green-600">{formatCurrency(item.netPayout)}</span>
+                          Net Payout: <span className="font-semibold text-green-600">{formatCurrency(Math.abs(item.netPayout))}</span>
                         </div>
                       </div>
                     </div>
@@ -261,7 +261,7 @@ export const ItemsView = ({ itemMetrics, onExportCSV }: ItemsViewProps) => {
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(item.paymentFee)}</td>
                     <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(item.shippingFee)}</td>
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(item.platformFee)}</td>
-                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(item.netPayout)}</td>
+                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(item.netPayout))}</td>
                   </tr>
                 ))
               )}

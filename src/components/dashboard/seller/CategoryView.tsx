@@ -68,7 +68,7 @@ export const CategoryView = ({ categoryMetrics, onExportCSV }: CategoryViewProps
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(category.paymentFee)}</td>
                     <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(category.shippingFee)}</td>
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(category.platformFee)}</td>
-                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(category.netPayout)}</td>
+                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(category.netPayout))}</td>
                   </tr>
                 ))
               )}
@@ -98,7 +98,7 @@ export const CategoryView = ({ categoryMetrics, onExportCSV }: CategoryViewProps
             <div className="bg-white rounded-lg p-4">
               <div className="text-xs text-gray-600 mb-1">Top Category</div>
               <div className="text-lg font-bold text-gray-900">{categoryMetrics[0].name}</div>
-              <div className="text-xs text-teal-600 mt-1">{formatCurrency(categoryMetrics[0].netPayout)}</div>
+              <div className="text-xs text-teal-600 mt-1">{formatCurrency(Math.abs(categoryMetrics[0].netPayout))}</div>
             </div>
             <div className="bg-white rounded-lg p-4">
               <div className="text-xs text-gray-600 mb-1">Total Categories</div>

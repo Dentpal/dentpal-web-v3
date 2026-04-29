@@ -162,7 +162,7 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
                         {formatCurrency(day.totalPlatformFee)}
                       </td>
                       <td className="px-6 py-4 text-green-600 text-right font-bold">
-                        {formatCurrency(day.netPayout)}
+                        {formatCurrency(Math.abs(day.netPayout))}
                       </td>
                     </tr>
                   ))}
@@ -186,7 +186,7 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
                       {formatCurrency(grandTotals.totalPlatformFee)}
                     </td>
                     <td className="px-6 py-4 text-green-600 text-right text-base">
-                      {formatCurrency(grandTotals.netPayout)}
+                      {formatCurrency(Math.abs(grandTotals.netPayout))}
                     </td>
                   </tr>
                 </>

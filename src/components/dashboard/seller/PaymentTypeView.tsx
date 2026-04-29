@@ -76,7 +76,7 @@ export const PaymentTypeView = ({ paymentTypeMetrics, onExportCSV }: PaymentType
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(paymentType.paymentFee)}</td>
                     <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(paymentType.shippingFee)}</td>
                     <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(paymentType.platformFee)}</td>
-                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(paymentType.netPayout)}</td>
+                    <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(paymentType.netPayout))}</td>
                   </tr>
                 ))
               )}

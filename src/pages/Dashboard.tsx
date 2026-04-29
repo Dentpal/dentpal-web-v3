@@ -291,7 +291,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     ).sort((a, b) => a.localeCompare(b));
   }, [confirmationOrders]);
 
-  const isPaidStatus = (s: Order['status']) => ['to_ship','processing','completed','shipping'].includes(s);
+  const isPaidStatus = (s: Order['status']) => ['to_ship','completed','shipping'].includes(s);
   const isWithdrawableStatus = (s: Order['status']) => s === 'completed'; // Only completed orders are eligible for withdrawal
   const getAmount = (o: Order) => typeof o.total === 'number' ? o.total : ((o.items || []).reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0) || 0);
 
@@ -1403,7 +1403,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                     {currency.format(dayMetrics.totalPlatformFee)}
                                   </td>
                                   <td className="px-6 py-4 text-green-600 text-right font-bold">
-                                    {formatCurrency(dayMetrics.totalNetPayout)}
+                                    {formatCurrency(Math.abs(dayMetrics.totalNetPayout))}
                                   </td>
                                 </tr>
                               );
@@ -1431,7 +1431,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                   {currency.format(grandTotalPlatformFee)}
                                 </td>
                                 <td className="px-6 py-4 text-green-600 text-right text-base">
-                                  {formatCurrency(grandTotalNetPayout)}
+                                  {formatCurrency(Math.abs(grandTotalNetPayout))}
                                 </td>
                               </tr>
                             );
@@ -1542,7 +1542,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
-                                      <div className="text-xs text-gray-500 mt-1">Net Payout: <span className="font-semibold text-green-600">{formatCurrency(item.netPayout)}</span></div>
+                                      <div className="text-xs text-gray-500 mt-1">Net Payout: <span className="font-semibold text-green-600">{formatCurrency(Math.abs(item.netPayout))}</span></div>
                                     </div>
                                   </div>
                                 ))}
@@ -1871,7 +1871,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(item.paymentFee)}</td>
                                 <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(item.shippingFee)}</td>
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(item.platformFee)}</td>
-                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(item.netPayout)}</td>
+                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(item.netPayout))}</td>
                               </tr>
                             ));
                           })()}
@@ -2132,7 +2132,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(category.paymentFee)}</td>
                                 <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(category.shippingFee)}</td>
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(category.platformFee)}</td>
-                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(category.netPayout)}</td>
+                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(category.netPayout))}</td>
                               </tr>
                             ));
                           })()}
@@ -2397,7 +2397,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(paymentType.paymentFee)}</td>
                                 <td className="px-6 py-4 text-orange-600 text-right">{formatCurrency(paymentType.shippingFee)}</td>
                                 <td className="px-6 py-4 text-red-600 text-right">{formatCurrency(paymentType.platformFee)}</td>
-                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(paymentType.netPayout)}</td>
+                                <td className="px-6 py-4 text-green-600 text-right font-bold text-base">{formatCurrency(Math.abs(paymentType.netPayout))}</td>
                               </tr>
                             ));
                           })()}
@@ -2503,29 +2503,67 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                           const headers = [
                             'Receipt No.',
                             'Date',
+                            'Time',
                             'Customer Name',
                             'Customer ID',
+                            'Employee',
                             'Payment Type',
-                            'Amount',
-                            'Status'
+                            'Status',
+                            'Items',
+                            'Total Quantity',
+                            'Subtotal',
+                            'Shipping Fee',
+                            'Payment Fee',
+                            'Platform Fee',
+                            'Platform VAT (12% inclusive)',
+                            'Total'
                           ];
+
+                          const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
                           const rows = paidOrders.map(order => {
                             const createdAt = order.createdAt || order.timestamp || '';
-                            const date = createdAt ? new Date(createdAt).toLocaleDateString('en-US', { 
-                              year: 'numeric', 
-                              month: 'short', 
-                              day: 'numeric' 
+                            const dateObj = createdAt ? new Date(createdAt) : null;
+                            const date = dateObj ? dateObj.toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
                             }) : '';
-                            
+                            const time = dateObj ? dateObj.toLocaleTimeString('en-US', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : '';
+
+                            const items = Array.isArray(order.items) ? order.items : [];
+                            const itemsSummary = items
+                              .map((it: any) => `${it.name || 'Item'} x${it.quantity || 1} @ ${(Number(it.price) || 0).toFixed(2)}`)
+                              .join(' | ') || (order.itemsBrief || '');
+                            const totalQty = items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0);
+
+                            const subtotal = Number(order.summary?.subtotal) || 0;
+                            const shippingFee = Number(order.summary?.buyerShippingCharge) || 0;
+                            const paymentFee = Number(order.feesBreakdown?.paymentProcessingFee) || 0;
+                            const platformFee = Number(order.feesBreakdown?.platformFee) || 0;
+                            const platformVat = platformFee * 0.12;
+                            const total = subtotal + shippingFee;
+
                             return [
-                              `"${order.id || ''}"`,
-                              `"${date}"`,
-                              `"${order.customer?.name || 'N/A'}"`,
-                              `"${order.userId || 'N/A'}"`,
-                              `"${order.feesBreakdown?.paymentMethod || 'N/A'}"`,
-                              (Number(order.summary?.subtotal) || 0).toFixed(2),
-                              `"${order.status || 'N/A'}"`
+                              escape(order.id || ''),
+                              escape(date),
+                              escape(time),
+                              escape(order.customer?.name || 'N/A'),
+                              escape(order.userId || 'N/A'),
+                              escape((order as any).employeeName || (order as any).employee?.name || 'N/A'),
+                              escape(order.feesBreakdown?.paymentMethod || order.paymentType || 'N/A'),
+                              escape((order.status || 'N/A').toString().toUpperCase()),
+                              escape(itemsSummary),
+                              totalQty,
+                              subtotal.toFixed(2),
+                              shippingFee.toFixed(2),
+                              paymentFee.toFixed(2),
+                              platformFee.toFixed(2),
+                              platformVat.toFixed(2),
+                              total.toFixed(2)
                             ];
                           });
 

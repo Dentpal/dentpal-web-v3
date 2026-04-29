@@ -8,7 +8,7 @@ import { Order } from '@/types/order';
 import { formatCurrency, formatDate } from '@/utils/dashboard/formatters';
 import {
   X, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  ArrowUpDown, Package, DollarSign, Printer, FileText, FileSpreadsheet,
+  ArrowUpDown, Package, PhilippinePeso, Printer, FileText, FileSpreadsheet,
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -114,7 +114,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
   };
 
   /* ── totals row ── */
-  const EXCLUDED_STATUSES = new Set(['cancelled', 'expired']);
+  const EXCLUDED_STATUSES = new Set(['cancelled', 'expired', 'processing']);
   const totals = useMemo(() => {
     const successful = filtered.filter(o => !EXCLUDED_STATUSES.has((o.status || '').toLowerCase()));
     const sub = successful.reduce((s, o) => s + resolveSubtotal(o), 0);
@@ -259,9 +259,9 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
             <div className="grid grid-cols-4 gap-3 mt-4">
               {[
                 { icon: Package,    label: 'Total Orders',  value: filtered.length.toLocaleString() },
-                { icon: DollarSign, label: 'Gross Revenue', value: formatCurrency(totals.sub) },
-                { icon: DollarSign, label: 'Total Fees',    value: formatCurrency(totals.pf + totals.sf + totals.plf) },
-                { icon: DollarSign, label: 'Net Payout',    value: formatCurrency(totals.net) },
+                { icon: PhilippinePeso, label: 'Gross Revenue', value: formatCurrency(totals.sub) },
+                { icon: PhilippinePeso, label: 'Total Fees',    value: formatCurrency(totals.pf + totals.sf + totals.plf) },
+                { icon: PhilippinePeso, label: 'Net Payout',    value: formatCurrency(totals.net) },
               ].map((c, i) => (
                 <div key={i} className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-1">
