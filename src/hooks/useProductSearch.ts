@@ -46,8 +46,8 @@ export default function useProductSearch(uid: string | undefined) {
         const status = data.status || (data.isActive ? 'active' : 'inactive');
         const isApproved = data.isApproved ?? data.IsApproved ?? data.QCProduct ?? false;
         
-        // Skip if not active or not approved
-        if (status !== 'active' || !isApproved) {
+        // Allow both active and inactive products; still require QC approval
+        if ((status !== 'active' && status !== 'inactive') || !isApproved) {
           continue;
         }
         
@@ -76,6 +76,7 @@ export default function useProductSearch(uid: string | undefined) {
           imageUrl: data.imageURL || data.imageUrl || undefined,
           sellerId,
           sellerName,
+          status,
         });
       }
       setResults(filtered);

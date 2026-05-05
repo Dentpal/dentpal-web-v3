@@ -416,7 +416,7 @@ const StockAdjustment: React.FC = () => {
             />
             
             {/* Dropdown for search results */}
-            {search.trim() && results.length > 0 && (
+            {search.trim() && (
               <div style={{
                 position: 'absolute',
                 top: '100%',
@@ -431,7 +431,11 @@ const StockAdjustment: React.FC = () => {
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                 zIndex: 100
               }}>
-                {results.map((row) => (
+                {results.length === 0 ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
+                    {loading ? 'Searching...' : 'No product found'}
+                  </div>
+                ) : results.map((row) => (
                   <div
                     key={row.id}
                     onClick={() => handleAddProductToBatch(row)}
@@ -474,8 +478,23 @@ const StockAdjustment: React.FC = () => {
                       </div>
                     )}
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: '#111827', display: 'flex', alignItems: 'center', gap: 8 }}>
                         {row.product}
+                        {row.status === 'inactive' && (
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: '#6b7280',
+                            background: '#f3f4f6',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: 4,
+                            padding: '2px 6px',
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.4
+                          }}>
+                            Inactive
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 12, color: '#6b7280' }}>
                         Stock: {row.stock || 0}
