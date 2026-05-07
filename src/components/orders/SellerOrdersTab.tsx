@@ -13,6 +13,8 @@ import CompletedOrdersView from './views/CompletedOrdersView';
 import UnfulfilledOrdersView from './views/UnfulfilledOrdersView';
 import ReturnRefundOrdersView from './views/ReturnRefundOrdersView';
 import OrdersService from '@/services/orders';
+import SellersService from '@/services/sellers';
+import ProductService from '@/services/product';
 import { useAuth } from '@/hooks/useAuth';
 import { auth } from '@/lib/firebase';
 import QRCode from 'qrcode';
@@ -296,7 +298,6 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       return;
     }
 
-    // Open print window first
     const printWindow = printPackList(toPackOrders);
 
     if (!printWindow) {
@@ -304,41 +305,20 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       return;
     }
 
-    // Wait for the print dialog to be handled (printed or closed)
-    // We'll move orders after the window is closed
-    const checkWindowClosed = setInterval(async () => {
-      if (printWindow.closed) {
-        clearInterval(checkWindowClosed);
+    try {
+      await Promise.all(
+        toPackOrders.map(order =>
+          OrdersService.updateFulfillmentStage(order.id, 'to-arrangement')
+        )
+      );
 
-        // Ask user to confirm they printed the pack list
-        const confirmPrinted = confirm(
-          `Did you print or save the pack list?\n\n` +
-          `Click OK to move ${toPackOrders.length} ${hasSelection ? 'selected ' : ''}order(s) to Arrangement stage.\n` +
-          `Click Cancel to keep orders in To Pack stage.`
-        );
-
-        if (confirmPrinted) {
-          try {
-            // Move the printed orders to arrangement
-            const updatePromises = toPackOrders.map(order =>
-              OrdersService.updateFulfillmentStage(order.id, 'to-arrangement')
-            );
-
-            await Promise.all(updatePromises);
-
-            // Clear selection and switch to arrangement tab to show the moved orders
-            setSelectedPackOrderIds(new Set());
-            setToShipSubTab('to-arrangement');
-
-            alert(`Successfully moved ${toPackOrders.length} order(s) to Arrangement stage.`);
-            onRefresh?.();
-          } catch (error) {
-            console.error('Failed to move orders:', error);
-            alert('Failed to move orders. Please try again.');
-          }
-        }
-      }
-    }, 500);
+      setSelectedPackOrderIds(new Set());
+      setToShipSubTab('to-arrangement');
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to move orders:', error);
+      alert('Failed to move orders. Please try again.');
+    }
   };
 
   // Toggle selection for a pack order
@@ -1020,19 +1000,11 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     try { await navigator.clipboard.writeText(text); setCopied(which); setTimeout(()=> setCopied(null), 1200); } catch {}
   };
 
-  // Build invoice HTML with QR code
+  // Build waybill HTML (landscape, courier-grade)
   const buildInvoiceHTML = async (order: Order) => {
-    const currency = order.currency || 'PHP';
-    const total = order.total != null ? order.total : '';
-    const hasItems = Array.isArray(order.items) && order.items.length > 0;
-    
-    // Format status for display
-    const formattedStatus = order.status
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
-    
-    // Load and convert logo to base64
+    const DEFAULT_SELLER_ADDRESS = 'Unit 1207, 12/F Cityland Herrera Tower, Rufino St. cor. Valero St., Brgy. Bel-Air, Makati City, Metro Manila, 1227';
+
+    // Logo → base64
     let logoDataUrl = '';
     try {
       const response = await fetch(dentpalLogo);
@@ -1045,130 +1017,245 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     } catch (err) {
       console.error('Failed to load logo:', err);
     }
-    
-    // Generate QR code for tracking ID
+
+    // QR code for tracking ID — generated at higher resolution so 180px render stays crisp
     const trackingId = order.shippingInfo?.jrs?.trackingId || 'N/A';
     let qrCodeDataUrl = '';
     try {
       qrCodeDataUrl = await QRCode.toDataURL(trackingId, {
-        width: 120,
+        width: 320,
         margin: 1,
-        color: {
-          dark: '#0f172a',
-          light: '#ffffff'
-        }
+        color: { dark: '#0b0f17', light: '#ffffff' },
       });
     } catch (err) {
       console.error('Failed to generate QR code:', err);
     }
 
-    const itemsMarkup = hasItems
-      ? `<table style="width:100%; border-collapse:collapse; margin-top:8px;">
-           <thead>
-             <tr>
-               <th align="left" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Item</th>
-               <th align="right" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Qty</th>
-               <th align="right" style="border-bottom:1px solid #e2e8f0; padding:8px 0; font-size:12px; color:#64748b;">Price</th>
-             </tr>
-           </thead>
-           <tbody>
-             ${order.items!.map(it => `<tr>
-               <td style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.name}</td>
-               <td align="right" style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.quantity}</td>
-               <td align="right" style="padding:10px 0; border-bottom:1px solid #f1f5f9;">${it.price != null ? currency + ' ' + it.price : ''}</td>
-             </tr>`).join('')}
-           </tbody>
-         </table>`
-      : `<div class="items">${order.itemsBrief || `${order.orderCount} item(s)`}</div>`;
+    // Buyer (shipping) address
+    const ship = order.shippingInfo;
+    const buyerName = ship?.fullName || order.customer?.name || '—';
+    const buyerAddressParts = [
+      ship?.addressLine1,
+      ship?.addressLine2 || '',
+      [ship?.city, ship?.state, ship?.postalCode].filter(Boolean).join(', '),
+    ].filter(s => s && String(s).trim().length > 0);
+    const buyerAddress = buyerAddressParts.length ? buyerAddressParts.join(', ') : '—';
+    const buyerContact = ship?.phoneNumber || order.customer?.contact || '—';
+
+    // Seller name + address — always resolve to the PARENT seller's store.
+    // Try the order's sellerId first, follow parentId if the resolved profile is a sub-account,
+    // and fall back to the logged-in user's own parent chain so sub-accounts print the parent store.
+    let sellerName = order.sellerName || 'DentPal Seller';
+    let sellerAddress = DEFAULT_SELLER_ADDRESS;
+    const rawSellerFees = (order as unknown as { sellerFeeBreakdowns?: unknown }).sellerFeeBreakdowns;
+    const sellerFeesEntry = Array.isArray(rawSellerFees)
+      ? (rawSellerFees[0] as Record<string, unknown> | undefined)
+      : (rawSellerFees as Record<string, unknown> | undefined);
+    const orderSellerId = (sellerFeesEntry?.sellerId as string | undefined) || undefined;
+
+    type ParentAwareProfile = {
+      name?: string;
+      parentId?: string;
+      isSubAccount?: boolean;
+      vendor?: {
+        company?: {
+          name?: string;
+          storeName?: string;
+          address?: { line1?: string; line2?: string; city?: string; province?: string; zip?: string };
+        };
+      };
+    };
+
+    const loadOwnerProfile = async (id: string | undefined): Promise<ParentAwareProfile | null> => {
+      if (!id) return null;
+      const first = (await SellersService.get(id)) as unknown as ParentAwareProfile | null;
+      if (!first) return null;
+      // If this profile is a sub-account, jump to its parent so we always print the parent store.
+      if (first.parentId) {
+        const parent = (await SellersService.get(first.parentId)) as unknown as ParentAwareProfile | null;
+        if (parent) return parent;
+      }
+      return first;
+    };
+
+    try {
+      let ownerProfile = await loadOwnerProfile(orderSellerId);
+
+      // Fallback: if the order's sellerId didn't yield a usable store, try the logged-in user's
+      // parent chain (covers sub-accounts whose orders weren't tagged with the parent uid).
+      if (!ownerProfile?.vendor?.company?.storeName && user?.uid) {
+        const fromAuth = await loadOwnerProfile(user.uid);
+        if (fromAuth?.vendor?.company?.storeName) ownerProfile = fromAuth;
+      }
+
+      if (ownerProfile) {
+        const company = ownerProfile.vendor?.company;
+        sellerName = company?.storeName || company?.name || ownerProfile.name || sellerName;
+        const a = company?.address;
+        if (a) {
+          const parts = [a.line1, a.line2 || '', [a.city, a.province, a.zip].filter(Boolean).join(', ')]
+            .filter(s => s && String(s).trim().length > 0);
+          if (parts.length) sellerAddress = parts.join(', ');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load seller profile:', err);
+    }
+
+    // Package size + dimensions/weight
+    const packageSize = ship?.packagingSize || order.package?.size || '—';
+    let packageDimensions = order.package?.dimensions || '';
+    let packageWeight = order.package?.weight || '';
+
+    // If the order doesn't carry parcel dimensions/weight, fall back to the first item's product
+    if ((!packageDimensions || !packageWeight) && Array.isArray(order.items) && order.items.length > 0) {
+      const firstProductId = order.items.find(it => it.productId)?.productId;
+      if (firstProductId) {
+        try {
+          const product = await ProductService.getProductById(firstProductId) as
+            | (Record<string, any> & {
+                dimensions?: { length?: number; width?: number; height?: number };
+                dimensionsUnit?: string;
+                weight?: number;
+                weightUnit?: string;
+              })
+            | null;
+          if (product) {
+            if (!packageDimensions && product.dimensions) {
+              const { length, width, height } = product.dimensions;
+              const dimsParts = [length, width, height].filter(v => v != null && v !== 0);
+              if (dimsParts.length > 0) {
+                const unit = product.dimensionsUnit || 'cm';
+                packageDimensions = `${dimsParts.join(' × ')} ${unit}`;
+              }
+            }
+            if (!packageWeight && product.weight != null) {
+              const unit = product.weightUnit || 'kg';
+              packageWeight = `${product.weight} ${unit}`;
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load product dimensions:', err);
+        }
+      }
+    }
+
+    // Mode of payment — COD or NON-COD
+    const rawPayment = (order.feesBreakdown?.paymentMethod || order.paymentType || '').toString().trim().toLowerCase();
+    const paymentMode = rawPayment === 'cash_on_delivery' ? 'COD' : 'NON-COD';
+
+    const printedAt = new Date().toLocaleString('en-PH', {
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
 
     return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Invoice ${order.id}</title>
+  <title>Waybill ${order.id}</title>
   <style>
-    :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --brand:#0d9488; }
+    :root { --ink:#0b0f17; --line:#0b0f17; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color: var(--ink); }
-    .sheet { max-width: 800px; margin: 24px auto; padding: 32px; border: 1px solid var(--line); border-radius: 16px; }
-    .header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--line); }
-    .brand { display:flex; align-items:center; gap:12px; }
-    .brand-badge { width:48px; height:48px; object-fit:contain; }
-    .title { font-size:20px; font-weight:700; }
-    .meta { text-align:right; font-size:12px; color: var(--muted); }
-    .section { padding:16px 0; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-    .grid-three { display:grid; grid-template-columns:1fr 1fr auto; gap:16px; align-items:start; }
-    .label { font-size:12px; color: var(--muted); }
-    .value { font-size:14px; font-weight:600; }
-    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; font-size:11px; border-radius:999px; border:1px solid var(--line); color:#0f172a; }
-    .items { background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:12px; }
-    .total { font-size:18px; font-weight:700; }
-    .footer { margin-top:24px; padding-top:16px; border-top:1px solid var(--line); font-size:12px; color: var(--muted); }
-    @media print { body { background:white; } .sheet { border:none; box-shadow:none; margin:0; border-radius:0; } .actions { display:none !important; } @page { size: A4; margin: 16mm; } }
+    html, body { margin:0; padding:0; background:#fff; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      font-size: 10pt;
+      font-weight: 700;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet { width: 6in; height: 4in; padding: 0.1in 0.14in; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column; border: 2.5px solid var(--ink); }
+    .header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-bottom:3px; border-bottom: 1.5px solid var(--ink); flex-shrink:0; }
+    .brand { display:flex; align-items:center; gap:6px; }
+    .brand img { width:24px; height:24px; object-fit:contain; }
+    .title { font-size:16pt; font-weight:900; letter-spacing:0.4px; line-height:1; }
+    .meta { text-align:right; }
+    .meta .order-id { font-size:12pt; font-weight:900; word-break:break-all; line-height:1.15; }
+    .meta .order-date { font-size:8pt; font-weight:700; margin-top:1px; }
+
+    .qr-row { display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom: 1px solid var(--ink); flex-shrink:0; }
+    .qr-box { width:1in; height:1in; border:2px solid var(--ink); padding:2px; background:#fff; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .qr-box img { width:100%; height:100%; display:block; }
+    .qr-no { font-size:7pt; font-weight:800; color:var(--ink); text-align:center; }
+    .qr-meta { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+    .field-value { font-size:11pt; font-weight:900; line-height:1.15; }
+    .field-value.lg { font-size:14pt; }
+
+    .party { padding:4px 0; }
+    .party .field-label { font-size:8pt; font-weight:900; letter-spacing:1px; text-transform:uppercase; }
+    .party .name { font-size:13pt; font-weight:900; margin-top:1px; line-height:1.15; }
+    .party .addr { font-size:9.5pt; font-weight:700; margin-top:1px; line-height:1.25; }
+    .party .contact { font-size:9.5pt; font-weight:800; margin-top:1px; }
+
+    .divider { border-top: 1px solid var(--ink); margin: 1px 0; }
+
+    .printed { text-align:right; font-size:7.5pt; font-weight:800; margin-top:2px; }
+
+    .footer { display:none; }
+
+    .actions { margin-top:6px; }
+    .actions button { padding:6px 12px; border:2px solid var(--ink); border-radius:6px; background:#fff; font-weight:800; cursor:pointer; }
+
+    @media print {
+      html, body { width: 6in; height: 4in; }
+      .sheet { padding: 0.08in 0.12in; width: 6in; height: 4in; page-break-after: avoid; page-break-inside: avoid; }
+      .actions { display:none !important; }
+      @page { size: 6in 4in; margin: 0; }
+    }
   </style>
 </head>
 <body>
   <div class="sheet">
+
     <div class="header">
       <div class="brand">
-        ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DentPal Logo" class="brand-badge" />` : '<div style="width:48px; height:48px; border-radius:10px; background:linear-gradient(135deg,#0ea5e9,#0d9488);"></div>'}
-        <div class="title">Waybill</div>
+        ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DentPal Logo" />` : '<div style="width:56px; height:56px; border-radius:10px; background:linear-gradient(135deg,#0ea5e9,#0d9488);"></div>'}
+        <div class="title">DentPal</div>
       </div>
       <div class="meta">
-        <div><strong>Order #</strong> ${order.id}</div>
-        <div>${order.timestamp}</div>
+        <div class="order-id">Order # ${order.id}</div>
+        <div class="order-date">${order.timestamp || ''}</div>
       </div>
     </div>
 
-    <div class="section grid-three">
-      <div>
-        <div class="label">Buyer</div>
-        <div class="value">${order.customer.name || ''}</div>
-        <div class="label" style="margin-top:8px">Contact</div>
-        <div class="value">${order.customer.contact || ''}</div>
+    <div class="qr-row">
+      <div class="qr-box">
+        ${qrCodeDataUrl ? `<img src="${qrCodeDataUrl}" alt="QR Code" />` : '<div class="qr-no">No QR</div>'}
       </div>
-      <div>
-        <div class="label">Status</div>
-        <div class="badge">${formattedStatus}</div>
-        <div class="label" style="margin-top:8px">Tracking ID</div>
-        <div class="value" style="margin-top:4px;">${trackingId}</div>
-      </div>
-      <div style="display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start;">
-        <div class="label" style="text-align:center; margin-bottom:8px;">QR Code</div>
-        ${qrCodeDataUrl ? `<img src="${qrCodeDataUrl}" alt="QR Code" style="width:100px; height:100px; border:1px solid var(--line); border-radius:8px; padding:4px; background:white;" />` : '<div style="width:100px; height:100px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--muted);">No QR</div>'}
+      <div class="qr-meta">
+        <div class="field-value lg">${packageSize}</div>
+        <div class="field-value">${paymentMode}</div>
+        ${packageDimensions ? `<div style="font-size:12pt; font-weight:800;">${packageDimensions}</div>` : ''}
+        ${packageWeight ? `<div style="font-size:12pt; font-weight:800;">${packageWeight}</div>` : ''}
       </div>
     </div>
 
-    <div class="section">
-      <div class="label">Items</div>
-      ${itemsMarkup}
+    <div class="party">
+      <div class="field-label">Buyer</div>
+      <div class="name">${buyerName}</div>
+      <div class="addr">${buyerAddress}</div>
+      <div class="contact">${buyerContact}</div>
     </div>
 
-    <div class="section" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:end;">
-      <div>
-        <div class="label">Package</div>
-        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
-          ${order.package?.size || '—'}
-        </div>
-        <div class="label" style="margin-top:12px;">Shipping Fee</div>
-        <div style="font-size:13px; color:#6b7280; margin-top:4px;">
-          ${typeof order.summary?.shippingCost === 'number' ? `${order.currency || 'PHP'} ${order.summary.shippingCost}` : '—'}
-        </div>
-      </div>
-      <div style="text-align:right;">
-        <div class="label">Total Amount</div>
-        <div class="total">${currency} ${total}</div>
-      </div>
+    <div class="divider"></div>
+
+    <div class="party">
+      <div class="field-label">Seller</div>
+      <div class="name">${sellerName}</div>
+      <div class="addr">${sellerAddress}</div>
     </div>
+
+    <div class="printed">Printed: ${printedAt}</div>
 
     <div class="footer">
       Thanks for your purchase. This is a system-generated waybill. For concerns, contact support.
     </div>
-    <div class="actions" style="margin-top:16px">
-      <button onclick="window.print()" style="padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:white; cursor:pointer">Print</button>
+
+    <div class="actions">
+      <button onclick="window.print()">Print</button>
     </div>
   </div>
 </body>
@@ -1625,18 +1712,20 @@ export const OrderTab: React.FC<OrderTabProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      className="text-xs px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50"
-                      onClick={async () => {
-                        try {
-                          await printInvoice(selectedOrder);
-                        } catch (e) {
-                          console.error('Error printing invoice:', e);
-                        }
-                      }}
-                    >
-                      Print Invoice
-                    </button>
+                    {activeSubTab === 'to-ship' && toShipSubTab === 'to-hand-over' && (
+                      <button
+                        className="text-xs px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50"
+                        onClick={async () => {
+                          try {
+                            await printInvoice(selectedOrder);
+                          } catch (e) {
+                            console.error('Error printing waybill:', e);
+                          }
+                        }}
+                      >
+                        Print Waybill
+                      </button>
+                    )}
                     <button 
                       className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-red-50 text-red-600 border border-red-200" 
                       onClick={() => setDetailsOpen(false)}

@@ -44,11 +44,31 @@ const PAGE_SIZE = 10;
 
 const resolveDate = (o: Order) => new Date(o.createdAt || o.timestamp || '');
 
+const sellerFees = (o: Order): Record<string, unknown> | undefined => {
+  const raw = (o as unknown as { sellerFeeBreakdowns?: unknown }).sellerFeeBreakdowns;
+  if (Array.isArray(raw)) return raw[0] as Record<string, unknown> | undefined;
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
+  return undefined;
+};
+
 const resolveSubtotal   = (o: Order) => Number(o.summary?.subtotal)  || o.total || 0;
 const resolvePaymentFee = (o: Order) => Number(o.feesBreakdown?.paymentProcessingFee) || 0;
 const resolveShipping   = (o: Order) => Number(o.summary?.sellerShippingCharge) || 0;
-const resolvePlatformFee= (o: Order) => Number(o.feesBreakdown?.platformFee) || 0;
-const resolveNet = (o: Order) => resolveSubtotal(o) - resolvePaymentFee(o) - resolveShipping(o) - resolvePlatformFee(o);
+const resolvePlatformFee= (o: Order) =>
+  Number(sellerFees(o)?.platformFee) || Number(o.feesBreakdown?.platformFee) || 0;
+const resolveNet = (o: Order) => {
+  const sf = sellerFees(o);
+  const wired = sf?.netPayoutToSeller ?? o.payout?.netPayoutToSeller;
+  if (wired != null && wired !== '') return Number(wired) || 0;
+  return resolveSubtotal(o) - resolvePaymentFee(o) - resolveShipping(o) - resolvePlatformFee(o);
+};
+
+const formatPaymentMethod = (o: Order) => {
+  const raw = (o.feesBreakdown?.paymentMethod || o.paymentType || '').toString().trim();
+  if (!raw) return '—';
+  if (raw.toLowerCase() === 'cash_on_delivery') return 'COD';
+  return raw;
+};
 
 const statusConfig: Record<string, { bg: string; text: string; label: string }> = {
   completed:  { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Completed' },
@@ -64,6 +84,16 @@ const statusConfig: Record<string, { bg: string; text: string; label: string }> 
 };
 
 const getStatus = (s: string) => statusConfig[s] || { bg: 'bg-gray-100', text: 'text-gray-600', label: s };
+
+const formatCustomerName = (name?: string) => {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return '—';
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const first = parts[0];
+  const lastInitial = parts[parts.length - 1][0];
+  return `${first} ${lastInitial}.`;
+};
 
 /* ─── Component ──────────────────────────────────────────── */
 
@@ -131,7 +161,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
     formatDate(o.createdAt || o.timestamp || ''),
     getStatus(o.status).label,
     o.items?.map(i => `${i.name} x${i.quantity || 1}`).join('; ') || '—',
-    o.feesBreakdown?.paymentMethod || o.paymentType || '—',
+    formatPaymentMethod(o),
     resolveSubtotal(o),
     resolvePaymentFee(o),
     resolvePlatformFee(o),
@@ -351,13 +381,13 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                             : <ChevronDown className="w-3.5 h-3.5 text-gray-400 mx-auto" />}
                         </td>
                         <td className="px-3 py-2.5 font-mono text-gray-600 truncate align-middle">{(o.id || '').slice(0, 12)}</td>
-                        <td className="px-3 py-2.5 text-gray-800 truncate align-middle">{o.customer?.name || '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-800 truncate align-middle">{formatCustomerName(o.customer?.name)}</td>
                         <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap align-middle">{formatDate(o.createdAt || o.timestamp || '')}</td>
                         <td className="px-3 py-2.5 align-middle">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.bg} ${st.text}`}>{st.label}</span>
                         </td>
                         <td className="px-3 py-2.5 text-gray-600 truncate align-middle">{o.items?.map(it => `${it.name} x${it.quantity || 1}`).join(', ') || '—'}</td>
-                        <td className="px-3 py-2.5 text-gray-600 truncate align-middle">{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-600 truncate align-middle">{formatPaymentMethod(o)}</td>
                         <td className="px-3 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap align-middle">{formatCurrency(resolveSubtotal(o))}</td>
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePaymentFee(o))}</td>
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePlatformFee(o))}</td>
@@ -414,7 +444,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                                 </div>
                                 <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
                                   <div className="font-semibold text-gray-700 mb-1">Payment</div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{o.feesBreakdown?.paymentMethod || o.paymentType || '—'}</span></div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{formatPaymentMethod(o)}</span></div>
                                   <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="capitalize">{(o as any).paymongo?.paymentStatus || o.status.replace(/_/g, ' ')}</span></div>
                                 </div>
                                 {o.region && (
