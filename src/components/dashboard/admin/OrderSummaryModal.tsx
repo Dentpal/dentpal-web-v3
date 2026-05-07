@@ -54,6 +54,8 @@ const sellerFees = (o: Order): Record<string, unknown> | undefined => {
 const resolveSubtotal   = (o: Order) => Number(o.summary?.subtotal)  || o.total || 0;
 const resolvePaymentFee = (o: Order) => Number(o.feesBreakdown?.paymentProcessingFee) || 0;
 const resolveShipping   = (o: Order) => Number(o.summary?.sellerShippingCharge) || 0;
+const resolveShippingVat = (o: Order) =>
+  Number(sellerFees(o)?.shippingVat) || 0;
 const resolvePlatformFee= (o: Order) =>
   Number(sellerFees(o)?.platformFee) || Number(o.feesBreakdown?.platformFee) || 0;
 const resolveNet = (o: Order) => {
@@ -165,10 +167,11 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
     resolveSubtotal(o),
     resolvePaymentFee(o),
     resolvePlatformFee(o),
+    resolveShippingVat(o),
     resolveNet(o),
   ]);
 
-  const headers = ['Order ID', 'Customer', 'Date', 'Status', 'Items', 'Payment', 'Subtotal', 'Payment Fee', 'Platform Fee', 'Net Payout'];
+  const headers = ['Order ID', 'Customer', 'Date', 'Status', 'Items', 'Payment', 'Subtotal', 'Payment Fee', 'Platform Fee', 'Shipping VAT', 'Net Payout'];
 
   const handleExportPdf = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
@@ -179,7 +182,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
     doc.text(`${seller.province}, ${seller.city}  |  ${filtered.length} orders  |  Generated: ${new Date().toLocaleString('en-US')}`, 14, 21);
     doc.text(`Gross: ${formatCurrency(totals.sub)}   Payment Fees: ${formatCurrency(totals.pf)}   Platform Fees: ${formatCurrency(totals.plf)}   Net: ${formatCurrency(totals.net)}`, 14, 26);
 
-    const rows = buildRows().map(r => [...r.slice(0, 6), formatCurrency(r[6] as number), formatCurrency(r[7] as number), formatCurrency(r[8] as number), formatCurrency(r[9] as number)]);
+    const rows = buildRows().map(r => [...r.slice(0, 6), formatCurrency(r[6] as number), formatCurrency(r[7] as number), formatCurrency(r[8] as number), formatCurrency(r[9] as number), formatCurrency(r[10] as number)]);
 
     autoTable(doc, {
       startY: 30,
@@ -210,14 +213,15 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
 
     buildRows().forEach(r => {
       const row = ws.addRow([...r.slice(0, 6), ...r.slice(6)]);
-      [7, 8, 9, 10].forEach(ci => { row.getCell(ci).numFmt = '#,##0.00'; });
+      [7, 8, 9, 10, 11].forEach(ci => { row.getCell(ci).numFmt = '#,##0.00'; });
     });
 
     // Totals
+    const totalShippingVat = filtered.reduce((s, o) => s + resolveShippingVat(o), 0);
     ws.addRow([]);
-    const tRow = ws.addRow(['', '', '', '', '', 'TOTAL', totals.sub, totals.pf, totals.plf, totals.net]);
+    const tRow = ws.addRow(['', '', '', '', '', 'TOTAL', totals.sub, totals.pf, totals.plf, totalShippingVat, totals.net]);
     tRow.font = { bold: true };
-    [7, 8, 9, 10].forEach(ci => { tRow.getCell(ci).numFmt = '#,##0.00'; });
+    [7, 8, 9, 10, 11].forEach(ci => { tRow.getCell(ci).numFmt = '#,##0.00'; });
 
     ws.columns.forEach(col => {
       let max = 10;
@@ -232,7 +236,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
 
   const handlePrint = () => {
     const rows = buildRows().map(r => `<tr>${
-      [...r.slice(0, 6), formatCurrency(r[6] as number), formatCurrency(r[7] as number), formatCurrency(r[8] as number), formatCurrency(r[9] as number)]
+      [...r.slice(0, 6), formatCurrency(r[6] as number), formatCurrency(r[7] as number), formatCurrency(r[8] as number), formatCurrency(r[9] as number), formatCurrency(r[10] as number)]
         .map((c, i) => `<td style="padding:4px 8px;border:1px solid #ddd;${i >= 6 ? 'text-align:right' : ''}">${c}</td>`).join('')
     }</tr>`).join('');
 
@@ -344,6 +348,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                 <col style={{ width: 82 }} />      {/* subtotal */}
                 <col style={{ width: 76 }} />      {/* pmt fee */}
                 <col style={{ width: 76 }} />      {/* plat fee */}
+                <col style={{ width: 78 }} />      {/* shipping vat */}
                 <col style={{ width: 88 }} />      {/* net payout */}
               </colgroup>
               <thead>
@@ -358,12 +363,13 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                   <Th k="subtotal" align="text-right">Subtotal</Th>
                   <Th k="paymentFee" align="text-right">Pmt Fee</Th>
                   <Th k="platformFee" align="text-right">Plat Fee</Th>
+                  <th className="sticky top-0 bg-gray-100 z-10 border-b border-gray-300 px-3 py-2.5 text-right text-[11px] font-semibold whitespace-nowrap">Ship VAT</th>
                   <Th k="netPayout" align="text-right">Net Payout</Th>
                 </tr>
               </thead>
               <tbody>
                 {paged.length === 0 && (
-                  <tr><td colSpan={11} className="text-center py-12 text-gray-400">No orders match your search.</td></tr>
+                  <tr><td colSpan={12} className="text-center py-12 text-gray-400">No orders match your search.</td></tr>
                 )}
                 {paged.map((o, i) => {
                   const st = getStatus(o.status);
@@ -391,13 +397,14 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                         <td className="px-3 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap align-middle">{formatCurrency(resolveSubtotal(o))}</td>
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePaymentFee(o))}</td>
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePlatformFee(o))}</td>
+                        <td className="px-3 py-2.5 text-right text-amber-700 whitespace-nowrap align-middle">{formatCurrency(resolveShippingVat(o))}</td>
                         <td className="px-3 py-2.5 text-right font-semibold text-green-700 whitespace-nowrap align-middle">{formatCurrency(resolveNet(o))}</td>
                       </tr>
 
                       {/* ── Expanded detail row ── */}
                       {isExp && (
                         <tr className="border-b border-blue-100">
-                          <td colSpan={11} className="p-0">
+                          <td colSpan={12} className="p-0">
                             <div className="bg-blue-50/50 border-t border-blue-100 px-8 py-4 space-y-3">
                               {/* Items sub-table */}
                               {o.items && o.items.length > 0 && (
@@ -438,22 +445,51 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                                   <div className="font-semibold text-gray-700 mb-1">Financials</div>
                                   <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(resolveSubtotal(o))}</span></div>
                                   <div className="flex justify-between"><span className="text-gray-500">Shipping</span><span>{formatCurrency(resolveShipping(o))}</span></div>
+                                  <div className="flex justify-between text-amber-700"><span>Shipping VAT</span><span>{formatCurrency(resolveShippingVat(o))}</span></div>
                                   <div className="flex justify-between text-red-600"><span>Payment Fee</span><span>-{formatCurrency(resolvePaymentFee(o))}</span></div>
                                   <div className="flex justify-between text-red-600"><span>Platform Fee</span><span>-{formatCurrency(resolvePlatformFee(o))}</span></div>
                                   <div className="flex justify-between pt-1.5 border-t font-semibold text-green-700"><span>Net Payout</span><span>{formatCurrency(resolveNet(o))}</span></div>
                                 </div>
-                                <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
-                                  <div className="font-semibold text-gray-700 mb-1">Payment</div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{formatPaymentMethod(o)}</span></div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="capitalize">{(o as any).paymongo?.paymentStatus || o.status.replace(/_/g, ' ')}</span></div>
-                                </div>
-                                {o.region && (
-                                  <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
-                                    <div className="font-semibold text-gray-700 mb-1">Location</div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Municipality</span><span>{o.region.municipality || '—'}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Province</span><span>{o.region.province || '—'}</span></div>
-                                  </div>
-                                )}
+                                {(() => {
+                                  const isCod = formatPaymentMethod(o) === 'COD';
+                                  return (
+                                    <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+                                      <div className="font-semibold text-gray-700 mb-1">Payment</div>
+                                      <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{formatPaymentMethod(o)}</span></div>
+                                      {!isCod && (
+                                        <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="capitalize">{(o as any).paymongo?.paymentStatus || o.status.replace(/_/g, ' ')}</span></div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                                {(() => {
+                                  const ship = (o as any).shippingInfo as
+                                    | { addressLine1?: string; addressLine2?: string | null; city?: string; state?: string; postalCode?: string; country?: string }
+                                    | undefined;
+                                  const region = o.region;
+                                  const fullAddress = [ship?.addressLine1, ship?.addressLine2, [ship?.city, ship?.state, ship?.postalCode].filter(Boolean).join(', '), ship?.country]
+                                    .filter(s => s && String(s).trim().length > 0).join(', ');
+                                  if (!region && !ship) return null;
+                                  return (
+                                    <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
+                                      <div className="font-semibold text-gray-700 mb-1">Location</div>
+                                      {region?.barangay && (
+                                        <div className="flex justify-between"><span className="text-gray-500">Barangay</span><span>{region.barangay}</span></div>
+                                      )}
+                                      <div className="flex justify-between"><span className="text-gray-500">Municipality</span><span>{region?.municipality || ship?.city || '—'}</span></div>
+                                      <div className="flex justify-between"><span className="text-gray-500">Province</span><span>{region?.province || ship?.state || '—'}</span></div>
+                                      {(region?.zip || ship?.postalCode) && (
+                                        <div className="flex justify-between"><span className="text-gray-500">ZIP</span><span>{region?.zip || ship?.postalCode}</span></div>
+                                      )}
+                                      {fullAddress && (
+                                        <div className="pt-1.5 border-t">
+                                          <div className="text-gray-500 mb-0.5">Full Address</div>
+                                          <div className="text-gray-800 leading-snug">{fullAddress}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </td>

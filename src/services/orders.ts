@@ -329,7 +329,10 @@ const mapDocToOrder = (id: string, data: any): Order => {
     } : undefined,
     // Return request ID if exists
     returnRequestId: data.returnRequestId ? String(data.returnRequestId) : undefined,
-  };
+    // Pass through raw seller fee breakdown(s) so dashboards can read shippingVat,
+    // platformFee, netPayoutToSeller, sellerId, etc., without re-fetching the doc.
+    ...(data.sellerFeeBreakdowns !== undefined ? { sellerFeeBreakdowns: data.sellerFeeBreakdowns } : {}),
+  } as Order;
 };
 
 // Hydrate order imageUrl from first item's Product doc
