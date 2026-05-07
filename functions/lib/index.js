@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testCreateJRSShipping = exports.verifyUserEmail = exports.setUserAccountStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
+exports.testCreateJRSShipping = exports.verifyUserEmail = exports.setUserAccountStatus = exports.deleteUserAccount = exports.listPaymongoTransactions = exports.getPaymongoTransaction = exports.getWalletTransactions = exports.checkWithdrawalStatus = exports.processWithdrawal = exports.getSellerReturnRequests = exports.processReturnRequest = exports.cancelJRSShipping = exports.createJRSShipping = exports.processSellerPayoutAdjustments = exports.getSellerPayoutAdjustments = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const app_1 = require("firebase-admin/app");
@@ -28,12 +28,13 @@ const axios_1 = require("axios");
 const db = (0, firestore_1.getFirestore)();
 const auth = (0, auth_1.getAuth)();
 // Define parameters for JRS API
-const JRS_API_KEY = (0, params_1.defineString)("JRS_API_KEY");
-const JRS_API_URL = (0, params_1.defineString)("JRS_API_URL", { default: "https://jrs-express.azure-api.net/qa-online-shipping-ship/ShippingRequestFunction" });
+const JRS_API_KEY = (0, params_1.defineSecret)("JRS_API_KEY");
+const JRS_SHIPPING_API_URL = (0, params_1.defineSecret)("JRS_SHIPPING_API_URL");
+const JRS_CANCEL_URL = (0, params_1.defineSecret)("JRS_CANCEL_URL");
 // Define parameters for PayMongo API
 const PAYMONGO_SECRET_KEY = (0, params_1.defineSecret)("PAYMONGO_SECRET_KEY");
-const PAYMONGO_WALLET_ID = (0, params_1.defineString)("PAYMONGO_WALLET_ID");
-const PAYMONGO_API_URL = (0, params_1.defineString)("PAYMONGO_API_URL", { default: "https://api.paymongo.com/v1" });
+const PAYMONGO_WALLET_ID = (0, params_1.defineSecret)("PAYMONGO_WALLET_ID");
+const PAYMONGO_API_URL = (0, params_1.defineSecret)("PAYMONGO_API_URL");
 const verifyAuthToken = async (authorizationHeader) => {
     if (!authorizationHeader) {
         throw new Error("Missing Authorization header");
@@ -103,6 +104,82 @@ const fetchSellerData = async (sellerId) => {
         return sellerDoc.data();
     }
     return null;
+};
+const fetchCallerProfile = async (decodedToken) => {
+    const snap = await db.collection("web_users").doc(decodedToken.uid).get();
+    const data = (snap.exists ? snap.data() : null) || {};
+    return {
+        uid: decodedToken.uid,
+        email: decodedToken.email || data.email,
+        role: data.role,
+        isSubAccount: data.isSubAccount === true,
+        parentId: typeof data.parentId === "string" ? data.parentId : null,
+    };
+};
+/**
+ * Returns the seller UIDs the caller is authorized to act as.
+ * Sub-accounts inherit their parent's seller identity.
+ */
+const getEffectiveSellerUids = (caller) => {
+    if (caller.isSubAccount && caller.parentId) {
+        return [caller.parentId];
+    }
+    return [caller.uid];
+};
+const isAdminCaller = (decodedToken, caller) => {
+    var _a;
+    return (decodedToken.role === "admin" ||
+        ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === "admin" ||
+        caller.role === "admin");
+};
+/**
+ * Determines whether the caller is authorized as a seller on the given order.
+ *
+ * Accepts both the array shape (`sellerIds: string[]`) and the legacy
+ * singular shape (`sellerId: string`). For each entry, attempts a direct
+ * UID match against the caller's effective seller UIDs first, then falls
+ * back to resolving the entry as a `Seller/{id}` document and matching its
+ * `userId` / `email` fields (handles cases where `sellerIds` stores Seller
+ * doc IDs rather than user UIDs).
+ */
+const isSellerOnOrder = async (orderData, caller) => {
+    const rawIds = orderData === null || orderData === void 0 ? void 0 : orderData.sellerIds;
+    const sellerIds = Array.isArray(rawIds)
+        ? rawIds.map((v) => String(v))
+        : (orderData === null || orderData === void 0 ? void 0 : orderData.sellerId)
+            ? [String(orderData.sellerId)]
+            : [];
+    if (sellerIds.length === 0)
+        return false;
+    const effectiveUids = getEffectiveSellerUids(caller);
+    if (sellerIds.some((id) => effectiveUids.includes(id)))
+        return true;
+    const sellerDocs = await Promise.all(sellerIds.map((id) => db.collection("Seller").doc(id).get()));
+    for (const doc of sellerDocs) {
+        if (!doc.exists)
+            continue;
+        const d = doc.data() || {};
+        if (typeof d.userId === "string" && effectiveUids.includes(d.userId))
+            return true;
+        if (caller.email && d.email === caller.email)
+            return true;
+    }
+    return false;
+};
+/**
+ * True when the caller owns the seller record (directly or as a sub-account
+ * of the seller's owning user). Used by single-seller endpoints that don't
+ * pivot through an order.
+ */
+const isOwnerOfSeller = (sellerData, caller) => {
+    if (!sellerData)
+        return false;
+    const effectiveUids = getEffectiveSellerUids(caller);
+    if (typeof sellerData.userId === "string" && effectiveUids.includes(sellerData.userId))
+        return true;
+    if (caller.email && sellerData.email === caller.email)
+        return true;
+    return false;
 };
 const calculateShipmentItems = (orderItems) => {
     // Order items are stored with dimensions as top-level fields
@@ -229,7 +306,7 @@ exports.getSellerPayoutAdjustments = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
 }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f;
     try {
         // Verify authentication
         let decodedToken;
@@ -245,30 +322,40 @@ exports.getSellerPayoutAdjustments = (0, https_1.onRequest)({
         }
         const { sellerId } = req.query;
         let targetSellerId = sellerId;
-        // If no sellerId provided, try to find seller record for authenticated user
+        const caller = await fetchCallerProfile(decodedToken);
+        // If no sellerId provided, find seller record for authenticated user.
+        // Sub-accounts resolve to their parent seller's record.
         if (!targetSellerId) {
-            const sellerQuery = await db.collection('Seller')
-                .where('userId', '==', decodedToken.uid)
-                .limit(1)
-                .get();
-            if (sellerQuery.empty) {
+            const effectiveUids = getEffectiveSellerUids(caller);
+            let foundId = null;
+            for (const uid of effectiveUids) {
+                const sellerQuery = await db.collection('Seller')
+                    .where('userId', '==', uid)
+                    .limit(1)
+                    .get();
+                if (!sellerQuery.empty) {
+                    foundId = sellerQuery.docs[0].id;
+                    break;
+                }
+            }
+            if (!foundId) {
                 res.status(404).json({
                     error: "Seller not found",
                     message: "No seller record found for authenticated user"
                 });
                 return;
             }
-            targetSellerId = sellerQuery.docs[0].id;
+            targetSellerId = foundId;
         }
-        // Verify authorization - user must be the seller owner or admin
+        // Verify authorization - user must be the seller owner (or sub-account) or admin
         const sellerDoc = await db.collection('Seller').doc(targetSellerId).get();
         if (!sellerDoc.exists) {
             res.status(404).json({ error: "Seller not found" });
             return;
         }
         const sellerData = sellerDoc.data();
-        const isSellerOwner = (sellerData === null || sellerData === void 0 ? void 0 : sellerData.userId) === decodedToken.uid || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) === decodedToken.email;
-        const isAdmin = decodedToken.role === 'admin' || ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === 'admin';
+        const isSellerOwner = isOwnerOfSeller(sellerData, caller);
+        const isAdmin = isAdminCaller(decodedToken, caller);
         if (!isSellerOwner && !isAdmin) {
             res.status(403).json({
                 error: "Access denied",
@@ -303,8 +390,8 @@ exports.getSellerPayoutAdjustments = (0, https_1.onRequest)({
                 totalShippingCharges: sellerSummary.totalShippingCharges || 0,
                 pendingDeductions: sellerSummary.pendingDeductions || 0,
                 processedDeductions: sellerSummary.processedDeductions || 0,
-                lastUpdated: ((_d = (_c = (_b = sellerSummary.lastUpdated) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.toISOString()) || sellerSummary.lastUpdated,
-                lastProcessed: ((_g = (_f = (_e = sellerSummary.lastProcessed) === null || _e === void 0 ? void 0 : _e.toDate) === null || _f === void 0 ? void 0 : _f.call(_e)) === null || _g === void 0 ? void 0 : _g.toISOString()) || sellerSummary.lastProcessed,
+                lastUpdated: ((_c = (_b = (_a = sellerSummary.lastUpdated) === null || _a === void 0 ? void 0 : _a.toDate) === null || _b === void 0 ? void 0 : _b.call(_a)) === null || _c === void 0 ? void 0 : _c.toISOString()) || sellerSummary.lastUpdated,
+                lastProcessed: ((_f = (_e = (_d = sellerSummary.lastProcessed) === null || _d === void 0 ? void 0 : _d.toDate) === null || _e === void 0 ? void 0 : _e.call(_d)) === null || _f === void 0 ? void 0 : _f.toISOString()) || sellerSummary.lastProcessed,
             },
             count: adjustments.length,
         });
@@ -323,15 +410,14 @@ exports.processSellerPayoutAdjustments = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
 }, async (req, res) => {
-    var _a;
     try {
         // Verify authentication
         let decodedToken;
         try {
             decodedToken = await verifyAuthToken(req.headers.authorization);
             // Only allow admin users to process payouts
-            const isAdmin = decodedToken.role === 'admin' ||
-                ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === 'admin';
+            const caller = await fetchCallerProfile(decodedToken);
+            const isAdmin = isAdminCaller(decodedToken, caller);
             if (!isAdmin) {
                 res.status(403).json({
                     error: "Access denied",
@@ -443,20 +529,15 @@ exports.processSellerPayoutAdjustments = (0, https_1.onRequest)({
     }
 });
 exports.createJRSShipping = (0, https_1.onRequest)({
-    cors: true,
+    cors: [
+        /^http:\/\/localhost(:\d+)?$/,
+        "https://dentpal-161e5.web.app",
+        "https://dentpal-site.web.app",
+    ],
     region: "asia-southeast1",
+    secrets: [JRS_API_KEY, JRS_SHIPPING_API_URL],
 }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, _44;
-    // Add explicit CORS headers
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.set('Access-Control-Max-Age', '86400');
-    // Handle preflight OPTIONS request
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
-    }
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43;
     try {
         // Check for POST method
         if (req.method !== "POST") {
@@ -504,32 +585,22 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             res.status(404).json({ error: "Order data not found" });
             return;
         }
-        // Authorization check - ensure user can access this order
-        // Allow if user is the order owner, a seller involved, or an admin
+        // Authorization: order owner, an involved seller (or sub-account of one),
+        // or an admin. Sub-accounts inherit their parent seller's authorization.
+        const caller = await fetchCallerProfile(decodedToken);
         const isOrderOwner = orderData.userId === decodedToken.uid;
-        const isAdmin = decodedToken.role === 'admin' ||
-            ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === 'admin';
-        let isSeller = false;
-        if (orderData.sellerIds && Array.isArray(orderData.sellerIds)) {
-            // First check if the user's UID is directly in the sellerIds array
-            // (Some orders store user UIDs directly in sellerIds)
-            if (orderData.sellerIds.includes(decodedToken.uid)) {
-                isSeller = true;
-            }
-            else {
-                // Fallback: Check if sellerIds contains Seller document IDs
-                // and verify the authenticated user owns one of those seller records
-                const sellerPromises = orderData.sellerIds.map((sellerId) => db.collection("Seller").doc(sellerId).get());
-                const sellerDocs = await Promise.all(sellerPromises);
-                isSeller = sellerDocs.some(doc => { var _a, _b; return doc.exists && (((_a = doc.data()) === null || _a === void 0 ? void 0 : _a.userId) === decodedToken.uid || ((_b = doc.data()) === null || _b === void 0 ? void 0 : _b.email) === decodedToken.email); });
-            }
-        }
+        const isAdmin = isAdminCaller(decodedToken, caller);
+        const isSeller = await isSellerOnOrder(orderData, caller);
         if (!isOrderOwner && !isAdmin && !isSeller) {
             logger.warn("Unauthorized shipping request", {
                 orderId: payload.orderId,
                 authenticatedUser: decodedToken.uid,
+                callerRole: caller.role,
+                callerIsSubAccount: caller.isSubAccount,
+                callerParentId: caller.parentId,
                 orderOwner: orderData.userId,
-                sellerIds: orderData.sellerIds
+                sellerIds: orderData.sellerIds,
+                legacySellerId: orderData.sellerId,
             });
             res.status(403).json({
                 error: "Access denied",
@@ -538,7 +609,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             return;
         }
         // Prevent duplicate shipping requests
-        if ((_c = (_b = orderData.shippingInfo) === null || _b === void 0 ? void 0 : _b.jrs) === null || _c === void 0 ? void 0 : _c.trackingId) {
+        if ((_b = (_a = orderData.shippingInfo) === null || _a === void 0 ? void 0 : _a.jrs) === null || _b === void 0 ? void 0 : _b.trackingId) {
             logger.warn("Duplicate shipping request attempted", {
                 orderId: payload.orderId,
                 existingTrackingId: orderData.shippingInfo.jrs.trackingId,
@@ -589,17 +660,17 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         const recipientAddress = parseAddress(orderData.shippingInfo || {});
         // Prepare recipient info (buyer/user)
         const recipientInfo = {
-            email: ((_d = payload.recipientInfo) === null || _d === void 0 ? void 0 : _d.email) || (userData === null || userData === void 0 ? void 0 : userData.email) || ((_e = orderData.shippingInfo) === null || _e === void 0 ? void 0 : _e.email) || "customer@dentpal.ph",
-            firstName: ((_f = payload.recipientInfo) === null || _f === void 0 ? void 0 : _f.firstName) || (userData === null || userData === void 0 ? void 0 : userData.firstName) ||
-                ((_g = orderData.shippingInfo) === null || _g === void 0 ? void 0 : _g.fullName) || "Customer",
-            lastName: ((_h = payload.recipientInfo) === null || _h === void 0 ? void 0 : _h.lastName) || (userData === null || userData === void 0 ? void 0 : userData.lastName) || "N/A",
-            middleName: ((_j = payload.recipientInfo) === null || _j === void 0 ? void 0 : _j.middleName) || (userData === null || userData === void 0 ? void 0 : userData.middleName) || "",
-            country: ((_k = payload.recipientInfo) === null || _k === void 0 ? void 0 : _k.country) || recipientAddress.country,
-            province: ((_l = payload.recipientInfo) === null || _l === void 0 ? void 0 : _l.province) || recipientAddress.state,
-            municipality: ((_m = payload.recipientInfo) === null || _m === void 0 ? void 0 : _m.municipality) || recipientAddress.city,
-            district: ((_o = payload.recipientInfo) === null || _o === void 0 ? void 0 : _o.district) || recipientAddress.district,
-            addressLine1: ((_p = payload.recipientInfo) === null || _p === void 0 ? void 0 : _p.addressLine1) || recipientAddress.addressLine1,
-            phone: ((_q = payload.recipientInfo) === null || _q === void 0 ? void 0 : _q.phone) || ((_r = orderData.shippingInfo) === null || _r === void 0 ? void 0 : _r.phoneNumber) || (userData === null || userData === void 0 ? void 0 : userData.contactNumber),
+            email: ((_c = payload.recipientInfo) === null || _c === void 0 ? void 0 : _c.email) || (userData === null || userData === void 0 ? void 0 : userData.email) || ((_d = orderData.shippingInfo) === null || _d === void 0 ? void 0 : _d.email) || "customer@dentpal.ph",
+            firstName: ((_e = payload.recipientInfo) === null || _e === void 0 ? void 0 : _e.firstName) || (userData === null || userData === void 0 ? void 0 : userData.firstName) ||
+                ((_f = orderData.shippingInfo) === null || _f === void 0 ? void 0 : _f.fullName) || "Customer",
+            lastName: ((_g = payload.recipientInfo) === null || _g === void 0 ? void 0 : _g.lastName) || (userData === null || userData === void 0 ? void 0 : userData.lastName) || "N/A",
+            middleName: ((_h = payload.recipientInfo) === null || _h === void 0 ? void 0 : _h.middleName) || (userData === null || userData === void 0 ? void 0 : userData.middleName) || "",
+            country: ((_j = payload.recipientInfo) === null || _j === void 0 ? void 0 : _j.country) || recipientAddress.country,
+            province: ((_k = payload.recipientInfo) === null || _k === void 0 ? void 0 : _k.province) || recipientAddress.state,
+            municipality: ((_l = payload.recipientInfo) === null || _l === void 0 ? void 0 : _l.municipality) || recipientAddress.city,
+            district: ((_m = payload.recipientInfo) === null || _m === void 0 ? void 0 : _m.district) || recipientAddress.district,
+            addressLine1: ((_o = payload.recipientInfo) === null || _o === void 0 ? void 0 : _o.addressLine1) || recipientAddress.addressLine1,
+            phone: ((_p = payload.recipientInfo) === null || _p === void 0 ? void 0 : _p.phone) || ((_q = orderData.shippingInfo) === null || _q === void 0 ? void 0 : _q.phoneNumber) || (userData === null || userData === void 0 ? void 0 : userData.contactNumber),
         };
         // Prepare shipper info (seller)
         const defaultShipperAddress = {
@@ -611,7 +682,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             phone: "+639123456789",
         };
         let shipperAddress = defaultShipperAddress;
-        if ((_t = (_s = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _s === void 0 ? void 0 : _s.company) === null || _t === void 0 ? void 0 : _t.address) {
+        if ((_s = (_r = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _r === void 0 ? void 0 : _r.company) === null || _s === void 0 ? void 0 : _s.address) {
             const sellerAddr = sellerData.vendor.company.address;
             shipperAddress = {
                 country: "Philippines",
@@ -619,20 +690,20 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 municipality: sellerAddr.city || defaultShipperAddress.municipality,
                 district: sellerAddr.line2 || defaultShipperAddress.district,
                 addressLine1: sellerAddr.line1 || defaultShipperAddress.addressLine1,
-                phone: ((_u = sellerData.vendor.contacts) === null || _u === void 0 ? void 0 : _u.phone) || defaultShipperAddress.phone,
+                phone: ((_t = sellerData.vendor.contacts) === null || _t === void 0 ? void 0 : _t.phone) || defaultShipperAddress.phone,
             };
         }
         const shipperInfo = {
-            email: ((_v = payload.shipperInfo) === null || _v === void 0 ? void 0 : _v.email) || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) || "support@dentpal.ph",
-            firstName: ((_w = payload.shipperInfo) === null || _w === void 0 ? void 0 : _w.firstName) || ((_x = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _x === void 0 ? void 0 : _x.split(' ')[0]) || ((_z = (_y = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _y === void 0 ? void 0 : _y.company) === null || _z === void 0 ? void 0 : _z.storeName) || "DentPal",
-            lastName: ((_0 = payload.shipperInfo) === null || _0 === void 0 ? void 0 : _0.lastName) || ((_1 = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _1 === void 0 ? void 0 : _1.split(' ').slice(1).join(' ')) || "Support",
-            middleName: ((_2 = payload.shipperInfo) === null || _2 === void 0 ? void 0 : _2.middleName) || "",
-            country: ((_3 = payload.shipperInfo) === null || _3 === void 0 ? void 0 : _3.country) || shipperAddress.country,
-            province: ((_4 = payload.shipperInfo) === null || _4 === void 0 ? void 0 : _4.province) || shipperAddress.province,
-            municipality: ((_5 = payload.shipperInfo) === null || _5 === void 0 ? void 0 : _5.municipality) || shipperAddress.municipality,
-            district: ((_6 = payload.shipperInfo) === null || _6 === void 0 ? void 0 : _6.district) || shipperAddress.district,
-            addressLine1: ((_7 = payload.shipperInfo) === null || _7 === void 0 ? void 0 : _7.addressLine1) || shipperAddress.addressLine1,
-            phone: ((_8 = payload.shipperInfo) === null || _8 === void 0 ? void 0 : _8.phone) || shipperAddress.phone,
+            email: ((_u = payload.shipperInfo) === null || _u === void 0 ? void 0 : _u.email) || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) || "support@dentpal.ph",
+            firstName: ((_v = payload.shipperInfo) === null || _v === void 0 ? void 0 : _v.firstName) || ((_w = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _w === void 0 ? void 0 : _w.split(' ')[0]) || ((_y = (_x = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _x === void 0 ? void 0 : _x.company) === null || _y === void 0 ? void 0 : _y.storeName) || "DentPal",
+            lastName: ((_z = payload.shipperInfo) === null || _z === void 0 ? void 0 : _z.lastName) || ((_0 = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _0 === void 0 ? void 0 : _0.split(' ').slice(1).join(' ')) || "Support",
+            middleName: ((_1 = payload.shipperInfo) === null || _1 === void 0 ? void 0 : _1.middleName) || "",
+            country: ((_2 = payload.shipperInfo) === null || _2 === void 0 ? void 0 : _2.country) || shipperAddress.country,
+            province: ((_3 = payload.shipperInfo) === null || _3 === void 0 ? void 0 : _3.province) || shipperAddress.province,
+            municipality: ((_4 = payload.shipperInfo) === null || _4 === void 0 ? void 0 : _4.municipality) || shipperAddress.municipality,
+            district: ((_5 = payload.shipperInfo) === null || _5 === void 0 ? void 0 : _5.district) || shipperAddress.district,
+            addressLine1: ((_6 = payload.shipperInfo) === null || _6 === void 0 ? void 0 : _6.addressLine1) || shipperAddress.addressLine1,
+            phone: ((_7 = payload.shipperInfo) === null || _7 === void 0 ? void 0 : _7.phone) || shipperAddress.phone,
         };
         // Calculate shipment items from order
         const shipmentItems = payload.shipmentItems || calculateShipmentItems(orderData.items || []);
@@ -640,14 +711,14 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         const shipmentDescription = payload.shipmentDescription || generateShipmentDescription(orderData.items || []);
         // COD amount - use order total if cash on delivery
         // Check multiple possible locations for COD payment method
-        const isCODOrder = ((_9 = orderData.paymentInfo) === null || _9 === void 0 ? void 0 : _9.method) === 'cod' ||
-            ((_10 = orderData.paymongo) === null || _10 === void 0 ? void 0 : _10.paymentMethod) === 'cash_on_delivery' ||
-            ((_11 = orderData.metadata) === null || _11 === void 0 ? void 0 : _11.paymentMethod) === 'cash_on_delivery';
+        const isCODOrder = ((_8 = orderData.paymentInfo) === null || _8 === void 0 ? void 0 : _8.method) === 'cod' ||
+            ((_9 = orderData.paymongo) === null || _9 === void 0 ? void 0 : _9.paymentMethod) === 'cash_on_delivery' ||
+            ((_10 = orderData.metadata) === null || _10 === void 0 ? void 0 : _10.paymentMethod) === 'cash_on_delivery';
         // Check if order has fragile items
-        const hasFragileItems = ((_12 = orderData.metadata) === null || _12 === void 0 ? void 0 : _12.hasFragileItems) === true ||
-            ((_13 = orderData.items) === null || _13 === void 0 ? void 0 : _13.some((item) => item.isFragile === true));
+        const hasFragileItems = ((_11 = orderData.metadata) === null || _11 === void 0 ? void 0 : _11.hasFragileItems) === true ||
+            ((_12 = orderData.items) === null || _12 === void 0 ? void 0 : _12.some((item) => item.isFragile === true));
         // Build remarks with FRAGILE prefix if needed
-        let remarks = payload.remarks || ((_14 = orderData.shippingInfo) === null || _14 === void 0 ? void 0 : _14.notes) || "";
+        let remarks = payload.remarks || ((_13 = orderData.shippingInfo) === null || _13 === void 0 ? void 0 : _13.notes) || "";
         if (hasFragileItems && !remarks.toUpperCase().startsWith("FRAGILE")) {
             remarks = remarks ? `FRAGILE - ${remarks}` : "FRAGILE - Handle with care";
         }
@@ -667,23 +738,23 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         // For multi-seller orders, the shipment is created per seller (sellerIds[0]),
         // so prefer that seller's per-breakdown values and fall back to the
         // order-level defaults.
-        const shipperSellerId = (_15 = orderData.sellerIds) === null || _15 === void 0 ? void 0 : _15[0];
+        const shipperSellerId = (_14 = orderData.sellerIds) === null || _14 === void 0 ? void 0 : _14[0];
         const sellerBreakdown = Array.isArray(orderData.sellerFeeBreakdowns)
             ? orderData.sellerFeeBreakdowns.find((b) => b.sellerId === shipperSellerId)
             : undefined;
         const sellerCodTotal = typeof (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.totalChargedToBuyer) === 'number'
             ? sellerBreakdown.totalChargedToBuyer
             : undefined;
-        const orderCodTotal = typeof ((_16 = orderData.summary) === null || _16 === void 0 ? void 0 : _16.total) === 'number'
+        const orderCodTotal = typeof ((_15 = orderData.summary) === null || _15 === void 0 ? void 0 : _15.total) === 'number'
             ? orderData.summary.total
             : 0;
         // COD amount should reflect what the buyer pays (exclude seller-paid shipping).
         const codAmount = Math.max(0, typeof payload.codAmountToCollect === 'number'
             ? payload.codAmountToCollect
             : (isCODOrder ? (sellerCodTotal !== null && sellerCodTotal !== void 0 ? sellerCodTotal : orderCodTotal) : 0));
-        const orderExpress = typeof ((_17 = orderData.summary) === null || _17 === void 0 ? void 0 : _17.isExpressDelivery) === 'boolean'
+        const orderExpress = typeof ((_16 = orderData.summary) === null || _16 === void 0 ? void 0 : _16.isExpressDelivery) === 'boolean'
             ? orderData.summary.isExpressDelivery
-            : typeof ((_18 = orderData.shippingInfo) === null || _18 === void 0 ? void 0 : _18.isExpress) === 'boolean'
+            : typeof ((_17 = orderData.shippingInfo) === null || _17 === void 0 ? void 0 : _17.isExpress) === 'boolean'
                 ? orderData.shippingInfo.isExpress
                 : true;
         // Insurance & valuation are product-driven: only enabled when the seller
@@ -692,8 +763,8 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         // Packaging was already determined at checkout. Prefer the stored value;
         // if missing, omit productName so the JRS API auto-selects.
         const storedPackagingName = (sellerBreakdown === null || sellerBreakdown === void 0 ? void 0 : sellerBreakdown.packagingSize) ||
-            ((_19 = orderData.shippingInfo) === null || _19 === void 0 ? void 0 : _19.packagingSize) ||
-            ((_20 = orderData.summary) === null || _20 === void 0 ? void 0 : _20.packagingSize) ||
+            ((_18 = orderData.shippingInfo) === null || _18 === void 0 ? void 0 : _18.packagingSize) ||
+            ((_19 = orderData.summary) === null || _19 === void 0 ? void 0 : _19.packagingSize) ||
             undefined;
         const resolvedProductName = storedPackagingName;
         logger.info(`📦 JRS shipment for order ${payload.orderId}`, {
@@ -750,13 +821,13 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             hasPickupSchedule: !!payload.requestedPickupSchedule,
             hasFragileItems: hasFragileItems,
             remarks: remarks,
-            paymentMethod: ((_21 = orderData.paymongo) === null || _21 === void 0 ? void 0 : _21.paymentMethod) || ((_22 = orderData.paymentInfo) === null || _22 === void 0 ? void 0 : _22.method) || 'unknown',
+            paymentMethod: ((_20 = orderData.paymongo) === null || _20 === void 0 ? void 0 : _20.paymentMethod) || ((_21 = orderData.paymentInfo) === null || _21 === void 0 ? void 0 : _21.method) || 'unknown',
         });
         // Make API call to JRS
         let response;
         let responseData;
         try {
-            response = await axios_1.default.post(JRS_API_URL.value(), jrsRequest, {
+            response = await axios_1.default.post(JRS_SHIPPING_API_URL.value(), jrsRequest, {
                 headers: {
                     "Content-Type": "application/json",
                     "Cache-Control": "no-cache",
@@ -767,16 +838,16 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         }
         catch (axiosError) {
             logger.error("JRS API error", {
-                status: (_23 = axiosError.response) === null || _23 === void 0 ? void 0 : _23.status,
-                statusText: (_24 = axiosError.response) === null || _24 === void 0 ? void 0 : _24.statusText,
+                status: (_22 = axiosError.response) === null || _22 === void 0 ? void 0 : _22.status,
+                statusText: (_23 = axiosError.response) === null || _23 === void 0 ? void 0 : _23.statusText,
                 orderId: payload.orderId,
                 shippingReferenceNo,
-                errorCode: ((_26 = (_25 = axiosError.response) === null || _25 === void 0 ? void 0 : _25.data) === null || _26 === void 0 ? void 0 : _26.ErrorCode) || axiosError.code,
-                errorMessage: ((_28 = (_27 = axiosError.response) === null || _27 === void 0 ? void 0 : _27.data) === null || _28 === void 0 ? void 0 : _28.ErrorMessage) || "Network error",
+                errorCode: ((_25 = (_24 = axiosError.response) === null || _24 === void 0 ? void 0 : _24.data) === null || _25 === void 0 ? void 0 : _25.ErrorCode) || axiosError.code,
+                errorMessage: ((_27 = (_26 = axiosError.response) === null || _26 === void 0 ? void 0 : _26.data) === null || _27 === void 0 ? void 0 : _27.ErrorMessage) || "Network error",
             });
             res.status(400).json({
                 error: "JRS API request failed",
-                details: ((_29 = axiosError.response) === null || _29 === void 0 ? void 0 : _29.data) || axiosError.message,
+                details: ((_28 = axiosError.response) === null || _28 === void 0 ? void 0 : _28.data) || axiosError.message,
                 shippingReferenceNo,
             });
             return;
@@ -818,8 +889,8 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         logger.info("JRS API success with shipping charges", {
             orderId: payload.orderId,
             shippingReferenceNo,
-            trackingId: (_30 = responseData.ShippingRequestEntityDto) === null || _30 === void 0 ? void 0 : _30.TrackingId,
-            totalShippingAmount: (_31 = responseData.ShippingRequestEntityDto) === null || _31 === void 0 ? void 0 : _31.TotalShippingAmount,
+            trackingId: (_29 = responseData.ShippingRequestEntityDto) === null || _29 === void 0 ? void 0 : _29.TrackingId,
+            totalShippingAmount: (_30 = responseData.ShippingRequestEntityDto) === null || _30 === void 0 ? void 0 : _30.TotalShippingAmount,
             sellerShippingCharge,
             buyerShippingCharge,
             totalShippingCost,
@@ -838,7 +909,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                         sellerId: orderData.sellerIds[0],
                         shippingCharge: sellerShippingCharge,
                         shippingReferenceNo,
-                        trackingId: (_32 = responseData.ShippingRequestEntityDto) === null || _32 === void 0 ? void 0 : _32.TrackingId,
+                        trackingId: (_31 = responseData.ShippingRequestEntityDto) === null || _31 === void 0 ? void 0 : _31.TrackingId,
                     });
                     logger.info("Successfully created seller payout adjustment", {
                         orderId: payload.orderId,
@@ -873,15 +944,15 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                     jrs: {
                         response: responseData,
                         shippingReferenceNo: shippingReferenceNo,
-                        trackingId: (_33 = responseData.ShippingRequestEntityDto) === null || _33 === void 0 ? void 0 : _33.TrackingId,
+                        trackingId: (_32 = responseData.ShippingRequestEntityDto) === null || _32 === void 0 ? void 0 : _32.TrackingId,
                         requestedAt: new Date(),
-                        totalShippingAmount: (_34 = responseData.ShippingRequestEntityDto) === null || _34 === void 0 ? void 0 : _34.TotalShippingAmount,
+                        totalShippingAmount: (_33 = responseData.ShippingRequestEntityDto) === null || _33 === void 0 ? void 0 : _33.TotalShippingAmount,
                         pickupSchedule: jrsRequest.apiShippingRequest.requestedPickupSchedule,
                         // Include COD information
                         cashOnDelivery: {
                             isCOD: isCODOrder,
                             codAmount: codAmount,
-                            paymentMethod: ((_35 = orderData.paymongo) === null || _35 === void 0 ? void 0 : _35.paymentMethod) || ((_36 = orderData.paymentInfo) === null || _36 === void 0 ? void 0 : _36.method) || 'unknown',
+                            paymentMethod: ((_34 = orderData.paymongo) === null || _34 === void 0 ? void 0 : _34.paymentMethod) || ((_35 = orderData.paymentInfo) === null || _35 === void 0 ? void 0 : _35.method) || 'unknown',
                         },
                         // Include shipping charge allocation info
                         shippingCharges: {
@@ -907,7 +978,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             logger.info("Order updated successfully in Firestore", {
                 orderId: payload.orderId,
                 collection: orderResult.collection,
-                trackingId: (_37 = responseData.ShippingRequestEntityDto) === null || _37 === void 0 ? void 0 : _37.TrackingId,
+                trackingId: (_36 = responseData.ShippingRequestEntityDto) === null || _36 === void 0 ? void 0 : _36.TrackingId,
             });
         }
         catch (firestoreError) {
@@ -923,7 +994,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 error: "Order shipping succeeded but failed to update order status",
                 message: "JRS shipping request was successful, but we couldn't update the order in our database. Please contact support.",
                 shippingReferenceNo,
-                trackingId: (_38 = responseData.ShippingRequestEntityDto) === null || _38 === void 0 ? void 0 : _38.TrackingId,
+                trackingId: (_37 = responseData.ShippingRequestEntityDto) === null || _37 === void 0 ? void 0 : _37.TrackingId,
                 firestoreError: firestoreError instanceof Error ? firestoreError.message : 'Unknown error'
             });
             return;
@@ -932,8 +1003,8 @@ exports.createJRSShipping = (0, https_1.onRequest)({
         res.status(200).json({
             success: true,
             shippingReferenceNo,
-            trackingId: (_39 = responseData.ShippingRequestEntityDto) === null || _39 === void 0 ? void 0 : _39.TrackingId,
-            totalShippingAmount: (_40 = responseData.ShippingRequestEntityDto) === null || _40 === void 0 ? void 0 : _40.TotalShippingAmount,
+            trackingId: (_38 = responseData.ShippingRequestEntityDto) === null || _38 === void 0 ? void 0 : _38.TrackingId,
+            totalShippingAmount: (_39 = responseData.ShippingRequestEntityDto) === null || _39 === void 0 ? void 0 : _39.TotalShippingAmount,
             shippingCharges: {
                 sellerCharge: sellerShippingCharge,
                 buyerCharge: buyerShippingCharge,
@@ -943,7 +1014,7 @@ exports.createJRSShipping = (0, https_1.onRequest)({
             cashOnDelivery: {
                 isCOD: isCODOrder,
                 codAmount: codAmount,
-                paymentMethod: ((_41 = orderData.paymongo) === null || _41 === void 0 ? void 0 : _41.paymentMethod) || ((_42 = orderData.paymentInfo) === null || _42 === void 0 ? void 0 : _42.method) || 'unknown',
+                paymentMethod: ((_40 = orderData.paymongo) === null || _40 === void 0 ? void 0 : _40.paymentMethod) || ((_41 = orderData.paymentInfo) === null || _41 === void 0 ? void 0 : _41.method) || 'unknown',
             },
             jrsResponse: responseData,
             message: isCODOrder
@@ -955,15 +1026,183 @@ exports.createJRSShipping = (0, https_1.onRequest)({
                 orderId: payload.orderId,
                 recipient: `${recipientInfo.firstName} ${recipientInfo.lastName}`,
                 shipper: `${shipperInfo.firstName} ${shipperInfo.lastName}`,
-                items: ((_43 = orderData.items) === null || _43 === void 0 ? void 0 : _43.length) || 0,
+                items: ((_42 = orderData.items) === null || _42 === void 0 ? void 0 : _42.length) || 0,
             },
         });
     }
     catch (error) {
         logger.error("Error in createJRSShipping", {
             error: error instanceof Error ? error.message : "Unknown error",
-            orderId: (_44 = req.body) === null || _44 === void 0 ? void 0 : _44.orderId,
+            orderId: (_43 = req.body) === null || _43 === void 0 ? void 0 : _43.orderId,
             stack: error instanceof Error ? error.stack : undefined,
+        });
+        res.status(500).json({
+            error: "Internal server error",
+            message: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+});
+exports.cancelJRSShipping = (0, https_1.onRequest)({
+    cors: [
+        /^http:\/\/localhost(:\d+)?$/,
+        "https://dentpal-161e5.web.app",
+        "https://dentpal-site.web.app",
+    ],
+    region: "asia-southeast1",
+    secrets: [JRS_CANCEL_URL, JRS_API_KEY],
+}, async (req, res) => {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        if (req.method !== "POST") {
+            res.status(405).json({ error: "Method not allowed" });
+            return;
+        }
+        let decodedToken;
+        try {
+            decodedToken = await verifyAuthToken(req.headers.authorization);
+        }
+        catch (authError) {
+            res.status(401).json({
+                error: "Authentication required",
+                message: authError instanceof Error ? authError.message : "Invalid authentication",
+            });
+            return;
+        }
+        const payload = req.body;
+        if (!payload.orderId) {
+            res.status(400).json({ error: "Missing orderId" });
+            return;
+        }
+        const orderResult = await fetchOrderData(payload.orderId);
+        if (!orderResult || !orderResult.data) {
+            res.status(404).json({ error: "Order not found" });
+            return;
+        }
+        const orderData = orderResult.data;
+        // Authorization: order owner, involved seller (or sub-account), or admin.
+        const caller = await fetchCallerProfile(decodedToken);
+        const isOrderOwner = orderData.userId === decodedToken.uid;
+        const isAdmin = isAdminCaller(decodedToken, caller);
+        const isSeller = await isSellerOnOrder(orderData, caller);
+        if (!isOrderOwner && !isAdmin && !isSeller) {
+            logger.warn("Unauthorized cancel shipping request", {
+                orderId: payload.orderId,
+                authenticatedUser: decodedToken.uid,
+            });
+            res.status(403).json({
+                error: "Access denied",
+                message: "You are not authorized to cancel shipping for this order",
+            });
+            return;
+        }
+        const jrsInfo = (_a = orderData.shippingInfo) === null || _a === void 0 ? void 0 : _a.jrs;
+        const jrsResponse = jrsInfo === null || jrsInfo === void 0 ? void 0 : jrsInfo.response;
+        const shippingRequestId = ((_b = jrsResponse === null || jrsResponse === void 0 ? void 0 : jrsResponse.ShippingRequestEntityDto) === null || _b === void 0 ? void 0 : _b.Id) ||
+            ((_c = jrsResponse === null || jrsResponse === void 0 ? void 0 : jrsResponse.ShippingRequestEntityDto) === null || _c === void 0 ? void 0 : _c.id) ||
+            (jrsResponse === null || jrsResponse === void 0 ? void 0 : jrsResponse.Id) ||
+            (jrsInfo === null || jrsInfo === void 0 ? void 0 : jrsInfo.shippingRequestId);
+        if (!shippingRequestId) {
+            logger.warn("Cannot cancel shipping: missing JRS shipping request id", {
+                orderId: payload.orderId,
+                hasJrsInfo: !!jrsInfo,
+            });
+            res.status(400).json({
+                error: "No active JRS shipping request found for this order",
+            });
+            return;
+        }
+        if (jrsInfo === null || jrsInfo === void 0 ? void 0 : jrsInfo.cancelledAt) {
+            res.status(409).json({
+                error: "Shipping already cancelled",
+                cancelledAt: jrsInfo.cancelledAt,
+            });
+            return;
+        }
+        const cancellationDetails = payload.cancellationDetails || "Cancelled by seller";
+        const canceledByUserEmail = payload.canceledByUserEmail || decodedToken.email || caller.email || "admin@dentpal.ph";
+        const cancelRequestBody = {
+            requestType: "cancelTransaction",
+            shippingRequest: {
+                id: shippingRequestId,
+                cancellationDetails,
+                canceledByUserEmail,
+            },
+        };
+        logger.info("Sending JRS cancel shipping request", {
+            orderId: payload.orderId,
+            shippingRequestId,
+            cancellationDetails,
+        });
+        let cancelResponseData;
+        try {
+            const response = await axios_1.default.post(JRS_CANCEL_URL.value(), cancelRequestBody, {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-cache",
+                    "Ocp-Apim-Subscription-Key": JRS_API_KEY.value(),
+                },
+            });
+            cancelResponseData = response.data;
+        }
+        catch (axiosError) {
+            logger.error("JRS cancel API error", {
+                orderId: payload.orderId,
+                shippingRequestId,
+                status: (_d = axiosError.response) === null || _d === void 0 ? void 0 : _d.status,
+                details: (_e = axiosError.response) === null || _e === void 0 ? void 0 : _e.data,
+            });
+            res.status(400).json({
+                error: "JRS cancel request failed",
+                details: ((_f = axiosError.response) === null || _f === void 0 ? void 0 : _f.data) || axiosError.message,
+            });
+            return;
+        }
+        if (cancelResponseData && cancelResponseData.Success === false) {
+            logger.error("JRS cancel API business logic error", {
+                orderId: payload.orderId,
+                shippingRequestId,
+                details: cancelResponseData,
+            });
+            res.status(400).json({
+                error: "JRS cancel request failed",
+                details: cancelResponseData,
+            });
+            return;
+        }
+        // Roll back fulfillment stage and persist cancellation under shippingInfo.
+        const orderRef = db.collection(orderResult.collection).doc(payload.orderId);
+        const cancelledAt = new Date();
+        const newHistoryEntry = {
+            status: "to-arrangement",
+            note: `JRS shipping cancelled (${cancellationDetails}). Order moved back to arrangement.`,
+            timestamp: cancelledAt,
+        };
+        await orderRef.update({
+            "shippingInfo.jrs.cancelledAt": cancelledAt,
+            "shippingInfo.jrs.cancellationDetails": cancellationDetails,
+            "shippingInfo.jrs.canceledByUserEmail": canceledByUserEmail,
+            "shippingInfo.jrs.cancelResponse": cancelResponseData !== null && cancelResponseData !== void 0 ? cancelResponseData : null,
+            fulfillmentStage: "to-arrangement",
+            statusHistory: firestore_1.FieldValue.arrayUnion(newHistoryEntry),
+            updatedAt: cancelledAt,
+        });
+        logger.info("JRS shipping cancelled and order rolled back", {
+            orderId: payload.orderId,
+            shippingRequestId,
+        });
+        res.status(200).json({
+            success: true,
+            orderId: payload.orderId,
+            shippingRequestId,
+            cancellationDetails,
+            canceledByUserEmail,
+            jrsResponse: cancelResponseData,
+        });
+    }
+    catch (error) {
+        logger.error("Error in cancelJRSShipping", {
+            error: error instanceof Error ? error.message : "Unknown error",
+            orderId: (_g = req.body) === null || _g === void 0 ? void 0 : _g.orderId,
         });
         res.status(500).json({
             error: "Internal server error",
@@ -979,8 +1218,9 @@ exports.createJRSShipping = (0, https_1.onRequest)({
 exports.processReturnRequest = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
+    secrets: [JRS_API_KEY, JRS_SHIPPING_API_URL],
 }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2;
     // Add explicit CORS headers
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -1074,33 +1314,20 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             res.status(404).json({ error: "Order data not found" });
             return;
         }
-        // Authorization check - only sellers involved in the order or admins can process returns
-        const isAdmin = decodedToken.role === 'admin' ||
-            ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === 'admin';
-        let isSeller = false;
-        let sellerData = null;
-        if (orderData.sellerIds && Array.isArray(orderData.sellerIds)) {
-            if (orderData.sellerIds.includes(decodedToken.uid)) {
-                isSeller = true;
-                sellerData = await fetchSellerData(decodedToken.uid);
-            }
-            else {
-                const sellerPromises = orderData.sellerIds.map((sellerId) => db.collection("Seller").doc(sellerId).get());
-                const sellerDocs = await Promise.all(sellerPromises);
-                for (const doc of sellerDocs) {
-                    if (doc.exists && (((_b = doc.data()) === null || _b === void 0 ? void 0 : _b.userId) === decodedToken.uid || ((_c = doc.data()) === null || _c === void 0 ? void 0 : _c.email) === decodedToken.email)) {
-                        isSeller = true;
-                        sellerData = doc.data();
-                        break;
-                    }
-                }
-            }
-        }
+        // Authorization: only sellers involved in the order (including their
+        // sub-accounts) or admins can process returns.
+        const caller = await fetchCallerProfile(decodedToken);
+        const isAdmin = isAdminCaller(decodedToken, caller);
+        const isSeller = await isSellerOnOrder(orderData, caller);
         if (!isAdmin && !isSeller) {
             logger.warn("Unauthorized return request processing", {
                 returnRequestId: payload.returnRequestId,
                 authenticatedUser: decodedToken.uid,
-                sellerIds: orderData.sellerIds
+                callerRole: caller.role,
+                callerIsSubAccount: caller.isSubAccount,
+                callerParentId: caller.parentId,
+                sellerIds: orderData.sellerIds,
+                legacySellerId: orderData.sellerId,
             });
             res.status(403).json({
                 error: "Access denied",
@@ -1108,9 +1335,23 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             });
             return;
         }
-        // If no seller data found yet, try to fetch the first seller
-        if (!sellerData && ((_d = orderData.sellerIds) === null || _d === void 0 ? void 0 : _d.length) > 0) {
-            sellerData = await fetchSellerData(orderData.sellerIds[0]);
+        // Fetch seller data for the order (used downstream for shipping addresses,
+        // contact info, etc.). Prefer the seller matching the caller's effective
+        // UID so the seller's own contact details are used; fall back to the
+        // first seller on the order otherwise.
+        let sellerData = null;
+        const orderSellerIds = Array.isArray(orderData.sellerIds)
+            ? orderData.sellerIds.map((v) => String(v))
+            : orderData.sellerId
+                ? [String(orderData.sellerId)]
+                : [];
+        const effectiveUids = getEffectiveSellerUids(caller);
+        const preferredSellerId = orderSellerIds.find((id) => effectiveUids.includes(id));
+        if (preferredSellerId) {
+            sellerData = await fetchSellerData(preferredSellerId);
+        }
+        if (!sellerData && orderSellerIds.length > 0) {
+            sellerData = await fetchSellerData(orderSellerIds[0]);
         }
         const orderRef = db.collection(orderResult.collection).doc(payload.orderId);
         const now = new Date();
@@ -1169,16 +1410,16 @@ exports.processReturnRequest = (0, https_1.onRequest)({
         const buyerAddress = parseAddress(orderData.shippingInfo || {});
         // Prepare shipper info (buyer - the one returning the item)
         const shipperInfo = {
-            email: ((_e = orderData.shippingInfo) === null || _e === void 0 ? void 0 : _e.email) || "customer@dentpal.ph",
-            firstName: ((_g = (_f = orderData.shippingInfo) === null || _f === void 0 ? void 0 : _f.fullName) === null || _g === void 0 ? void 0 : _g.split(' ')[0]) || "Customer",
-            lastName: ((_j = (_h = orderData.shippingInfo) === null || _h === void 0 ? void 0 : _h.fullName) === null || _j === void 0 ? void 0 : _j.split(' ').slice(1).join(' ')) || "N/A",
+            email: ((_a = orderData.shippingInfo) === null || _a === void 0 ? void 0 : _a.email) || "customer@dentpal.ph",
+            firstName: ((_c = (_b = orderData.shippingInfo) === null || _b === void 0 ? void 0 : _b.fullName) === null || _c === void 0 ? void 0 : _c.split(' ')[0]) || "Customer",
+            lastName: ((_e = (_d = orderData.shippingInfo) === null || _d === void 0 ? void 0 : _d.fullName) === null || _e === void 0 ? void 0 : _e.split(' ').slice(1).join(' ')) || "N/A",
             middleName: "",
             country: buyerAddress.country,
             province: buyerAddress.state,
             municipality: buyerAddress.city,
             district: buyerAddress.district,
             addressLine1: buyerAddress.addressLine1,
-            phone: ((_k = orderData.shippingInfo) === null || _k === void 0 ? void 0 : _k.phoneNumber) || "+639000000000",
+            phone: ((_f = orderData.shippingInfo) === null || _f === void 0 ? void 0 : _f.phoneNumber) || "+639000000000",
         };
         // Prepare recipient info (seller - receiving the returned item)
         const defaultSellerAddress = {
@@ -1190,7 +1431,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             phone: "+639123456789",
         };
         let sellerAddress = defaultSellerAddress;
-        if ((_m = (_l = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _l === void 0 ? void 0 : _l.company) === null || _m === void 0 ? void 0 : _m.address) {
+        if ((_h = (_g = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _g === void 0 ? void 0 : _g.company) === null || _h === void 0 ? void 0 : _h.address) {
             const sellerAddr = sellerData.vendor.company.address;
             sellerAddress = {
                 country: "Philippines",
@@ -1198,13 +1439,13 @@ exports.processReturnRequest = (0, https_1.onRequest)({
                 municipality: sellerAddr.city || defaultSellerAddress.municipality,
                 district: sellerAddr.line2 || defaultSellerAddress.district,
                 addressLine1: sellerAddr.line1 || defaultSellerAddress.addressLine1,
-                phone: ((_o = sellerData.vendor.contacts) === null || _o === void 0 ? void 0 : _o.phone) || defaultSellerAddress.phone,
+                phone: ((_j = sellerData.vendor.contacts) === null || _j === void 0 ? void 0 : _j.phone) || defaultSellerAddress.phone,
             };
         }
         const recipientInfo = {
             email: (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) || "support@dentpal.ph",
-            firstName: ((_p = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _p === void 0 ? void 0 : _p.split(' ')[0]) || ((_r = (_q = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _q === void 0 ? void 0 : _q.company) === null || _r === void 0 ? void 0 : _r.storeName) || "DentPal",
-            lastName: ((_s = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _s === void 0 ? void 0 : _s.split(' ').slice(1).join(' ')) || "Support",
+            firstName: ((_k = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _k === void 0 ? void 0 : _k.split(' ')[0]) || ((_m = (_l = sellerData === null || sellerData === void 0 ? void 0 : sellerData.vendor) === null || _l === void 0 ? void 0 : _l.company) === null || _m === void 0 ? void 0 : _m.storeName) || "DentPal",
+            lastName: ((_o = sellerData === null || sellerData === void 0 ? void 0 : sellerData.name) === null || _o === void 0 ? void 0 : _o.split(' ').slice(1).join(' ')) || "Support",
             middleName: "",
             country: sellerAddress.country,
             province: sellerAddress.province,
@@ -1215,7 +1456,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
         };
         // Calculate shipment items for return
         const returnItems = returnRequestData.itemsToReturn
-            ? (_t = orderData.items) === null || _t === void 0 ? void 0 : _t.filter((item) => returnRequestData.itemsToReturn.includes(item.productId))
+            ? (_p = orderData.items) === null || _p === void 0 ? void 0 : _p.filter((item) => returnRequestData.itemsToReturn.includes(item.productId))
             : orderData.items;
         const shipmentItems = calculateShipmentItems(returnItems || []);
         // Generate return shipment description
@@ -1274,7 +1515,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
         let jrsResponse;
         let jrsResponseData;
         try {
-            jrsResponse = await axios_1.default.post(JRS_API_URL.value(), jrsReturnRequest, {
+            jrsResponse = await axios_1.default.post(JRS_SHIPPING_API_URL.value(), jrsReturnRequest, {
                 headers: {
                     "Content-Type": "application/json",
                     "Ocp-Apim-Subscription-Key": JRS_API_KEY.value(),
@@ -1287,19 +1528,19 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             logger.error("JRS API request failed for return", {
                 orderId: payload.orderId,
                 error: axiosError.message,
-                response: (_u = axiosError.response) === null || _u === void 0 ? void 0 : _u.data,
-                status: (_v = axiosError.response) === null || _v === void 0 ? void 0 : _v.status,
+                response: (_q = axiosError.response) === null || _q === void 0 ? void 0 : _q.data,
+                status: (_r = axiosError.response) === null || _r === void 0 ? void 0 : _r.status,
             });
             // Update return request with failure
             await returnRequestRef.update({
                 status: 'shipping_failed',
-                shippingError: ((_x = (_w = axiosError.response) === null || _w === void 0 ? void 0 : _w.data) === null || _x === void 0 ? void 0 : _x.ErrorMessage) || axiosError.message,
+                shippingError: ((_t = (_s = axiosError.response) === null || _s === void 0 ? void 0 : _s.data) === null || _t === void 0 ? void 0 : _t.ErrorMessage) || axiosError.message,
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
             res.status(502).json({
                 error: "JRS shipping request failed",
-                message: ((_z = (_y = axiosError.response) === null || _y === void 0 ? void 0 : _y.data) === null || _z === void 0 ? void 0 : _z.ErrorMessage) || axiosError.message,
-                jrsError: (_0 = axiosError.response) === null || _0 === void 0 ? void 0 : _0.data,
+                message: ((_v = (_u = axiosError.response) === null || _u === void 0 ? void 0 : _u.data) === null || _v === void 0 ? void 0 : _v.ErrorMessage) || axiosError.message,
+                jrsError: (_w = axiosError.response) === null || _w === void 0 ? void 0 : _w.data,
             });
             return;
         }
@@ -1322,12 +1563,12 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             });
             return;
         }
-        const returnTrackingId = (_1 = jrsResponseData.ShippingRequestEntityDto) === null || _1 === void 0 ? void 0 : _1.TrackingId;
+        const returnTrackingId = (_x = jrsResponseData.ShippingRequestEntityDto) === null || _x === void 0 ? void 0 : _x.TrackingId;
         logger.info("JRS return shipping created successfully", {
             orderId: payload.orderId,
             returnShippingReferenceNo,
             returnTrackingId,
-            totalShippingAmount: (_2 = jrsResponseData.ShippingRequestEntityDto) === null || _2 === void 0 ? void 0 : _2.TotalShippingAmount,
+            totalShippingAmount: (_y = jrsResponseData.ShippingRequestEntityDto) === null || _y === void 0 ? void 0 : _y.TotalShippingAmount,
         });
         // Update return request with shipping info
         await returnRequestRef.update({
@@ -1337,7 +1578,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             returnShipping: {
                 referenceNo: returnShippingReferenceNo,
                 trackingId: returnTrackingId,
-                totalShippingAmount: (_3 = jrsResponseData.ShippingRequestEntityDto) === null || _3 === void 0 ? void 0 : _3.TotalShippingAmount,
+                totalShippingAmount: (_z = jrsResponseData.ShippingRequestEntityDto) === null || _z === void 0 ? void 0 : _z.TotalShippingAmount,
                 pickupSchedule: pickupSchedule,
                 jrsResponse: jrsResponseData,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -1371,7 +1612,7 @@ exports.processReturnRequest = (0, https_1.onRequest)({
             returnShipping: {
                 referenceNo: returnShippingReferenceNo,
                 trackingId: returnTrackingId,
-                totalShippingAmount: (_4 = jrsResponseData.ShippingRequestEntityDto) === null || _4 === void 0 ? void 0 : _4.TotalShippingAmount,
+                totalShippingAmount: (_0 = jrsResponseData.ShippingRequestEntityDto) === null || _0 === void 0 ? void 0 : _0.TotalShippingAmount,
                 pickupSchedule: pickupSchedule,
                 pickup: {
                     from: `${shipperInfo.firstName} ${shipperInfo.lastName}`,
@@ -1388,8 +1629,8 @@ exports.processReturnRequest = (0, https_1.onRequest)({
     catch (error) {
         logger.error("Error in processReturnRequest", {
             error: error instanceof Error ? error.message : "Unknown error",
-            returnRequestId: (_5 = req.body) === null || _5 === void 0 ? void 0 : _5.returnRequestId,
-            orderId: (_6 = req.body) === null || _6 === void 0 ? void 0 : _6.orderId,
+            returnRequestId: (_1 = req.body) === null || _1 === void 0 ? void 0 : _1.returnRequestId,
+            orderId: (_2 = req.body) === null || _2 === void 0 ? void 0 : _2.orderId,
             stack: error instanceof Error ? error.stack : undefined,
         });
         res.status(500).json({
@@ -1406,7 +1647,7 @@ exports.getSellerReturnRequests = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
 }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -1429,30 +1670,39 @@ exports.getSellerReturnRequests = (0, https_1.onRequest)({
         }
         const { sellerId, status } = req.query;
         let targetSellerId = sellerId;
-        // If no sellerId provided, try to find seller record for authenticated user
+        const caller = await fetchCallerProfile(decodedToken);
+        // If no sellerId provided, find seller record for authenticated user.
+        // Sub-accounts resolve to their parent seller's record.
         if (!targetSellerId) {
-            const sellerQuery = await db.collection('Seller')
-                .where('userId', '==', decodedToken.uid)
-                .limit(1)
-                .get();
-            if (sellerQuery.empty) {
-                // Try by email
-                const sellerByEmail = await db.collection('Seller')
-                    .where('email', '==', decodedToken.email)
+            const effectiveUids = getEffectiveSellerUids(caller);
+            let foundDoc = null;
+            for (const uid of effectiveUids) {
+                const byUid = await db.collection('Seller')
+                    .where('userId', '==', uid)
                     .limit(1)
                     .get();
-                if (sellerByEmail.empty) {
-                    res.status(404).json({
-                        error: "Seller not found",
-                        message: "No seller account found for this user"
-                    });
-                    return;
+                if (!byUid.empty) {
+                    foundDoc = byUid.docs[0];
+                    break;
                 }
-                targetSellerId = sellerByEmail.docs[0].id;
             }
-            else {
-                targetSellerId = sellerQuery.docs[0].id;
+            if (!foundDoc && caller.email) {
+                const byEmail = await db.collection('Seller')
+                    .where('email', '==', caller.email)
+                    .limit(1)
+                    .get();
+                if (!byEmail.empty) {
+                    foundDoc = byEmail.docs[0];
+                }
             }
+            if (!foundDoc) {
+                res.status(404).json({
+                    error: "Seller not found",
+                    message: "No seller account found for this user"
+                });
+                return;
+            }
+            targetSellerId = foundDoc.id;
         }
         // Verify authorization
         const sellerDoc = await db.collection('Seller').doc(targetSellerId).get();
@@ -1461,8 +1711,8 @@ exports.getSellerReturnRequests = (0, https_1.onRequest)({
             return;
         }
         const sellerData = sellerDoc.data();
-        const isSellerOwner = (sellerData === null || sellerData === void 0 ? void 0 : sellerData.userId) === decodedToken.uid || (sellerData === null || sellerData === void 0 ? void 0 : sellerData.email) === decodedToken.email;
-        const isAdmin = decodedToken.role === 'admin' || ((_a = decodedToken.customClaims) === null || _a === void 0 ? void 0 : _a.role) === 'admin';
+        const isSellerOwner = isOwnerOfSeller(sellerData, caller);
+        const isAdmin = isAdminCaller(decodedToken, caller);
         if (!isSellerOwner && !isAdmin) {
             res.status(403).json({
                 error: "Access denied",
@@ -1503,10 +1753,10 @@ exports.getSellerReturnRequests = (0, https_1.onRequest)({
                 returnRequests.push({
                     id: doc.id,
                     ...data,
-                    requestedAt: ((_d = (_c = (_b = data.requestedAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.toISOString()) || data.requestedAt,
-                    approvedAt: ((_g = (_f = (_e = data.approvedAt) === null || _e === void 0 ? void 0 : _e.toDate) === null || _f === void 0 ? void 0 : _f.call(_e)) === null || _g === void 0 ? void 0 : _g.toISOString()) || data.approvedAt,
-                    rejectedAt: ((_k = (_j = (_h = data.rejectedAt) === null || _h === void 0 ? void 0 : _h.toDate) === null || _j === void 0 ? void 0 : _j.call(_h)) === null || _k === void 0 ? void 0 : _k.toISOString()) || data.rejectedAt,
-                    deliveryDate: ((_o = (_m = (_l = data.deliveryDate) === null || _l === void 0 ? void 0 : _l.toDate) === null || _m === void 0 ? void 0 : _m.call(_l)) === null || _o === void 0 ? void 0 : _o.toISOString()) || data.deliveryDate,
+                    requestedAt: ((_c = (_b = (_a = data.requestedAt) === null || _a === void 0 ? void 0 : _a.toDate) === null || _b === void 0 ? void 0 : _b.call(_a)) === null || _c === void 0 ? void 0 : _c.toISOString()) || data.requestedAt,
+                    approvedAt: ((_f = (_e = (_d = data.approvedAt) === null || _d === void 0 ? void 0 : _d.toDate) === null || _e === void 0 ? void 0 : _e.call(_d)) === null || _f === void 0 ? void 0 : _f.toISOString()) || data.approvedAt,
+                    rejectedAt: ((_j = (_h = (_g = data.rejectedAt) === null || _g === void 0 ? void 0 : _g.toDate) === null || _h === void 0 ? void 0 : _h.call(_g)) === null || _j === void 0 ? void 0 : _j.toISOString()) || data.rejectedAt,
+                    deliveryDate: ((_m = (_l = (_k = data.deliveryDate) === null || _k === void 0 ? void 0 : _k.toDate) === null || _l === void 0 ? void 0 : _l.call(_k)) === null || _m === void 0 ? void 0 : _m.toISOString()) || data.deliveryDate,
                 });
             }
         }
@@ -1540,7 +1790,7 @@ exports.getSellerReturnRequests = (0, https_1.onRequest)({
 exports.processWithdrawal = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
-    secrets: [PAYMONGO_SECRET_KEY],
+    secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
     // Only allow POST
@@ -1696,7 +1946,7 @@ exports.processWithdrawal = (0, https_1.onRequest)({
 exports.checkWithdrawalStatus = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
-    secrets: [PAYMONGO_SECRET_KEY],
+    secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
     var _a, _b, _c, _d, _e, _f;
     // Allow GET or POST
@@ -1799,7 +2049,7 @@ exports.checkWithdrawalStatus = (0, https_1.onRequest)({
 exports.getWalletTransactions = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
-    secrets: [PAYMONGO_SECRET_KEY],
+    secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
     var _a, _b, _c, _d, _e, _f;
     if (req.method !== "GET") {
@@ -1856,7 +2106,7 @@ exports.getWalletTransactions = (0, https_1.onRequest)({
 exports.getPaymongoTransaction = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
-    secrets: [PAYMONGO_SECRET_KEY],
+    secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
     var _a, _b, _c, _d, _e, _f;
     if (req.method !== "GET") {
@@ -1912,7 +2162,7 @@ exports.getPaymongoTransaction = (0, https_1.onRequest)({
 exports.listPaymongoTransactions = (0, https_1.onRequest)({
     cors: true,
     region: "asia-southeast1",
-    secrets: [PAYMONGO_SECRET_KEY],
+    secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
     var _a, _b, _c, _d, _e, _f;
     if (req.method !== "GET") {

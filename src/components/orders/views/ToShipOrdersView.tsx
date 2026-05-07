@@ -10,7 +10,9 @@ interface ViewProps {
   onConfirmHandover?: (order: Order) => void;
   onMoveToPack?: (order: Order) => void; // Move back from arrangement to pack
   onMoveToShipping?: (order: Order) => void; // Move from hand-over to shipping
+  onCancelShipment?: (order: Order) => void; // Cancel JRS shipping and roll back to arrangement
   shippingLoading?: string | null; // Order ID currently being processed for shipping
+  cancelLoading?: string | null; // Order ID currently being processed for cancellation
   selectedOrderIds?: Set<string>; // IDs of selected orders in To Hand Over tab
   onToggleOrderSelection?: (order: Order) => void; // Callback to toggle order selection
   selectedArrangementOrderIds?: Set<string>; // IDs of selected orders in To Arrangement tab
@@ -27,7 +29,9 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
   onConfirmHandover,
   onMoveToPack,
   onMoveToShipping,
+  onCancelShipment,
   shippingLoading,
+  cancelLoading,
   selectedOrderIds,
   onToggleOrderSelection,
   selectedArrangementOrderIds,
@@ -67,7 +71,9 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
           onConfirmHandover={onConfirmHandover}
           onMoveToPack={onMoveToPack}
           onMoveToShipping={onMoveToShipping}
+          onCancelShipment={onCancelShipment}
           isShippingLoading={shippingLoading === o.id}
+          isCancelLoading={cancelLoading === o.id}
           isSelectable={isHandOverSelectable || isArrangementSelectable || isPackSelectable}
           isSelected={isSelected}
           onToggleSelect={onToggle}

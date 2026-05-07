@@ -10,11 +10,13 @@ interface OrderRowProps {
   onClick?: () => void;   
   isToShip?: boolean;    
   onMoveToArrangement?: (order: Order) => void; 
-  onMoveToHandOver?: (order: Order) => void; 
+  onMoveToHandOver?: (order: Order) => void;
   onConfirmHandover?: (order: Order) => void;
   onMoveToPack?: (order: Order) => void; // Move back from arrangement to pack
   onMoveToShipping?: (order: Order) => void; // Move from hand-over to shipping
+  onCancelShipment?: (order: Order) => void; // Cancel JRS shipping and move back to arrangement
   isShippingLoading?: boolean; // Loading state for shipping requests
+  isCancelLoading?: boolean; // Loading state for cancel shipment
   // Checkbox selection support
   isSelectable?: boolean; // Whether this order can be selected with checkbox
   isSelected?: boolean; // Whether this order is currently selected
@@ -239,9 +241,11 @@ const OrderRow: React.FC<OrderRowProps> = ({
   onMoveToArrangement, 
   onMoveToHandOver, 
   onConfirmHandover, 
-  onMoveToPack, 
-  onMoveToShipping, 
+  onMoveToPack,
+  onMoveToShipping,
+  onCancelShipment,
   isShippingLoading = false,
+  isCancelLoading = false,
   isSelectable = false,
   isSelected = false,
   onToggleSelect
@@ -397,6 +401,17 @@ const OrderRow: React.FC<OrderRowProps> = ({
               >
                 Complete Handover →
               </button>
+              {onCancelShipment && (
+                <button
+                  type="button"
+                  className="text-xs px-3 py-1 border border-red-600 text-red-700 rounded-md font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  onClick={() => onCancelShipment(order)}
+                  disabled={isCancelLoading}
+                >
+                  {isCancelLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {isCancelLoading ? 'Cancelling…' : 'Cancel Shipment'}
+                </button>
+              )}
             </div>
           ) : (
             // Default (to-pack): No buttons shown - bulk action will be used instead
@@ -530,6 +545,16 @@ const OrderRow: React.FC<OrderRowProps> = ({
                 ) : order.fulfillmentStage === 'to-hand-over' ? (
                   <>
                     <button className="text-sm px-3 py-2 rounded bg-orange-600 text-white hover:bg-orange-700" onClick={() => { onMoveToHandOver?.(order); setOpen(false); }}>Complete Handover →</button>
+                    {onCancelShipment && (
+                      <button
+                        className="text-sm px-3 py-2 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        onClick={() => { onCancelShipment(order); setOpen(false); }}
+                        disabled={isCancelLoading}
+                      >
+                        {isCancelLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {isCancelLoading ? 'Cancelling…' : 'Cancel Shipment'}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <button className="text-sm px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700" onClick={() => { onMoveToArrangement?.(order); setOpen(false); }}>To Arrangement →</button>

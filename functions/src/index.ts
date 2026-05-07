@@ -3,7 +3,7 @@ import * as logger from "firebase-functions/logger";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import {getAuth, DecodedIdToken} from "firebase-admin/auth";
-import {defineString, defineSecret} from "firebase-functions/params";
+import {defineSecret} from "firebase-functions/params";
 export * from "./testJRSShipping";
 import axios from "axios";
 
@@ -13,13 +13,14 @@ const db = getFirestore();
 const auth = getAuth();
 
 // Define parameters for JRS API
-const JRS_API_KEY = defineString("JRS_API_KEY");
-const JRS_API_URL = defineString("JRS_API_URL", {default: "https://jrs-express.azure-api.net/qa-online-shipping-ship/ShippingRequestFunction"});
+const JRS_API_KEY = defineSecret("JRS_API_KEY");
+const JRS_SHIPPING_API_URL = defineSecret("JRS_SHIPPING_API_URL");
+const JRS_CANCEL_URL = defineSecret("JRS_CANCEL_URL");
 
 // Define parameters for PayMongo API
 const PAYMONGO_SECRET_KEY = defineSecret("PAYMONGO_SECRET_KEY");
-const PAYMONGO_WALLET_ID = defineString("PAYMONGO_WALLET_ID");
-const PAYMONGO_API_URL = defineString("PAYMONGO_API_URL", {default: "https://api.paymongo.com/v1"});
+const PAYMONGO_WALLET_ID = defineSecret("PAYMONGO_WALLET_ID");
+const PAYMONGO_API_URL = defineSecret("PAYMONGO_API_URL");
 
 const verifyAuthToken = async (authorizationHeader: string | undefined): Promise<DecodedIdToken> => {
   if (!authorizationHeader) {
@@ -188,6 +189,108 @@ const fetchSellerData = async (sellerId: string) => {
   return null;
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Shared auth helpers
+//
+// Sub-accounts (assistants) act on behalf of their parent seller for
+// authorization, even though their UI permissions are narrower. The helpers
+// below resolve the caller's "effective seller UID" from the web_users
+// document so any auth check that succeeds for the parent seller also
+// succeeds for their sub-accounts.
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface CallerProfile {
+  uid: string;
+  email?: string;
+  role?: string;
+  isSubAccount?: boolean;
+  parentId?: string | null;
+}
+
+const fetchCallerProfile = async (decodedToken: DecodedIdToken): Promise<CallerProfile> => {
+  const snap = await db.collection("web_users").doc(decodedToken.uid).get();
+  const data = (snap.exists ? snap.data() : null) || {};
+  return {
+    uid: decodedToken.uid,
+    email: decodedToken.email || (data.email as string | undefined),
+    role: data.role as string | undefined,
+    isSubAccount: data.isSubAccount === true,
+    parentId: typeof data.parentId === "string" ? data.parentId : null,
+  };
+};
+
+/**
+ * Returns the seller UIDs the caller is authorized to act as.
+ * Sub-accounts inherit their parent's seller identity.
+ */
+const getEffectiveSellerUids = (caller: CallerProfile): string[] => {
+  if (caller.isSubAccount && caller.parentId) {
+    return [caller.parentId];
+  }
+  return [caller.uid];
+};
+
+const isAdminCaller = (decodedToken: DecodedIdToken, caller: CallerProfile): boolean => {
+  return (
+    (decodedToken as any).role === "admin" ||
+    (decodedToken as any).customClaims?.role === "admin" ||
+    caller.role === "admin"
+  );
+};
+
+/**
+ * Determines whether the caller is authorized as a seller on the given order.
+ *
+ * Accepts both the array shape (`sellerIds: string[]`) and the legacy
+ * singular shape (`sellerId: string`). For each entry, attempts a direct
+ * UID match against the caller's effective seller UIDs first, then falls
+ * back to resolving the entry as a `Seller/{id}` document and matching its
+ * `userId` / `email` fields (handles cases where `sellerIds` stores Seller
+ * doc IDs rather than user UIDs).
+ */
+const isSellerOnOrder = async (
+  orderData: any,
+  caller: CallerProfile
+): Promise<boolean> => {
+  const rawIds: unknown = orderData?.sellerIds;
+  const sellerIds: string[] = Array.isArray(rawIds)
+    ? rawIds.map((v) => String(v))
+    : orderData?.sellerId
+      ? [String(orderData.sellerId)]
+      : [];
+  if (sellerIds.length === 0) return false;
+
+  const effectiveUids = getEffectiveSellerUids(caller);
+  if (sellerIds.some((id) => effectiveUids.includes(id))) return true;
+
+  const sellerDocs = await Promise.all(
+    sellerIds.map((id) => db.collection("Seller").doc(id).get())
+  );
+  for (const doc of sellerDocs) {
+    if (!doc.exists) continue;
+    const d = doc.data() || {};
+    if (typeof d.userId === "string" && effectiveUids.includes(d.userId)) return true;
+    if (caller.email && d.email === caller.email) return true;
+  }
+  return false;
+};
+
+/**
+ * True when the caller owns the seller record (directly or as a sub-account
+ * of the seller's owning user). Used by single-seller endpoints that don't
+ * pivot through an order.
+ */
+const isOwnerOfSeller = (
+  sellerData: any,
+  caller: CallerProfile
+): boolean => {
+  if (!sellerData) return false;
+  const effectiveUids = getEffectiveSellerUids(caller);
+  if (typeof sellerData.userId === "string" && effectiveUids.includes(sellerData.userId)) return true;
+  if (caller.email && sellerData.email === caller.email) return true;
+  return false;
+};
+
 const calculateShipmentItems = (orderItems: any[]): ShipmentItem[] => {
   // Order items are stored with dimensions as top-level fields
   // (length/width/height/weight in cm/cm/cm/grams) by the checkout flow.
@@ -348,26 +451,36 @@ export const getSellerPayoutAdjustments = onRequest({
 
     const { sellerId } = req.query;
     let targetSellerId = sellerId as string;
+    const caller = await fetchCallerProfile(decodedToken);
 
-    // If no sellerId provided, try to find seller record for authenticated user
+    // If no sellerId provided, find seller record for authenticated user.
+    // Sub-accounts resolve to their parent seller's record.
     if (!targetSellerId) {
-      const sellerQuery = await db.collection('Seller')
-        .where('userId', '==', decodedToken.uid)
-        .limit(1)
-        .get();
-      
-      if (sellerQuery.empty) {
+      const effectiveUids = getEffectiveSellerUids(caller);
+      let foundId: string | null = null;
+      for (const uid of effectiveUids) {
+        const sellerQuery = await db.collection('Seller')
+          .where('userId', '==', uid)
+          .limit(1)
+          .get();
+        if (!sellerQuery.empty) {
+          foundId = sellerQuery.docs[0].id;
+          break;
+        }
+      }
+
+      if (!foundId) {
         res.status(404).json({
           error: "Seller not found",
           message: "No seller record found for authenticated user"
         });
         return;
       }
-      
-      targetSellerId = sellerQuery.docs[0].id;
+
+      targetSellerId = foundId;
     }
 
-    // Verify authorization - user must be the seller owner or admin
+    // Verify authorization - user must be the seller owner (or sub-account) or admin
     const sellerDoc = await db.collection('Seller').doc(targetSellerId).get();
     if (!sellerDoc.exists) {
       res.status(404).json({ error: "Seller not found" });
@@ -375,8 +488,8 @@ export const getSellerPayoutAdjustments = onRequest({
     }
 
     const sellerData = sellerDoc.data();
-    const isSellerOwner = sellerData?.userId === decodedToken.uid || sellerData?.email === decodedToken.email;
-    const isAdmin = decodedToken.role === 'admin' || decodedToken.customClaims?.role === 'admin';
+    const isSellerOwner = isOwnerOfSeller(sellerData, caller);
+    const isAdmin = isAdminCaller(decodedToken, caller);
 
     if (!isSellerOwner && !isAdmin) {
       res.status(403).json({
@@ -438,11 +551,11 @@ export const processSellerPayoutAdjustments = onRequest({
     let decodedToken: DecodedIdToken;
     try {
       decodedToken = await verifyAuthToken(req.headers.authorization);
-      
+
       // Only allow admin users to process payouts
-      const isAdmin = decodedToken.role === 'admin' || 
-                     decodedToken.customClaims?.role === 'admin';
-      
+      const caller = await fetchCallerProfile(decodedToken);
+      const isAdmin = isAdminCaller(decodedToken, caller);
+
       if (!isAdmin) {
         res.status(403).json({
           error: "Access denied",
@@ -555,21 +668,14 @@ export const processSellerPayoutAdjustments = onRequest({
 });
 
 export const createJRSShipping = onRequest({
-  cors: true,
+  cors: [
+    /^http:\/\/localhost(:\d+)?$/,
+    "https://dentpal-161e5.web.app",
+    "https://dentpal-site.web.app",
+  ],
   region: "asia-southeast1",
+  secrets: [JRS_API_KEY, JRS_SHIPPING_API_URL],
 }, async (req, res) => {
-  // Add explicit CORS headers
-  res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Max-Age', '86400');
-
-  // Handle preflight OPTIONS request
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
   try {
     // Check for POST method
     if (req.method !== "POST") {
@@ -623,37 +729,23 @@ export const createJRSShipping = onRequest({
       return;
     }
 
-    // Authorization check - ensure user can access this order
-    // Allow if user is the order owner, a seller involved, or an admin
+    // Authorization: order owner, an involved seller (or sub-account of one),
+    // or an admin. Sub-accounts inherit their parent seller's authorization.
+    const caller = await fetchCallerProfile(decodedToken);
     const isOrderOwner = orderData.userId === decodedToken.uid;
-    const isAdmin = decodedToken.role === 'admin' || 
-                   decodedToken.customClaims?.role === 'admin';
-    
-    let isSeller = false;
-    if (orderData.sellerIds && Array.isArray(orderData.sellerIds)) {
-      // First check if the user's UID is directly in the sellerIds array
-      // (Some orders store user UIDs directly in sellerIds)
-      if (orderData.sellerIds.includes(decodedToken.uid)) {
-        isSeller = true;
-      } else {
-        // Fallback: Check if sellerIds contains Seller document IDs
-        // and verify the authenticated user owns one of those seller records
-        const sellerPromises = orderData.sellerIds.map((sellerId: string) => 
-          db.collection("Seller").doc(sellerId).get()
-        );
-        const sellerDocs = await Promise.all(sellerPromises);
-        isSeller = sellerDocs.some(doc => 
-          doc.exists && (doc.data()?.userId === decodedToken.uid || doc.data()?.email === decodedToken.email)
-        );
-      }
-    }
+    const isAdmin = isAdminCaller(decodedToken, caller);
+    const isSeller = await isSellerOnOrder(orderData, caller);
 
     if (!isOrderOwner && !isAdmin && !isSeller) {
       logger.warn("Unauthorized shipping request", {
         orderId: payload.orderId,
         authenticatedUser: decodedToken.uid,
+        callerRole: caller.role,
+        callerIsSubAccount: caller.isSubAccount,
+        callerParentId: caller.parentId,
         orderOwner: orderData.userId,
-        sellerIds: orderData.sellerIds
+        sellerIds: orderData.sellerIds,
+        legacySellerId: orderData.sellerId,
       });
       res.status(403).json({
         error: "Access denied",
@@ -915,7 +1007,7 @@ export const createJRSShipping = onRequest({
     let response;
     let responseData;
     try {
-      response = await axios.post(JRS_API_URL.value(), jrsRequest, {
+      response = await axios.post(JRS_SHIPPING_API_URL.value(), jrsRequest, {
         headers: {
           "Content-Type": "application/json",
           "Cache-Control": "no-cache",
@@ -1147,6 +1239,207 @@ export const createJRSShipping = onRequest({
 
 
 // ============================================
+// Cancel JRS Shipping
+// ============================================
+//
+// Cancels an existing JRS shipping request created via createJRSShipping and
+// rolls the order back from the "to-hand-over" fulfillment stage to
+// "to-arrangement" so the seller can re-issue shipping if needed.
+
+interface CancelJRSShippingPayload {
+  orderId: string;
+  cancellationDetails?: string;
+  canceledByUserEmail?: string;
+}
+
+export const cancelJRSShipping = onRequest({
+  cors: [
+    /^http:\/\/localhost(:\d+)?$/,
+    "https://dentpal-161e5.web.app",
+    "https://dentpal-site.web.app",
+  ],
+  region: "asia-southeast1",
+  secrets: [JRS_CANCEL_URL, JRS_API_KEY],
+}, async (req, res) => {
+  try {
+    if (req.method !== "POST") {
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    let decodedToken: DecodedIdToken;
+    try {
+      decodedToken = await verifyAuthToken(req.headers.authorization);
+    } catch (authError) {
+      res.status(401).json({
+        error: "Authentication required",
+        message: authError instanceof Error ? authError.message : "Invalid authentication",
+      });
+      return;
+    }
+
+    const payload = req.body as CancelJRSShippingPayload;
+
+    if (!payload.orderId) {
+      res.status(400).json({error: "Missing orderId"});
+      return;
+    }
+
+    const orderResult = await fetchOrderData(payload.orderId);
+    if (!orderResult || !orderResult.data) {
+      res.status(404).json({error: "Order not found"});
+      return;
+    }
+
+    const orderData = orderResult.data;
+
+    // Authorization: order owner, involved seller (or sub-account), or admin.
+    const caller = await fetchCallerProfile(decodedToken);
+    const isOrderOwner = orderData.userId === decodedToken.uid;
+    const isAdmin = isAdminCaller(decodedToken, caller);
+    const isSeller = await isSellerOnOrder(orderData, caller);
+
+    if (!isOrderOwner && !isAdmin && !isSeller) {
+      logger.warn("Unauthorized cancel shipping request", {
+        orderId: payload.orderId,
+        authenticatedUser: decodedToken.uid,
+      });
+      res.status(403).json({
+        error: "Access denied",
+        message: "You are not authorized to cancel shipping for this order",
+      });
+      return;
+    }
+
+    const jrsInfo = orderData.shippingInfo?.jrs;
+    const jrsResponse = jrsInfo?.response;
+    const shippingRequestId =
+      jrsResponse?.ShippingRequestEntityDto?.Id ||
+      jrsResponse?.ShippingRequestEntityDto?.id ||
+      jrsResponse?.Id ||
+      jrsInfo?.shippingRequestId;
+
+    if (!shippingRequestId) {
+      logger.warn("Cannot cancel shipping: missing JRS shipping request id", {
+        orderId: payload.orderId,
+        hasJrsInfo: !!jrsInfo,
+      });
+      res.status(400).json({
+        error: "No active JRS shipping request found for this order",
+      });
+      return;
+    }
+
+    if (jrsInfo?.cancelledAt) {
+      res.status(409).json({
+        error: "Shipping already cancelled",
+        cancelledAt: jrsInfo.cancelledAt,
+      });
+      return;
+    }
+
+    const cancellationDetails = payload.cancellationDetails || "Cancelled by seller";
+    const canceledByUserEmail =
+      payload.canceledByUserEmail || decodedToken.email || caller.email || "admin@dentpal.ph";
+
+    const cancelRequestBody = {
+      requestType: "cancelTransaction",
+      shippingRequest: {
+        id: shippingRequestId,
+        cancellationDetails,
+        canceledByUserEmail,
+      },
+    };
+
+    logger.info("Sending JRS cancel shipping request", {
+      orderId: payload.orderId,
+      shippingRequestId,
+      cancellationDetails,
+    });
+
+    let cancelResponseData: any;
+    try {
+      const response = await axios.post(JRS_CANCEL_URL.value(), cancelRequestBody, {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache",
+          "Ocp-Apim-Subscription-Key": JRS_API_KEY.value(),
+        },
+      });
+      cancelResponseData = response.data;
+    } catch (axiosError: any) {
+      logger.error("JRS cancel API error", {
+        orderId: payload.orderId,
+        shippingRequestId,
+        status: axiosError.response?.status,
+        details: axiosError.response?.data,
+      });
+      res.status(400).json({
+        error: "JRS cancel request failed",
+        details: axiosError.response?.data || axiosError.message,
+      });
+      return;
+    }
+
+    if (cancelResponseData && cancelResponseData.Success === false) {
+      logger.error("JRS cancel API business logic error", {
+        orderId: payload.orderId,
+        shippingRequestId,
+        details: cancelResponseData,
+      });
+      res.status(400).json({
+        error: "JRS cancel request failed",
+        details: cancelResponseData,
+      });
+      return;
+    }
+
+    // Roll back fulfillment stage and persist cancellation under shippingInfo.
+    const orderRef = db.collection(orderResult.collection).doc(payload.orderId);
+    const cancelledAt = new Date();
+    const newHistoryEntry = {
+      status: "to-arrangement",
+      note: `JRS shipping cancelled (${cancellationDetails}). Order moved back to arrangement.`,
+      timestamp: cancelledAt,
+    };
+
+    await orderRef.update({
+      "shippingInfo.jrs.cancelledAt": cancelledAt,
+      "shippingInfo.jrs.cancellationDetails": cancellationDetails,
+      "shippingInfo.jrs.canceledByUserEmail": canceledByUserEmail,
+      "shippingInfo.jrs.cancelResponse": cancelResponseData ?? null,
+      fulfillmentStage: "to-arrangement",
+      statusHistory: FieldValue.arrayUnion(newHistoryEntry),
+      updatedAt: cancelledAt,
+    });
+
+    logger.info("JRS shipping cancelled and order rolled back", {
+      orderId: payload.orderId,
+      shippingRequestId,
+    });
+
+    res.status(200).json({
+      success: true,
+      orderId: payload.orderId,
+      shippingRequestId,
+      cancellationDetails,
+      canceledByUserEmail,
+      jrsResponse: cancelResponseData,
+    });
+  } catch (error) {
+    logger.error("Error in cancelJRSShipping", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      orderId: (req.body as any)?.orderId,
+    });
+    res.status(500).json({
+      error: "Internal server error",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+
+// ============================================
 // Return Request Processing Functions
 // ============================================
 
@@ -1168,6 +1461,7 @@ interface ProcessReturnPayload {
 export const processReturnRequest = onRequest({
   cors: true,
   region: "asia-southeast1",
+  secrets: [JRS_API_KEY, JRS_SHIPPING_API_URL],
 }, async (req, res) => {
   // Add explicit CORS headers
   res.set('Access-Control-Allow-Origin', '*');
@@ -1276,37 +1570,21 @@ export const processReturnRequest = onRequest({
       return;
     }
 
-    // Authorization check - only sellers involved in the order or admins can process returns
-    const isAdmin = decodedToken.role === 'admin' || 
-                   decodedToken.customClaims?.role === 'admin';
-    
-    let isSeller = false;
-    let sellerData: any = null;
-    
-    if (orderData.sellerIds && Array.isArray(orderData.sellerIds)) {
-      if (orderData.sellerIds.includes(decodedToken.uid)) {
-        isSeller = true;
-        sellerData = await fetchSellerData(decodedToken.uid);
-      } else {
-        const sellerPromises = orderData.sellerIds.map((sellerId: string) => 
-          db.collection("Seller").doc(sellerId).get()
-        );
-        const sellerDocs = await Promise.all(sellerPromises);
-        for (const doc of sellerDocs) {
-          if (doc.exists && (doc.data()?.userId === decodedToken.uid || doc.data()?.email === decodedToken.email)) {
-            isSeller = true;
-            sellerData = doc.data();
-            break;
-          }
-        }
-      }
-    }
+    // Authorization: only sellers involved in the order (including their
+    // sub-accounts) or admins can process returns.
+    const caller = await fetchCallerProfile(decodedToken);
+    const isAdmin = isAdminCaller(decodedToken, caller);
+    const isSeller = await isSellerOnOrder(orderData, caller);
 
     if (!isAdmin && !isSeller) {
       logger.warn("Unauthorized return request processing", {
         returnRequestId: payload.returnRequestId,
         authenticatedUser: decodedToken.uid,
-        sellerIds: orderData.sellerIds
+        callerRole: caller.role,
+        callerIsSubAccount: caller.isSubAccount,
+        callerParentId: caller.parentId,
+        sellerIds: orderData.sellerIds,
+        legacySellerId: orderData.sellerId,
       });
       res.status(403).json({
         error: "Access denied",
@@ -1315,9 +1593,23 @@ export const processReturnRequest = onRequest({
       return;
     }
 
-    // If no seller data found yet, try to fetch the first seller
-    if (!sellerData && orderData.sellerIds?.length > 0) {
-      sellerData = await fetchSellerData(orderData.sellerIds[0]);
+    // Fetch seller data for the order (used downstream for shipping addresses,
+    // contact info, etc.). Prefer the seller matching the caller's effective
+    // UID so the seller's own contact details are used; fall back to the
+    // first seller on the order otherwise.
+    let sellerData: any = null;
+    const orderSellerIds: string[] = Array.isArray(orderData.sellerIds)
+      ? orderData.sellerIds.map((v: any) => String(v))
+      : orderData.sellerId
+        ? [String(orderData.sellerId)]
+        : [];
+    const effectiveUids = getEffectiveSellerUids(caller);
+    const preferredSellerId = orderSellerIds.find((id) => effectiveUids.includes(id));
+    if (preferredSellerId) {
+      sellerData = await fetchSellerData(preferredSellerId);
+    }
+    if (!sellerData && orderSellerIds.length > 0) {
+      sellerData = await fetchSellerData(orderSellerIds[0]);
     }
 
     const orderRef = db.collection(orderResult.collection).doc(payload.orderId);
@@ -1502,7 +1794,7 @@ export const processReturnRequest = onRequest({
     let jrsResponse;
     let jrsResponseData;
     try {
-      jrsResponse = await axios.post(JRS_API_URL.value(), jrsReturnRequest, {
+      jrsResponse = await axios.post(JRS_SHIPPING_API_URL.value(), jrsReturnRequest, {
         headers: {
           "Content-Type": "application/json",
           "Ocp-Apim-Subscription-Key": JRS_API_KEY.value(),
@@ -1670,31 +1962,43 @@ export const getSellerReturnRequests = onRequest({
     const { sellerId, status } = req.query;
     let targetSellerId = sellerId as string;
 
-    // If no sellerId provided, try to find seller record for authenticated user
+    const caller = await fetchCallerProfile(decodedToken);
+
+    // If no sellerId provided, find seller record for authenticated user.
+    // Sub-accounts resolve to their parent seller's record.
     if (!targetSellerId) {
-      const sellerQuery = await db.collection('Seller')
-        .where('userId', '==', decodedToken.uid)
-        .limit(1)
-        .get();
-      
-      if (sellerQuery.empty) {
-        // Try by email
-        const sellerByEmail = await db.collection('Seller')
-          .where('email', '==', decodedToken.email)
+      const effectiveUids = getEffectiveSellerUids(caller);
+      let foundDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+      for (const uid of effectiveUids) {
+        const byUid = await db.collection('Seller')
+          .where('userId', '==', uid)
           .limit(1)
           .get();
-        
-        if (sellerByEmail.empty) {
-          res.status(404).json({
-            error: "Seller not found",
-            message: "No seller account found for this user"
-          });
-          return;
+        if (!byUid.empty) {
+          foundDoc = byUid.docs[0];
+          break;
         }
-        targetSellerId = sellerByEmail.docs[0].id;
-      } else {
-        targetSellerId = sellerQuery.docs[0].id;
       }
+
+      if (!foundDoc && caller.email) {
+        const byEmail = await db.collection('Seller')
+          .where('email', '==', caller.email)
+          .limit(1)
+          .get();
+        if (!byEmail.empty) {
+          foundDoc = byEmail.docs[0];
+        }
+      }
+
+      if (!foundDoc) {
+        res.status(404).json({
+          error: "Seller not found",
+          message: "No seller account found for this user"
+        });
+        return;
+      }
+      targetSellerId = foundDoc.id;
     }
 
     // Verify authorization
@@ -1705,8 +2009,8 @@ export const getSellerReturnRequests = onRequest({
     }
 
     const sellerData = sellerDoc.data();
-    const isSellerOwner = sellerData?.userId === decodedToken.uid || sellerData?.email === decodedToken.email;
-    const isAdmin = decodedToken.role === 'admin' || decodedToken.customClaims?.role === 'admin';
+    const isSellerOwner = isOwnerOfSeller(sellerData, caller);
+    const isAdmin = isAdminCaller(decodedToken, caller);
 
     if (!isSellerOwner && !isAdmin) {
       res.status(403).json({
@@ -1858,7 +2162,7 @@ interface PayMongoWalletTransactionResponse {
 export const processWithdrawal = onRequest({
   cors: true,
   region: "asia-southeast1",
-  secrets: [PAYMONGO_SECRET_KEY],
+  secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
   // Only allow POST
   if (req.method !== "POST") {
@@ -2038,7 +2342,7 @@ export const processWithdrawal = onRequest({
 export const checkWithdrawalStatus = onRequest({
   cors: true,
   region: "asia-southeast1",
-  secrets: [PAYMONGO_SECRET_KEY],
+  secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
   // Allow GET or POST
   if (req.method !== "GET" && req.method !== "POST") {
@@ -2161,7 +2465,7 @@ export const checkWithdrawalStatus = onRequest({
 export const getWalletTransactions = onRequest({
   cors: true,
   region: "asia-southeast1",
-  secrets: [PAYMONGO_SECRET_KEY],
+  secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed" });
@@ -2227,7 +2531,7 @@ export const getWalletTransactions = onRequest({
 export const getPaymongoTransaction = onRequest({
   cors: true,
   region: "asia-southeast1",
-  secrets: [PAYMONGO_SECRET_KEY],
+  secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed" });
@@ -2296,7 +2600,7 @@ export const getPaymongoTransaction = onRequest({
 export const listPaymongoTransactions = onRequest({
   cors: true,
   region: "asia-southeast1",
-  secrets: [PAYMONGO_SECRET_KEY],
+  secrets: [PAYMONGO_SECRET_KEY, PAYMONGO_WALLET_ID, PAYMONGO_API_URL],
 }, async (req, res) => {
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed" });

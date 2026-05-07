@@ -80,6 +80,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   const [toShipSubTab, setToShipSubTab] = useState<ToShipStage>('to-pack');
   // JRS shipping state
   const [shippingLoading, setShippingLoading] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState<string | null>(null);
   const [pickupScheduleDialog, setPickupScheduleDialog] = useState<{
     open: boolean;
     order: Order | null;
@@ -955,6 +956,64 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
+  // Cancel JRS shipping for a hand-over order and roll it back to to-arrangement.
+  // Calls the cancelJRSShipping cloud function which hits the JRS cancel endpoint
+  // and updates shippingInfo + fulfillmentStage in Firestore.
+  const handleCancelShipment = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Cancel JRS shipment for order #${order.id}?\n\nThis will move the order back to To Arrangement so you can re-issue shipping.`
+    );
+    if (!confirmed) return;
+
+    setCancelLoading(order.id);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        alert('Unable to authenticate your request. Please sign in again.');
+        return;
+      }
+
+      const firebaseFunctionUrl = 'https://asia-southeast1-dentpal-161e5.cloudfunctions.net/cancelJRSShipping';
+      const response = await fetch(firebaseFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          cancellationDetails: 'Cancelled by seller',
+          canceledByUserEmail: user?.email || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const baseError = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        const detailText = errorData.details
+          ? `\n\nJRS details: ${typeof errorData.details === 'string' ? errorData.details : JSON.stringify(errorData.details)}`
+          : '';
+        throw new Error(`${baseError}${detailText}`);
+      }
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Cancel request did not succeed');
+      }
+
+      alert(`Shipment cancelled successfully.\n\nOrder #${order.id} moved back to To Arrangement.`);
+      setToShipSubTab('to-arrangement');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to cancel JRS shipment:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to cancel shipment.\n\n${message}\n\nPlease try again or contact support.`);
+    } finally {
+      setCancelLoading(null);
+    }
+  };
+
   // Handle confirming handover -> move to Shipping (processing) - deprecated, use handleMoveToShipping instead
   const handleConfirmHandover = async (order: Order) => {
     try {
@@ -1543,7 +1602,9 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             onConfirmHandover={handleConfirmHandover}
             onMoveToPack={handleMoveToPack}
             onMoveToShipping={handleMoveToShipping}
+            onCancelShipment={handleCancelShipment}
             shippingLoading={shippingLoading}
+            cancelLoading={cancelLoading}
             selectedOrderIds={selectedOrderIds}
             onToggleOrderSelection={handleToggleOrderSelection}
             selectedArrangementOrderIds={selectedArrangementOrderIds}
