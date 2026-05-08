@@ -6,6 +6,7 @@
 import { Order } from '@/types/order';
 import { useDashboardFilters } from '@/hooks/dashboard/useDashboardFilters';
 import { useDashboardMetrics } from '@/hooks/dashboard/useDashboardMetrics';
+import { useCategoryResolution } from '@/hooks/dashboard/useCategoryResolution';
 import { formatCurrency } from '@/utils/dashboard/formatters';
 import { generateCSV, generatePDF } from '@/utils/dashboard/dataProcessing';
 import { DateRangePicker, ExportMenu, LoadingSpinner, MetricCard } from '../shared';
@@ -44,6 +45,8 @@ export const SellerDashboard = ({
     resetFilters,
   } = useDashboardFilters();
 
+  const { productCategoryMap, categoryNameMap } = useCategoryResolution(orders);
+
   const {
     paidOrders,
     kpiMetrics,
@@ -52,7 +55,7 @@ export const SellerDashboard = ({
     categoryMetrics,
     paymentTypeMetrics,
     revenueByDate,
-  } = useDashboardMetrics({ orders, filters });
+  } = useDashboardMetrics({ orders, filters, productCategoryMap, categoryNameMap });
 
   // CSV Export handlers
   const handleExportItemsCSV = () => {

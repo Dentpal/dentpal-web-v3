@@ -18,9 +18,11 @@ import {
 interface UseDashboardMetricsProps {
   orders: Order[];
   filters: DashboardFilters;
+  productCategoryMap?: Map<string, string>;
+  categoryNameMap?: Map<string, string>;
 }
 
-export const useDashboardMetrics = ({ orders, filters }: UseDashboardMetricsProps) => {
+export const useDashboardMetrics = ({ orders, filters, productCategoryMap, categoryNameMap }: UseDashboardMetricsProps) => {
   // Filter orders based on current filters
   const filteredOrders = useMemo(() => {
     return filterOrders(orders, filters);
@@ -48,8 +50,8 @@ export const useDashboardMetrics = ({ orders, filters }: UseDashboardMetricsProp
 
   // Calculate category metrics
   const categoryMetrics = useMemo(() => {
-    return calculateCategoryMetrics(paidOrders);
-  }, [paidOrders]);
+    return calculateCategoryMetrics(paidOrders, productCategoryMap, categoryNameMap);
+  }, [paidOrders, productCategoryMap, categoryNameMap]);
 
   // Calculate payment type metrics
   const paymentTypeMetrics = useMemo(() => {

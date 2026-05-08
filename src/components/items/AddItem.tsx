@@ -16,6 +16,24 @@ import CategoryService from '@/services/category';
 import { Package, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTriangle, Save, Shield } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import imageCompression from 'browser-image-compression';
+
+const MAX_THUMBNAIL_IMAGES = 3;
+const compressForUpload = async (file: File): Promise<File> => {
+  try {
+    const compressed = (await imageCompression(file, {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1024,
+      useWebWorker: true,
+    })) as Blob;
+    if (compressed instanceof File) return compressed;
+    return new File([compressed], file.name, { type: compressed.type || file.type });
+  } catch (err) {
+    console.warn('Image compression failed, using original file:', err);
+    return file;
+  }
+};
+type ThumbnailSlot = { file: File | null; preview: string | null; url: string };
 
 // Helper: convert weight to grams
 const toGrams = (weight: any, unit: string) => {
@@ -72,9 +90,7 @@ const getInitialFormState = () => ({
   price: 0,
   specialPrice: '' as number | '',
   lowestPrice: '' as number | '',
-  imageURL: '',
-  imageFile: null as File | null,
-  imagePreview: null as string | null,
+  thumbnails: [] as ThumbnailSlot[],
   dangerousGoods: 'none' as '' | 'none' | 'battery' | 'flammable' | 'liquid',
   warrantyType: '',
   warrantyDuration: '',
@@ -209,7 +225,8 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
       return;
     }
 
-    if (!form.imageFile && !form.imageURL) {
+    const hasThumbnail = form.thumbnails.some(t => t.file || t.url);
+    if (!hasThumbnail) {
       toast({ title: 'Error', description: 'Product image is required', variant: 'destructive' });
       return;
     }
@@ -228,13 +245,18 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     setSubmitting(true);
 
     try {
-      // Upload main product image if exists
-      let imageURL = form.imageURL;
-      if (form.imageFile) {
-        const imgRef = storageRef(storage, `products/${effectiveSellerId}/${Date.now()}_${form.imageFile.name}`);
-        await uploadBytes(imgRef, form.imageFile);
-        imageURL = await getDownloadURL(imgRef);
+      // Upload thumbnails (up to 3, compressed)
+      const uploadedImages: string[] = [];
+      for (const slot of form.thumbnails) {
+        if (slot.file) {
+          const imgRef = storageRef(storage, `products/${effectiveSellerId}/${Date.now()}_${slot.file.name}`);
+          await uploadBytes(imgRef, slot.file);
+          uploadedImages.push(await getDownloadURL(imgRef));
+        } else if (slot.url) {
+          uploadedImages.push(slot.url);
+        }
       }
+      const imageURL = uploadedImages[0] || '';
 
       // Upload brand image if provided
       let brandImageURL = form.brandImageURL;
@@ -254,6 +276,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         categoryID: form.categoryID,
         subCategoryID: form.subCategoryID || '',
         imageURL: imageURL,
+        images: uploadedImages,
         status: 'pending_qc' as const, // Always pending QC first
         price: form.price || 0,
         specialPrice: form.specialPrice || null,
@@ -344,13 +367,18 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     setShowDraftDialog(false);
 
     try {
-      // Upload main product image if exists
-      let imageURL = form.imageURL;
-      if (form.imageFile) {
-        const imgRef = storageRef(storage, `products/${effectiveSellerId}/${Date.now()}_${form.imageFile.name}`);
-        await uploadBytes(imgRef, form.imageFile);
-        imageURL = await getDownloadURL(imgRef);
+      // Upload thumbnails (up to 3, compressed)
+      const uploadedImages: string[] = [];
+      for (const slot of form.thumbnails) {
+        if (slot.file) {
+          const imgRef = storageRef(storage, `products/${effectiveSellerId}/${Date.now()}_${slot.file.name}`);
+          await uploadBytes(imgRef, slot.file);
+          uploadedImages.push(await getDownloadURL(imgRef));
+        } else if (slot.url) {
+          uploadedImages.push(slot.url);
+        }
       }
+      const imageURL = uploadedImages[0] || '';
 
       // Upload brand image if provided
       let brandImageURLDraft = form.brandImageURL;
@@ -370,6 +398,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         categoryID: form.categoryID || '',
         subCategoryID: form.subCategoryID || '',
         imageURL: imageURL || '',
+        images: uploadedImages,
         status: 'draft' as const,
         price: form.price || 0,
         specialPrice: form.specialPrice || null,
@@ -455,16 +484,16 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => {
+          onChange={async (e) => {
             const file = e.target.files?.[0];
-            if (file) {
-              const preview = URL.createObjectURL(file);
-              setForm(prev => ({
-                ...prev,
-                imageFile: file,
-                imagePreview: preview
-              }));
-            }
+            if (e.target) e.target.value = '';
+            if (!file) return;
+            const compressed = await compressForUpload(file);
+            const preview = URL.createObjectURL(compressed);
+            setForm(prev => prev.thumbnails.length >= MAX_THUMBNAIL_IMAGES
+              ? prev
+              : { ...prev, thumbnails: [...prev.thumbnails, { file: compressed, preview, url: '' }] }
+            );
           }}
         />
 
@@ -545,22 +574,38 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Thumbnail Image <span className="text-red-500">*</span></label>
-                <div className="flex items-center gap-4">
-                  {(form.imagePreview || form.imageURL) && (
-                    <img
-                      src={form.imagePreview || form.imageURL}
-                      alt="Product"
-                      className="w-24 h-24 rounded-lg object-cover border-2 border-gray-200"
-                    />
+                <div className="flex items-center gap-3 flex-wrap">
+                  {form.thumbnails.map((slot, idx) => {
+                    const src = slot.preview || slot.url;
+                    return (
+                      <div key={idx} className="relative w-24 h-24 rounded-lg border-2 border-gray-200 overflow-hidden bg-gray-50">
+                        {src && <img src={src} alt={`Product ${idx + 1}`} className="w-full h-full object-cover" />}
+                        {idx === 0 && (
+                          <span className="absolute bottom-1 left-1 bg-teal-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded">Primary</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setForm(prev => ({ ...prev, thumbnails: prev.thumbnails.filter((_, i) => i !== idx) }))}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-red-600 border border-gray-200 flex items-center justify-center"
+                          aria-label={`Remove image ${idx + 1}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {form.thumbnails.length < MAX_THUMBNAIL_IMAGES && (
+                    <button
+                      type="button"
+                      onClick={() => productImageInputRef.current?.click()}
+                      className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 hover:border-teal-500 hover:bg-teal-50 transition flex flex-col items-center justify-center text-gray-500 text-xs font-medium"
+                    >
+                      <Plus className="w-5 h-5 mb-1" />
+                      Upload
+                    </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => productImageInputRef.current?.click()}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
-                  >
-                    {form.imageURL ? 'Change Image' : 'Upload Image'}
-                  </button>
                 </div>
+                <p className="mt-2 text-xs text-gray-500">Up to {MAX_THUMBNAIL_IMAGES} images. The first image is the primary thumbnail.</p>
               </div>
             </div>
           </div>

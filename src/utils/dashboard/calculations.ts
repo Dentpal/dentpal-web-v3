@@ -163,21 +163,31 @@ export const calculateItemMetrics = (paidOrders: Order[]): ItemMetrics[] => {
 /**
  * Calculate category-level metrics
  */
-export const calculateCategoryMetrics = (paidOrders: Order[]): CategoryMetrics[] => {
+export const calculateCategoryMetrics = (
+  paidOrders: Order[],
+  productCategoryMap?: Map<string, string>,
+  categoryNameMap?: Map<string, string>,
+): CategoryMetrics[] => {
   const categoryMap = new Map<string, CategoryMetrics>();
 
   paidOrders.forEach(order => {
     const items = order.items || [];
     const summary = order.summary || {};
     const fees = order.feesBreakdown || {};
-    
+
     const orderSubtotal = Number(summary.subtotal) || 0;
     const orderPaymentFee = Number(fees.paymentProcessingFee) || 0;
     const orderShippingFee = Number(summary.sellerShippingCharge) || 0;
     const orderPlatformFee = Number(fees.platformFee) || 0;
 
     items.forEach((item: any) => {
-      const categoryName = item.category || 'Uncategorized';
+      const categoryId =
+        (item.categoryId as string | undefined) ||
+        (item.productId ? productCategoryMap?.get(item.productId) : undefined);
+      const categoryName =
+        (categoryId ? categoryNameMap?.get(categoryId) : undefined) ||
+        item.category ||
+        'Uncategorized';
       const quantity = Number(item.quantity) || 0;
       const price = Number(item.price) || 0;
       const itemSubtotal = Number(item.subtotal) || (price * quantity);

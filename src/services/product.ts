@@ -7,6 +7,7 @@ export type CreateProductInput = {
   name: string;
   description?: string;
   imageURL?: string;
+  images?: string[];
   imageVersion?: string | null;
   categoryID?: string | null;
   subCategoryID?: string | null;
@@ -149,6 +150,7 @@ export const ProductService = {
       name: input.name,
       description: input.description ?? '',
       imageURL: input.imageURL ?? '',
+      images: Array.isArray(input.images) ? input.images : (input.imageURL ? [input.imageURL] : []),
       imageVersion: input.imageVersion ?? null,
       categoryID: input.categoryID ?? null,
       // Write both spellings to satisfy consumers and requested schema
@@ -380,6 +382,9 @@ export const ProductService = {
       warrantyPolicy?: string;
       dangerousGoods?: string;
       allowInquiry?: boolean;
+      insuranceAndEvaluation?: boolean;
+      brandImage?: string;
+      images?: string[];
       clickCounter?: number;
     }>) => void
   ) {
@@ -431,6 +436,9 @@ export const ProductService = {
           warrantyPolicy: typeof pd.warrantyPolicy === 'string' ? pd.warrantyPolicy : undefined,
           dangerousGoods: typeof pd.dangerousGoods === 'string' ? pd.dangerousGoods : undefined,
           allowInquiry: typeof pd.allowInquiry === 'boolean' ? pd.allowInquiry : undefined,
+          insuranceAndEvaluation: typeof pd.insuranceAndEvaluation === 'boolean' ? pd.insuranceAndEvaluation : undefined,
+          brandImage: typeof pd.brandImage === 'string' ? pd.brandImage : undefined,
+          images: Array.isArray(pd.images) ? pd.images.map((u: any) => String(u)).filter((u: string) => !!u) : undefined,
           clickCounter: typeof pd.clickCounter === 'number' ? pd.clickCounter : 0,
         };
       }));
@@ -565,6 +573,8 @@ export const ProductService = {
     brand: string;
     description: string;
     imageURL: string;
+    images: string[];
+    brandImage: string | null;
     categoryID: string | null;
     subCategoryID: string | null;
     isActive: boolean;
@@ -585,6 +595,8 @@ export const ProductService = {
       ...(updates.brand !== undefined ? { brand: updates.brand } : {}),
       ...(updates.description !== undefined ? { description: updates.description } : {}),
       ...(updates.imageURL !== undefined ? { imageURL: updates.imageURL } : {}),
+      ...(updates.images !== undefined ? { images: Array.isArray(updates.images) ? updates.images : [] } : {}),
+      ...(updates.brandImage !== undefined ? { brandImage: updates.brandImage } : {}),
       ...(updates.categoryID !== undefined ? { categoryID: updates.categoryID } : {}),
       ...(updates.subCategoryID !== undefined ? { subCategoryID: updates.subCategoryID, subcategoryID: updates.subCategoryID } : {}),
       ...(updates.isActive !== undefined ? { isActive: !!updates.isActive } : {}),

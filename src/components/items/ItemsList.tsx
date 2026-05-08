@@ -16,6 +16,24 @@ import { Package, Edit3, X, Plus, FolderTree, Boxes, Trash2, ImageIcon, AlertTri
 import { storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, getDocs } from 'firebase/firestore';
+import imageCompression from 'browser-image-compression';
+
+const MAX_THUMBNAIL_IMAGES = 3;
+const compressForUpload = async (file: File): Promise<File> => {
+  try {
+    const compressed = (await imageCompression(file, {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1024,
+      useWebWorker: true,
+    })) as Blob;
+    if (compressed instanceof File) return compressed;
+    return new File([compressed], file.name, { type: compressed.type || file.type });
+  } catch (err) {
+    console.warn('Image compression failed, using original file:', err);
+    return file;
+  }
+};
+type ThumbnailSlot = { file: File | null; preview: string | null; url: string };
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
@@ -27,6 +45,8 @@ interface InventoryItem {
   brand?: string;
   description?: string;
   imageUrl?: string;
+  images?: string[];
+  brandImage?: string;
   category?: string;
   categoryID?: string;
   categoryName?: string;
@@ -94,9 +114,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
     specialPrice: number | '';
     inStock: number | string;
     suggestedThreshold: number;
-    imageURL: string;
-    imageFile?: File | null;
-    imagePreview?: string | null;
+    thumbnails: ThumbnailSlot[];
     brandImageURL: string;
     brandImageFile?: File | null;
     brandImagePreview?: string | null;
@@ -210,6 +228,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         updatedAt: r.updatedAt,
         description: r.description || '',
         imageUrl: r.imageUrl,
+        images: Array.isArray(r.images) ? r.images : undefined,
+        brandImage: r.brandImage || '',
         category: r.category || r.categoryID,
         categoryID: r.categoryID,
         subcategory: r.subcategory || r.subCategoryID,
@@ -526,9 +546,13 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       specialPrice: product.specialPrice || '',
       inStock: product.inStock || 0,
       suggestedThreshold: product.suggestedThreshold || 5,
-      imageURL: product.imageUrl || '',
-      imageFile: null,
-      imagePreview: null,
+      thumbnails: (() => {
+        const fromArray = (product.images || []).filter(Boolean);
+        const seed = fromArray.length > 0
+          ? fromArray
+          : (product.imageUrl ? [product.imageUrl] : []);
+        return seed.slice(0, MAX_THUMBNAIL_IMAGES).map(url => ({ file: null, preview: null, url }));
+      })(),
       brandImageURL: product.brandImage || '',
       brandImageFile: null,
       brandImagePreview: null,
@@ -574,16 +598,27 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
 
     setSubmitting(true);
     try {
-      let imageUrl = editForm.imageURL;
-
-      // Upload new image if selected
-      if (editForm.imageFile) {
-        const timestamp = Date.now();
-        const path = `ProductImages/${timestamp}/${editForm.imageFile.name}`;
-        const sRef = storageRef(storage, path);
-        await uploadBytes(sRef, editForm.imageFile);
-        imageUrl = await getDownloadURL(sRef);
+      // Validate at least one thumbnail
+      const hasThumbnail = editForm.thumbnails.some(t => t.file || t.url);
+      if (!hasThumbnail) {
+        toast({ title: 'Error', description: 'Product image is required', variant: 'destructive' });
+        setSubmitting(false);
+        return;
       }
+
+      // Upload any newly added thumbnails (compressed) and collect ordered URLs
+      const uploadedImages: string[] = [];
+      for (const slot of editForm.thumbnails) {
+        if (slot.file) {
+          const timestamp = Date.now();
+          const sRef = storageRef(storage, `ProductImages/${timestamp}_${slot.file.name}`);
+          await uploadBytes(sRef, slot.file);
+          uploadedImages.push(await getDownloadURL(sRef));
+        } else if (slot.url) {
+          uploadedImages.push(slot.url);
+        }
+      }
+      const imageUrl = uploadedImages[0] || '';
 
       let brandImageUrl = editForm.brandImageURL;
       if (editForm.brandImageFile) {
@@ -610,6 +645,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         brandImage: brandImageUrl || null,
         description: editForm.description,
         imageURL: imageUrl,
+        images: uploadedImages,
         categoryID: editForm.categoryID || null,
         subCategoryID: editForm.subCategoryID || null,
         suggestedThreshold: editForm.suggestedThreshold,
@@ -1091,16 +1127,17 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                  const preview = URL.createObjectURL(file);
-                  setEditForm(prev => prev ? {
-                    ...prev,
-                    imageFile: file,
-                    imagePreview: preview
-                  } : null);
-                }
+                if (e.target) e.target.value = '';
+                if (!file) return;
+                const compressed = await compressForUpload(file);
+                const preview = URL.createObjectURL(compressed);
+                setEditForm(prev => {
+                  if (!prev) return prev;
+                  if (prev.thumbnails.length >= MAX_THUMBNAIL_IMAGES) return prev;
+                  return { ...prev, thumbnails: [...prev.thumbnails, { file: compressed, preview, url: '' }] };
+                });
               }}
             />
             <input
@@ -1193,23 +1230,39 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Product Image</label>
-                    <div className="flex items-center gap-4">
-                      {(editForm.imagePreview || editForm.imageURL) && (
-                        <img
-                          src={editForm.imagePreview || editForm.imageURL}
-                          alt="Product"
-                          className="w-24 h-24 rounded-lg object-cover border-2 border-gray-200"
-                        />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Thumbnail <span className="text-red-500">*</span></label>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {editForm.thumbnails.map((slot, idx) => {
+                        const src = slot.preview || slot.url;
+                        return (
+                          <div key={idx} className="relative w-24 h-24 rounded-lg border-2 border-gray-200 overflow-hidden bg-gray-50">
+                            {src && <img src={src} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />}
+                            {idx === 0 && (
+                              <span className="absolute bottom-1 left-1 bg-green-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded">Primary</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditForm(prev => prev ? { ...prev, thumbnails: prev.thumbnails.filter((_, i) => i !== idx) } : prev)}
+                              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-red-600 border border-gray-200 flex items-center justify-center"
+                              aria-label={`Remove image ${idx + 1}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {editForm.thumbnails.length < MAX_THUMBNAIL_IMAGES && (
+                        <button
+                          type="button"
+                          onClick={() => editImageInputRef.current?.click()}
+                          className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 hover:border-green-500 hover:bg-green-50 transition flex flex-col items-center justify-center text-gray-500 text-xs font-medium"
+                        >
+                          <Plus className="w-5 h-5 mb-1" />
+                          Upload
+                        </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => editImageInputRef.current?.click()}
-                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition font-medium"
-                      >
-                        {editForm.imageURL ? 'Change Image' : 'Upload Image'}
-                      </button>
                     </div>
+                    <p className="mt-2 text-xs text-gray-500">Up to {MAX_THUMBNAIL_IMAGES} images. The first image is the primary thumbnail.</p>
                   </div>
                 </div>
               </div>

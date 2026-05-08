@@ -34,6 +34,7 @@ import AddItem from '@/components/items/AddItem';
 import BulkAddItems from '@/components/items/BulkAddItems';
 import ItemsView from '@/components/items/ItemsView';
 import { Order } from "@/types/order";
+import { useCategoryResolution } from '@/hooks/dashboard/useCategoryResolution';
 import { DollarSign, Users, ShoppingCart, TrendingUp, Filter, Download, ChevronDown, ChevronRight, ClipboardList, CreditCard } from "lucide-react";
 // Add permission-aware auth hook
 import { useAuth } from "@/hooks/use-auth";
@@ -348,6 +349,13 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   }, [confirmationOrders, sellerFilters]);
 
   const paidOrders = useMemo(() => filteredOrders.filter(o => isPaidStatus(o.status)), [filteredOrders]);
+
+  // Resolve real category names via productId → Product.categoryID → Category.name
+  const { productCategoryMap, categoryNameMap } = useCategoryResolution(filteredOrders);
+  const resolveCategoryName = (item: any): string => {
+    const categoryId = item?.categoryId || (item?.productId ? productCategoryMap.get(item.productId) : undefined);
+    return (categoryId ? categoryNameMap.get(categoryId) : undefined) || item?.category || 'Uncategorized';
+  };
 
   const kpiMetrics = useMemo(() => {
     const receipts = paidOrders.length;
@@ -1931,7 +1939,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               const orderPlatformFee = Number(fees.platformFee) || 0;
 
                               items.forEach((item: any) => {
-                                const categoryName = item.category || 'Uncategorized';
+                                const categoryName = resolveCategoryName(item);
                                 const quantity = Number(item.quantity) || 0;
                                 const price = Number(item.price) || 0;
                                 const itemSubtotal = Number(item.subtotal) || (price * quantity);
@@ -2064,7 +2072,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               const orderPlatformFee = Number(fees.platformFee) || 0;
 
                               items.forEach((item: any) => {
-                                const categoryName = item.category || 'Uncategorized';
+                                const categoryName = resolveCategoryName(item);
                                 const quantity = Number(item.quantity) || 0;
                                 const price = Number(item.price) || 0;
                                 // Calculate item subtotal: try item.subtotal first, fallback to price * quantity
