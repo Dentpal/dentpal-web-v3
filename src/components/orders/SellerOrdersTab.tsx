@@ -12,7 +12,9 @@ import DeliveredOrdersView from './views/DeliveredOrdersView';
 import CompletedOrdersView from './views/CompletedOrdersView';
 import UnfulfilledOrdersView from './views/UnfulfilledOrdersView';
 import ReturnRefundOrdersView from './views/ReturnRefundOrdersView';
-import OrdersService from '@/services/orders';
+import OrdersService, { type OrderHandler } from '@/services/orders';
+import { doc as fsDoc, getDoc as fsGetDoc } from 'firebase/firestore';
+import { db as fsDb } from '@/lib/firebase';
 import SellersService from '@/services/sellers';
 import ProductService from '@/services/product';
 import { useAuth } from '@/hooks/useAuth';
@@ -93,6 +95,30 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     pickupTime: '09:00',
   });
   const { user } = useAuth();
+
+  // Resolve current handler (main seller vs sub-account) once for use in
+  // every status / fulfillment-stage write.
+  const [handler, setHandler] = useState<OrderHandler | null>(null);
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) { setHandler(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await fsGetDoc(fsDoc(fsDb, 'User', uid));
+        const d = snap.exists() ? (snap.data() as { isSubAccount?: boolean; parentId?: string }) : null;
+        if (cancelled) return;
+        if (d?.isSubAccount && d.parentId) {
+          setHandler({ id: uid, role: 'sub', parentId: d.parentId });
+        } else {
+          setHandler({ id: uid, role: 'main' });
+        }
+      } catch {
+        if (!cancelled) setHandler({ id: uid, role: 'main' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid]);
 
   // Selection state for bulk actions in To Hand Over tab
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -272,7 +298,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   // Handle moving order to arrangement
   const handleMoveToArrangement = async (order: Order) => {
     try {
-      await OrdersService.updateFulfillmentStage(order.id, 'to-arrangement');
+      await OrdersService.updateFulfillmentStage(order.id, 'to-arrangement', handler ?? undefined);
       onRefresh?.();
     } catch (error) {
       console.error('Failed to move order to arrangement:', error);
@@ -309,7 +335,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     try {
       await Promise.all(
         toPackOrders.map(order =>
-          OrdersService.updateFulfillmentStage(order.id, 'to-arrangement')
+          OrdersService.updateFulfillmentStage(order.id, 'to-arrangement', handler ?? undefined)
         )
       );
 
@@ -618,7 +644,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   const handleMoveToHandOver = async (order: Order) => {
     try {
       // Move order to shipping tab (status: processing/shipping)
-      await OrdersService.updateOrderStatus(order.id, 'processing');
+      await OrdersService.updateOrderStatus(order.id, 'processing', handler ?? undefined);
       
       // Navigate to Shipping tab after successful handover
       setActiveSubTab('shipping');
@@ -656,7 +682,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     try {
       // Process all selected orders
       const promises = Array.from(selectedOrderIds).map(orderId =>
-        OrdersService.updateOrderStatus(orderId, 'processing')
+        OrdersService.updateOrderStatus(orderId, 'processing', handler ?? undefined)
       );
       
       await Promise.all(promises);
@@ -764,7 +790,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
           
           if (jrsResponse.success) {
             // Move order to To Hand Over stage
-            await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over');
+            await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over', handler ?? undefined);
             successCount++;
           } else {
             failCount++;
@@ -796,7 +822,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   // Handle moving order back to pack (from arrangement)
   const handleMoveToPack = async (order: Order) => {
     try {
-      await OrdersService.moveOrderToPreviousStage(order.id, 'to-arrangement', 'to-pack');
+      await OrdersService.moveOrderToPreviousStage(order.id, 'to-arrangement', 'to-pack', handler ?? undefined);
       onRefresh?.();
     } catch (error) {
       console.error('Failed to move order back to pack:', error);
@@ -808,7 +834,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   const handleMoveToToShip = async (order: Order) => {
     try {
       // Update order status to 'to_ship' and set fulfillmentStage to 'to-pack'
-      await OrdersService.updateOrderStatus(order.id, 'to_ship');
+      await OrdersService.updateOrderStatus(order.id, 'to_ship', handler ?? undefined);
       
       // The updateOrderStatus function now handles adding the to-pack fulfillment stage
       onRefresh?.();
@@ -930,7 +956,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       }
       
       // Move order to To Hand Over stage after creating JRS shipping
-      await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over');
+      await OrdersService.updateFulfillmentStage(order.id, 'to-hand-over', handler ?? undefined);
       
       // Switch to To Hand Over tab
       setToShipSubTab('to-hand-over');
@@ -1017,7 +1043,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   // Handle confirming handover -> move to Shipping (processing) - deprecated, use handleMoveToShipping instead
   const handleConfirmHandover = async (order: Order) => {
     try {
-      await OrdersService.updateOrderStatus(order.id, 'processing');
+      await OrdersService.updateOrderStatus(order.id, 'processing', handler ?? undefined);
       // After confirming handover, navigate to Shipping tab
       setActiveSubTab('shipping');
       setPage(1);

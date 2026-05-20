@@ -35,6 +35,7 @@ const CategoryManager: React.FC = () => {
   const [subName, setSubName] = useState('');
   const [subImageFile, setSubImageFile] = useState<File | null>(null);
   const [subImagePreview, setSubImagePreview] = useState<string>('');
+  const [subIsEquipment, setSubIsEquipment] = useState(false);
   const subFileInputRef = useRef<HTMLInputElement>(null);
 
   // Loading states
@@ -176,12 +177,13 @@ const CategoryManager: React.FC = () => {
     }
   };
 
-  const openAddSub = () => { setSubName(''); setSubImageFile(null); setSubImagePreview(''); setAddSubOpen(true); };
-  const openEditSub = (s: Subcategory) => { 
-    setSubName(s.name); 
+  const openAddSub = () => { setSubName(''); setSubImageFile(null); setSubImagePreview(''); setSubIsEquipment(false); setAddSubOpen(true); };
+  const openEditSub = (s: Subcategory) => {
+    setSubName(s.name);
     setSubImageFile(null);
     setSubImagePreview(s.imageURL || '');
-    setEditSubOpen(s); 
+    setSubIsEquipment(!!s.isEquipment);
+    setEditSubOpen(s);
   };
   const openDeleteSub = (s: Subcategory) => { setDeleteSubOpen(s); };
 
@@ -219,7 +221,7 @@ const CategoryManager: React.FC = () => {
         const tempId = Date.now().toString();
         imageURL = await CategoryService.uploadSubcategoryImage(compressed, selectedId, tempId);
       }
-      await CategoryService.addSubcategory(selectedId, name, imageURL);
+      await CategoryService.addSubcategory(selectedId, name, imageURL, subIsEquipment);
       setAddSubOpen(false);
       toast({ title: 'Subcategory added', description: `${name} created.` });
     } catch (e: any) {
@@ -248,7 +250,7 @@ const CategoryManager: React.FC = () => {
         });
         imageURL = await CategoryService.uploadSubcategoryImage(compressed, selectedId, s.id);
       }
-      await CategoryService.updateSubcategory(selectedId, s.id, name, imageURL);
+      await CategoryService.updateSubcategory(selectedId, s.id, name, imageURL, subIsEquipment);
       setEditSubOpen(null);
       toast({ title: 'Subcategory updated', description: `${name} saved.` });
     } catch (e: any) {
@@ -551,6 +553,20 @@ const CategoryManager: React.FC = () => {
                 </Button>
               )}
             </div>
+            <div className="pt-1">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={subIsEquipment}
+                  onChange={(e) => setSubIsEquipment(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-gray-900">Is this an Equipment?</span>
+                  <span className="block text-xs text-gray-500">Items in this subcategory will be treated as equipment (inquiry-only, no fixed price).</span>
+                </span>
+              </label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=> setAddSubOpen(false)} disabled={addSubLoading}>Cancel</Button>
@@ -604,6 +620,20 @@ const CategoryManager: React.FC = () => {
                   Upload Icon
                 </Button>
               )}
+            </div>
+            <div className="pt-1">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={subIsEquipment}
+                  onChange={(e) => setSubIsEquipment(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-gray-900">Is this an Equipment?</span>
+                  <span className="block text-xs text-gray-500">Items in this subcategory will be treated as equipment (inquiry-only, no fixed price).</span>
+                </span>
+              </label>
             </div>
           </div>
           <DialogFooter>

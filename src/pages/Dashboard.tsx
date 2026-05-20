@@ -15,6 +15,7 @@ import Sidebar from "@/components/dashboard/Sidebar";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import RevenueChart from "@/components/dashboard/RevenueChart";
 import { OrderSummaryModal } from "@/components/dashboard/admin/OrderSummaryModal";
+import { DailyTransactionsModal } from "@/components/dashboard/seller/DailyTransactionsModal";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import Booking from "@/pages/Booking";
 import ConfirmationTab from "@/components/confirmation/ConfirmationTab";
@@ -35,7 +36,7 @@ import BulkAddItems from '@/components/items/BulkAddItems';
 import ItemsView from '@/components/items/ItemsView';
 import { Order } from "@/types/order";
 import { useCategoryResolution } from '@/hooks/dashboard/useCategoryResolution';
-import { DollarSign, Users, ShoppingCart, TrendingUp, Filter, Download, ChevronDown, ChevronRight, ClipboardList, CreditCard } from "lucide-react";
+import { DollarSign, Users, ShoppingCart, TrendingUp, Filter, Download, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, CreditCard } from "lucide-react";
 // Add permission-aware auth hook
 import { useAuth } from "@/hooks/use-auth";
 import SellerProfileTab from '@/components/profile/SellerProfileTab';
@@ -79,6 +80,9 @@ const getAddressApi = async () => {
 
 const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [activeItem, setActiveItem] = useState("dashboard");
+  const [selectedSummaryDay, setSelectedSummaryDay] = useState<{ date: string; orders: Order[] } | null>(null);
+  const [receiptsPage, setReceiptsPage] = useState(1);
+  const RECEIPTS_PAGE_SIZE = 10;
   const { hasPermission, loading: authLoading, role, permissions } = useAuth();
   const { isAdmin } = useAuth();
   const { uid, isSubAccount, parentId } = useAuth();
@@ -349,6 +353,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   }, [confirmationOrders, sellerFilters]);
 
   const paidOrders = useMemo(() => filteredOrders.filter(o => isPaidStatus(o.status)), [filteredOrders]);
+  useEffect(() => { setReceiptsPage(1); }, [paidOrders.length]);
 
   // Resolve real category names via productId → Product.categoryID → Category.name
   const { productCategoryMap, categoryNameMap } = useCategoryResolution(filteredOrders);
@@ -1331,6 +1336,15 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               });
                             };
 
+                            const sellerFees = (o: typeof paidOrders[number]): Record<string, unknown> | undefined => {
+                              const raw = (o as unknown as { sellerFeeBreakdowns?: unknown }).sellerFeeBreakdowns;
+                              if (Array.isArray(raw)) return raw[0] as Record<string, unknown> | undefined;
+                              if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
+                              return undefined;
+                            };
+                            const resolvePlatformFee = (o: typeof paidOrders[number]) =>
+                              Number(sellerFees(o)?.platformFee) || Number(o.feesBreakdown?.platformFee) || 0;
+
                             paidOrders.forEach(order => {
                               const orderDate = order.createdAt ? new Date(order.createdAt) : new Date();
                               const dateKey = formatDateKey(orderDate);
@@ -1364,7 +1378,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 const refunds = 0; // Currently no refunds tracked
                                 const paymentFee = Number(feesData.paymentProcessingFee || 0);
                                 const shippingFee = Number(summary.sellerShippingCharge || 0);
-                                const platformFee = Number(feesData.platformFee || 0);
+                                const platformFee = resolvePlatformFee(o);
                                 // Calculate Net Payout: Gross - Refunds - Payment Fee - Shipping Fee - Platform Fee
                                 const netPayout = gross - refunds - paymentFee - shippingFee - platformFee;
                                 
@@ -1391,9 +1405,14 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               grandTotalNetPayout += dayMetrics.totalNetPayout;
 
                               return (
-                                <tr key={dateKey} className="border-t hover:bg-gray-50">
+                                <tr
+                                  key={dateKey}
+                                  className="border-t hover:bg-blue-50 cursor-pointer transition-colors"
+                                  onClick={() => setSelectedSummaryDay({ date: dateKey, orders: dayOrders })}
+                                  title="Click to view all transactions for this date"
+                                >
                                   <td className="px-6 py-4 text-gray-700 font-medium text-xs">
-                                    {dateKey}
+                                    <span className="text-blue-600 hover:underline">{dateKey}</span>
                                   </td>
                                   <td className="px-6 py-4 text-gray-900 text-right font-medium">
                                     {currency.format(dayMetrics.totalGross)}
@@ -1469,6 +1488,14 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                       </div>
                     </div>
                   </div>
+
+                  {selectedSummaryDay && (
+                    <DailyTransactionsModal
+                      dateLabel={selectedSummaryDay.date}
+                      orders={selectedSummaryDay.orders}
+                      onClose={() => setSelectedSummaryDay(null)}
+                    />
+                  )}
                 </>
               )}
 
@@ -2645,7 +2672,12 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               return dateB - dateA;
                             });
 
-                            return sortedOrders.map((order, idx) => {
+                            const pagedOrders = sortedOrders.slice(
+                              (receiptsPage - 1) * RECEIPTS_PAGE_SIZE,
+                              receiptsPage * RECEIPTS_PAGE_SIZE,
+                            );
+
+                            return pagedOrders.map((order, idx) => {
                               const createdAt = order.createdAt || order.timestamp || '';
                               const date = createdAt ? new Date(createdAt).toLocaleDateString('en-US', { 
                                 year: 'numeric', 
@@ -2738,7 +2770,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                       </table>
                     </div>
                     <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-t border-gray-200">
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-sm flex-wrap gap-3">
                         <div className="flex items-center gap-3 text-gray-600">
                           <span className="inline-flex items-center gap-1.5">
                             <span className="w-2.5 h-2.5 bg-teal-500 rounded-full shadow-sm"></span>
@@ -2754,9 +2786,47 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                             </span>
                           </span>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          Last updated: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                        {(() => {
+                          const totalPages = Math.max(1, Math.ceil(paidOrders.length / RECEIPTS_PAGE_SIZE));
+                          const start = paidOrders.length === 0 ? 0 : (receiptsPage - 1) * RECEIPTS_PAGE_SIZE + 1;
+                          const end = Math.min(receiptsPage * RECEIPTS_PAGE_SIZE, paidOrders.length);
+                          return (
+                            <div className="flex items-center gap-3">
+                              <div className="text-xs text-gray-500">
+                                {paidOrders.length === 0
+                                  ? 'Showing 0 receipts'
+                                  : `Showing ${start}–${end} of ${paidOrders.length}`}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => setReceiptsPage(p => Math.max(1, p - 1))}
+                                  disabled={receiptsPage <= 1}
+                                  className="p-1.5 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                  aria-label="Previous page"
+                                >
+                                  <ChevronLeft className="w-4 h-4 text-gray-600" />
+                                </button>
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
+                                  <button
+                                    key={n}
+                                    onClick={() => setReceiptsPage(n)}
+                                    className={`w-7 h-7 text-xs rounded border ${n === receiptsPage ? 'bg-teal-600 text-white border-teal-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                                  >
+                                    {n}
+                                  </button>
+                                ))}
+                                <button
+                                  onClick={() => setReceiptsPage(p => Math.min(totalPages, p + 1))}
+                                  disabled={receiptsPage >= totalPages}
+                                  className="p-1.5 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                  aria-label="Next page"
+                                >
+                                  <ChevronRight className="w-4 h-4 text-gray-600" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2873,7 +2943,6 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                                 </div>
                                 <div>
                                   <div className="font-semibold text-gray-900">{selectedReceipt.customer?.name || 'Unknown Customer'}</div>
-                                  <div className="text-xs text-gray-500">ID: {selectedReceipt.userId || 'N/A'}</div>
                                 </div>
                               </div>
                             </div>
@@ -2961,61 +3030,61 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                           </div>
 
                           {/* Price Breakdown */}
-                          <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                            <h4 className="text-sm font-bold text-gray-900 mb-3">Price Breakdown</h4>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-gray-600">Subtotal</span>
-                              <span className="font-semibold text-gray-900">
-                                {currency.format(Number(selectedReceipt.summary?.subtotal) || 0)}
-                              </span>
-                            </div>
-                            {/* Shipping Fee from Order.summary.buyerShippingCharge */}
-                            {selectedReceipt.summary?.buyerShippingCharge && Number(selectedReceipt.summary.buyerShippingCharge) > 0 && (
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-gray-600">Shipping Fee</span>
-                                <span className="font-semibold text-gray-900">
-                                  {currency.format(Number(selectedReceipt.summary.buyerShippingCharge))}
-                                </span>
-                              </div>
-                            )}
-                            {/* Payment Fee from Order.feesBreakdown.paymentProcessingFee */}
-                            {selectedReceipt.feesBreakdown?.paymentProcessingFee && Number(selectedReceipt.feesBreakdown.paymentProcessingFee) > 0 && (
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-gray-600">Payment Fee</span>
-                                <span className="font-semibold text-gray-900">
-                                  {currency.format(Number(selectedReceipt.feesBreakdown.paymentProcessingFee))}
-                                </span>
-                              </div>
-                            )}
-                            {/* Platform Fee from Order.feesBreakdown.platformFee */}
-                            {selectedReceipt.feesBreakdown?.platformFee && Number(selectedReceipt.feesBreakdown.platformFee) > 0 && (
-                              <>
+                          {(() => {
+                            const sfRaw = (selectedReceipt as unknown as { sellerFeeBreakdowns?: unknown }).sellerFeeBreakdowns;
+                            const sellerFees: Record<string, unknown> | undefined = (() => {
+                              if (!sfRaw) return undefined;
+                              if (Array.isArray(sfRaw)) return sfRaw[0] as Record<string, unknown> | undefined;
+                              if (typeof sfRaw === 'object') {
+                                const obj = sfRaw as Record<string, unknown>;
+                                if (obj['0'] && typeof obj['0'] === 'object') return obj['0'] as Record<string, unknown>;
+                                if ('platformFee' in obj || 'shippingVat' in obj || 'shippingCost' in obj) return obj;
+                              }
+                              return undefined;
+                            })();
+                            const subtotal     = Number(selectedReceipt.summary?.subtotal) || 0;
+                            const shippingFee  = Number(sellerFees?.shippingCost) || Number(selectedReceipt.summary?.buyerShippingCharge) || Number(selectedReceipt.summary?.sellerShippingCharge) || 0;
+                            const shippingVat  = Number(sellerFees?.shippingVat) || 0;
+                            const paymentFee   = Number(selectedReceipt.feesBreakdown?.paymentProcessingFee) || 0;
+                            const platformFee  = Number(sellerFees?.platformFee) || Number(selectedReceipt.feesBreakdown?.platformFee) || 0;
+                            const platformVat  = platformFee * 0.12;
+                            const total        = subtotal + shippingFee;
+                            return (
+                              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                                <h4 className="text-sm font-bold text-gray-900 mb-3">Price Breakdown</h4>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-gray-600">Subtotal</span>
+                                  <span className="font-semibold text-gray-900">{currency.format(subtotal)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-gray-600">Shipping Fee</span>
+                                  <span className="font-semibold text-amber-700">{currency.format(shippingFee)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-gray-600">Shipping VAT</span>
+                                  <span className="font-semibold text-amber-700">{currency.format(shippingVat)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-gray-600">Payment Fee</span>
+                                  <span className="font-semibold text-red-600">{currency.format(paymentFee)}</span>
+                                </div>
                                 <div className="flex items-center justify-between text-sm">
                                   <span className="text-gray-600">Platform Fee</span>
-                                  <span className="font-semibold text-gray-900">
-                                    {currency.format(Number(selectedReceipt.feesBreakdown.platformFee))}
-                                  </span>
+                                  <span className="font-semibold text-red-600">{currency.format(platformFee)}</span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                   <span className="text-gray-600">Platform VAT (12% inclusive)</span>
-                                  <span className="font-semibold text-red-600">
-                                    {currency.format(Number(selectedReceipt.feesBreakdown.platformFee) * 0.12)}
-                                  </span>
+                                  <span className="font-semibold text-red-600">{currency.format(platformVat)}</span>
                                 </div>
-                              </>
-                            )}
-                            <div className="border-t border-gray-300 pt-2 mt-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-base font-bold text-gray-900">Total</span>
-                                <span className="text-xl font-bold text-teal-600">
-                                  {currency.format(
-                                    (Number(selectedReceipt.summary?.subtotal) || 0) +
-                                    (Number(selectedReceipt.summary?.buyerShippingCharge) || 0)
-                                  )}
-                                </span>
+                                <div className="border-t border-gray-300 pt-2 mt-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-base font-bold text-gray-900">Total</span>
+                                    <span className="text-xl font-bold text-teal-600">{currency.format(total)}</span>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
+                            );
+                          })()}
 
                           {/* Action Buttons */}
                           <div className="flex gap-3 pt-2">

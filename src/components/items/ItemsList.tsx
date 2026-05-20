@@ -37,8 +37,6 @@ type ThumbnailSlot = { file: File | null; preview: string | null; url: string };
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
-const CATEGORY_OPTIONS = ['Consumables', 'Dental Equipment', 'Disposables', 'Equipment'] as const;
-
 interface InventoryItem {
   id: string;
   name: string;
@@ -94,7 +92,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
   // Filter states
   const [filterName, setFilterName] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
-  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'updatedAt'>('name');
+  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'price_asc' | 'price_desc' | 'updatedAt'>('name');
   const [catalogTab, setCatalogTab] = useState<'all' | 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'archive'>('all');
 
   // Pagination
@@ -146,7 +144,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       isDeleted?: boolean;
     }>;
   } | null>(null);
-  const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string; isEquipment?: boolean }>>([]);
   const editImageInputRef = useRef<HTMLInputElement | null>(null);
   const editBrandImageInputRef = useRef<HTMLInputElement | null>(null);
   const variationImageInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
@@ -351,6 +349,16 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       .sort((a, b) => {
         if (sortBy === 'stock') {
           const diff = (Number(b.inStock || 0) - Number(a.inStock || 0));
+          if (diff !== 0) return diff;
+          return (a.name || '').localeCompare(b.name || '');
+        }
+        if (sortBy === 'price_asc') {
+          const diff = Number(a.price || 0) - Number(b.price || 0);
+          if (diff !== 0) return diff;
+          return (a.name || '').localeCompare(b.name || '');
+        }
+        if (sortBy === 'price_desc') {
+          const diff = Number(b.price || 0) - Number(a.price || 0);
           if (diff !== 0) return diff;
           return (a.name || '').localeCompare(b.name || '');
         }
@@ -563,7 +571,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       warrantyPolicy: product.warrantyPolicy || '',
       promoStart: product.promoStart || null,
       promoEnd: product.promoEnd || null,
-      allowInquiry: categoryMap[product.category || ''] === 'Equipments',
+      allowInquiry: !!product.allowInquiry || categoryMap[product.category || ''] === 'Equipments',
       insuranceAndEvaluation: !!product.insuranceAndEvaluation,
       variations: variations,
     });
@@ -579,7 +587,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
             const name = String(
               data?.subCategoryName || data?.subcategoryName || data?.name || data?.title || data?.displayName || data?.label || d.id
             ).trim();
-            return { id: d.id, name };
+            return { id: d.id, name, isEquipment: !!data?.isEquipment };
           })
           .filter(r => !!r.name)
           .sort((a, b) => a.name.localeCompare(b.name));
@@ -654,7 +662,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         warrantyType: editForm.warrantyType || null,
         warrantyDuration: editForm.warrantyDuration || null,
         warrantyPolicy: editForm.warrantyPolicy || '',
-        allowInquiry: categoryMap[editForm.categoryID] === 'Equipments',
+        allowInquiry: editForm.allowInquiry,
         insuranceAndEvaluation: editForm.insuranceAndEvaluation,
       } as any);
 
@@ -858,23 +866,28 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
-          className="w-48 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+          className="w-56 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
         >
           <option value="">All categories</option>
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c} value={c}>{c}</option>
+          {categoriesList.map((c) => (
+            <option key={c.id} value={c.name}>{c.name}</option>
           ))}
         </select>
-   
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
-          className="w-48 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-        >
-          <option value="name">Sort by: Name</option>
-          <option value="stock">Sort by: Stock (desc)</option>
-          <option value="updatedAt">Sort by: Updated</option>
-        </select>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 font-medium">Sort by:</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="w-52 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+          >
+            <option value="name">Name (A–Z)</option>
+            <option value="price_asc">Price (low → high)</option>
+            <option value="price_desc">Price (high → low)</option>
+            <option value="stock">Stock (high → low)</option>
+            <option value="updatedAt">Recently updated</option>
+          </select>
+        </div>
 
       </div>
 
@@ -1105,7 +1118,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
       </div>
 
       {/* Edit Product Modal */}
-      {showEditModal && editForm && (
+      {showEditModal && editForm && (() => {
+        const editIsEquipment =
+          categoryMap[editForm.categoryID] === 'Equipments' ||
+          !!subcategoryOptions.find(s => s.id === editForm.subCategoryID)?.isEquipment;
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => !submitting && setShowEditModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1167,7 +1184,7 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                   Basic Information
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {categoryMap[editForm.categoryID] === 'Equipments' && (
+                  {editIsEquipment && (
                     <div className="md:col-span-2 flex items-center justify-between">
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
                         <input
@@ -1279,7 +1296,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                     <select
                       value={editForm.categoryID}
                       onChange={(e) => {
-                        setEditForm({...editForm, categoryID: e.target.value, subCategoryID: ''});
+                        const isEquip = categoryMap[e.target.value] === 'Equipments';
+                        setEditForm({...editForm, categoryID: e.target.value, subCategoryID: '', allowInquiry: isEquip});
                         // Clean up previous listener
                         if (currentSubcategoryUnsubscribeRef.current) {
                           currentSubcategoryUnsubscribeRef.current();
@@ -1305,7 +1323,11 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Subcategory</label>
                     <select
                       value={editForm.subCategoryID}
-                      onChange={(e) => setEditForm({...editForm, subCategoryID: e.target.value})}
+                      onChange={(e) => {
+                        const sub = subcategoryOptions.find(s => s.id === e.target.value);
+                        const isEquip = categoryMap[editForm.categoryID] === 'Equipments' || !!sub?.isEquipment;
+                        setEditForm({...editForm, subCategoryID: e.target.value, allowInquiry: isEquip});
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                       disabled={!editForm.categoryID}
                     >
@@ -1480,25 +1502,26 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
                               />
                             </div>
 
-                            {/* Price */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
-                              <input
-                                type="text"
-                                value={variation.price}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  // Allow empty or valid number
-                                  if (value === '' || !isNaN(Number(value))) {
-                                    const updatedVariations = [...editForm.variations];
-                                    updatedVariations[index] = { ...variation, price: value };
-                                    setEditForm({ ...editForm, variations: updatedVariations });
-                                  }
-                                }}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="0.00"
-                              />
-                            </div>
+                            {/* Price — hidden when subcategory/category is equipment */}
+                            {!editIsEquipment && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Price (₱) *</label>
+                                <input
+                                  type="text"
+                                  value={variation.price}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    if (value === '' || !isNaN(Number(value))) {
+                                      const updatedVariations = [...editForm.variations];
+                                      updatedVariations[index] = { ...variation, price: value };
+                                      setEditForm({ ...editForm, variations: updatedVariations });
+                                    }
+                                  }}
+                                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            )}
 
                             {/* Pcs per Box */}
                             <div>
@@ -1781,7 +1804,8 @@ const ItemsList: React.FC<ItemsListProps> = ({ onAddItemClick }) => {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Status Dialog for Archive/Violation/Pending QC */}
       <Dialog open={statusDialog.open} onOpenChange={(open) => !open && setStatusDialog({ open: false, productName: '', status: null, productId: '' })}>

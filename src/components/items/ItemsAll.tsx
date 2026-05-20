@@ -11,8 +11,6 @@ import { ProductService } from '@/services/product';
 import CategoryService from '@/services/category';
 import { Package, Download } from 'lucide-react';
 
-const CATEGORY_OPTIONS = ['Consumables', 'Dental Equipment', 'Disposables', 'Equipment'] as const;
-
 interface InventoryItem {
   id: string;
   name: string;
@@ -44,7 +42,13 @@ const ItemsAll: React.FC = () => {
   // Filter states
   const [filterName, setFilterName] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
-  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'updatedAt'>('name');
+  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'price_asc' | 'price_desc' | 'updatedAt'>('name');
+
+  const categoriesList = useMemo(() => {
+    return Object.entries(categoryMap)
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [categoryMap]);
   const [catalogTab, setCatalogTab] = useState<'all' | 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted'>('all');
 
   // Pagination
@@ -167,6 +171,16 @@ const ItemsAll: React.FC = () => {
           if (diff !== 0) return diff;
           return (a.name || '').localeCompare(b.name || '');
         }
+        if (sortBy === 'price_asc') {
+          const diff = Number(a.price || 0) - Number(b.price || 0);
+          if (diff !== 0) return diff;
+          return (a.name || '').localeCompare(b.name || '');
+        }
+        if (sortBy === 'price_desc') {
+          const diff = Number(b.price || 0) - Number(a.price || 0);
+          if (diff !== 0) return diff;
+          return (a.name || '').localeCompare(b.name || '');
+        }
         if (sortBy === 'updatedAt') {
           const diff = (Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
           if (diff !== 0) return diff;
@@ -237,22 +251,27 @@ const ItemsAll: React.FC = () => {
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className="w-48 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+            className="w-56 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
           >
             <option value="">All categories</option>
-            {CATEGORY_OPTIONS.map((c) => (
-              <option key={c} value={c}>{c}</option>
+            {categoriesList.map((c) => (
+              <option key={c.id} value={c.name}>{c.name}</option>
             ))}
           </select>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="w-48 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-          >
-            <option value="name">Sort by: Name</option>
-            <option value="stock">Sort by: Stock (desc)</option>
-            <option value="updatedAt">Sort by: Updated</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 font-medium">Sort by:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="w-52 max-w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+            >
+              <option value="name">Name (A–Z)</option>
+              <option value="price_asc">Price (low → high)</option>
+              <option value="price_desc">Price (high → low)</option>
+              <option value="stock">Stock (high → low)</option>
+              <option value="updatedAt">Recently updated</option>
+            </select>
+          </div>
         </div>
         <button
           onClick={handleExport}

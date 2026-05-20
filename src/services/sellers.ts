@@ -77,6 +77,11 @@ const SellersService = {
     // Merge vendor fields to avoid wiping unrelated data
     await setDoc(refDoc, { vendor: payload } as any, { merge: true });
   },
+  // Save top-level seller fields (merged at the root of Seller/<id>, not under vendor)
+  async saveSellerFields(sellerId: string, payload: Record<string, any>): Promise<void> {
+    const refDoc = doc(db, SELLER_COL, sellerId);
+    await setDoc(refDoc, payload as any, { merge: true });
+  },
   // Create a sub-account invite under Seller/<sellerId>/members with masked permissions
   async createSubAccountInvite(parentSellerId: string, name: string, email: string, permissions: Record<string, boolean>, createdBy?: string) {
     const membersCol = collection(db, SELLER_COL, parentSellerId, 'members');

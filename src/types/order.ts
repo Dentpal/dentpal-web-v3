@@ -65,7 +65,14 @@ export interface Order {
     status: string;
     note: string;
     timestamp: Timestamp | Date;
-    handledBy?: string; // Employee/seller UID who handled the status change
+    // Actor who performed this transition.
+    // Legacy entries may have a plain uid string; new entries are an object
+    // self-describing the role (main seller vs sub-account).
+    handledBy?: string | {
+      id: string;
+      role: 'main' | 'sub';
+      parentId?: string; // owning seller uid (only when role === 'sub')
+    };
   }>;
   // Return request information
   returnRequestId?: string;

@@ -3,7 +3,7 @@ import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, serverTimestam
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 export type Category = { id: string; name: string; imageURL?: string };
-export type Subcategory = { id: string; name: string; imageURL?: string };
+export type Subcategory = { id: string; name: string; imageURL?: string; isEquipment?: boolean };
 
 const normalizeName = (raw: any, fallBackId: string) => {
   return String(
@@ -65,10 +65,11 @@ export const CategoryService = {
           const name = String(
             data?.subCategoryName || data?.subcategoryName || data?.name || data?.title || data?.displayName || data?.label || d.id
           ).trim();
-          return { 
-            id: d.id, 
+          return {
+            id: d.id,
             name,
-            imageURL: data?.imageURL || data?.image || undefined
+            imageURL: data?.imageURL || data?.image || undefined,
+            isEquipment: !!data?.isEquipment,
           } as Subcategory;
         })
         .filter(r => !!r.name)
@@ -117,19 +118,20 @@ export const CategoryService = {
     await deleteDoc(doc(db, 'Category', id));
   },
 
-  addSubcategory: async (categoryId: string, name: string, imageURL?: string) => {
+  addSubcategory: async (categoryId: string, name: string, imageURL?: string, isEquipment?: boolean) => {
     const v = name.trim();
     if (!v) throw new Error('Name is required');
-    const data: any = { name: v, subCategoryName: v, createdAt: serverTimestamp() };
+    const data: any = { name: v, subCategoryName: v, isEquipment: !!isEquipment, createdAt: serverTimestamp() };
     if (imageURL) data.imageURL = imageURL;
     await addDoc(collection(db, 'Category', categoryId, 'subCategory'), data);
   },
 
-  updateSubcategory: async (categoryId: string, subId: string, name: string, imageURL?: string) => {
+  updateSubcategory: async (categoryId: string, subId: string, name: string, imageURL?: string, isEquipment?: boolean) => {
     const v = name.trim();
     if (!v) throw new Error('Name is required');
     const data: any = { name: v, subCategoryName: v, updatedAt: serverTimestamp() };
     if (imageURL !== undefined) data.imageURL = imageURL;
+    if (isEquipment !== undefined) data.isEquipment = !!isEquipment;
     await updateDoc(doc(db, 'Category', categoryId, 'subCategory', subId), data);
   },
 

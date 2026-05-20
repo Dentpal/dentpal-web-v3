@@ -118,7 +118,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const [submitting, setSubmitting] = useState(false);
   const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>([]);
-  const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string; isEquipment?: boolean }>>([]);
 
   const { uid, isSeller, isSubAccount, parentId } = useAuth();
   const { toast } = useToast();
@@ -130,7 +130,9 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   // Form state
   const [form, setForm] = useState(getInitialFormState());
 
-  const isEquipmentCategory = categoriesList.find(c => c.id === form.categoryID)?.name === 'Equipments';
+  const selectedCategory = categoriesList.find(c => c.id === form.categoryID);
+  const selectedSubcategory = subcategoryOptions.find(s => s.id === form.subCategoryID);
+  const isEquipmentCategory = selectedCategory?.name === 'Equipments' || !!selectedSubcategory?.isEquipment;
 
   // Load categories
   useEffect(() => {
@@ -286,7 +288,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         warrantyType: form.warrantyType || null,
         warrantyDuration: form.warrantyDuration || null,
         warrantyPolicy: form.warrantyPolicy || null,
-        allowInquiry: form.allowInquiry,
+        allowInquiry: isEquipmentCategory,
         insuranceAndEvaluation: form.insuranceAndEvaluation,
       };
 
@@ -408,7 +410,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         warrantyType: form.warrantyType || null,
         warrantyDuration: form.warrantyDuration || null,
         warrantyPolicy: form.warrantyPolicy || null,
-        allowInquiry: form.allowInquiry,
+        allowInquiry: isEquipmentCategory,
         insuranceAndEvaluation: form.insuranceAndEvaluation,
       };
 
@@ -638,7 +640,11 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Subcategory <span className="text-red-500">*</span></label>
                 <select
                   value={form.subCategoryID}
-                  onChange={(e) => setForm({...form, subCategoryID: e.target.value})}
+                  onChange={(e) => {
+                    const sub = subcategoryOptions.find(s => s.id === e.target.value);
+                    const isEquip = (selectedCategory?.name === 'Equipments') || !!sub?.isEquipment;
+                    setForm({ ...form, subCategoryID: e.target.value, allowInquiry: isEquip });
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   disabled={!form.categoryID}
                 >

@@ -7,6 +7,13 @@ const ORDER_COLLECTION = 'Order';
 // Also support lowercase/plural collection naming used elsewhere in the app
 const ORDER_COLLECTIONS = ['Order', 'orders'] as const;
 
+// Actor who performed a status / fulfillment-stage transition.
+export type OrderHandler = {
+  id: string;
+  role: 'main' | 'sub';
+  parentId?: string; // owning seller uid; set only when role === 'sub'
+};
+
 const storage = getStorage();
 
 // Known Category ID -> Name (keep in sync with Inventory)
@@ -469,7 +476,11 @@ const OrdersService = {
     return () => { unsubs.forEach(u => { try { u(); } catch {} }); };
   },
   // Update order fulfillment stage with statusHistory
-  updateFulfillmentStage: async (orderId: string, stage: 'to-pack' | 'to-arrangement' | 'to-hand-over'): Promise<void> => {
+  updateFulfillmentStage: async (
+    orderId: string,
+    stage: 'to-pack' | 'to-arrangement' | 'to-hand-over',
+    handledBy?: OrderHandler,
+  ): Promise<void> => {
     try {
       // Try both collection names
       for (const coll of ORDER_COLLECTIONS) {
@@ -489,10 +500,11 @@ const OrdersService = {
           const newHistoryEntry = {
             status: stage,
             note: statusNotes[stage],
-            timestamp: new Date()
+            timestamp: new Date(),
+            ...(handledBy ? { handledBy } : {}),
           };
 
-          await updateDoc(docRef, { 
+          await updateDoc(docRef, {
             fulfillmentStage: stage,
             statusHistory: [...currentHistory, newHistoryEntry]
           });
@@ -508,7 +520,8 @@ const OrdersService = {
   // Update high-level order status with statusHistory (e.g., move to Shipping)
   updateOrderStatus: async (
     orderId: string,
-    status: 'pending' | 'confirmed' | 'to_ship' | 'processing' | 'shipping' | 'completed' | 'cancelled' | 'returned' | 'refunded' | 'return_refund' | 'failed-delivery'
+    status: 'pending' | 'confirmed' | 'to_ship' | 'processing' | 'shipping' | 'completed' | 'cancelled' | 'returned' | 'refunded' | 'return_refund' | 'failed-delivery',
+    handledBy?: OrderHandler,
   ): Promise<void> => {
     try {
       for (const coll of ORDER_COLLECTIONS) {
@@ -536,10 +549,11 @@ const OrdersService = {
           const newHistoryEntry = {
             status: status,
             note: statusNotes[status],
-            timestamp: new Date()
+            timestamp: new Date(),
+            ...(handledBy ? { handledBy } : {}),
           };
 
-          const updateData: any = { 
+          const updateData: any = {
             status,
             statusHistory: [...currentHistory, newHistoryEntry]
           };
@@ -549,14 +563,15 @@ const OrdersService = {
             // Only set fulfillmentStage if it doesn't already exist
             if (!currentData.fulfillmentStage) {
               updateData.fulfillmentStage = 'to-pack';
-              
+
               // Add to-pack fulfillment stage history entry
               const packHistoryEntry = {
                 status: 'to-pack',
                 note: 'Order is ready to be packed',
-                timestamp: new Date()
+                timestamp: new Date(),
+                ...(handledBy ? { handledBy } : {}),
               };
-              
+
               updateData.statusHistory = [...currentHistory, newHistoryEntry, packHistoryEntry];
             }
           }
@@ -583,7 +598,12 @@ const OrdersService = {
   },
 
   // New: Move order back to previous fulfillment stage with statusHistory
-  moveOrderToPreviousStage: async (orderId: string, fromStage: 'to-arrangement' | 'to-hand-over', toStage: 'to-pack' | 'to-arrangement'): Promise<void> => {
+  moveOrderToPreviousStage: async (
+    orderId: string,
+    fromStage: 'to-arrangement' | 'to-hand-over',
+    toStage: 'to-pack' | 'to-arrangement',
+    handledBy?: OrderHandler,
+  ): Promise<void> => {
     try {
       for (const coll of ORDER_COLLECTIONS) {
         const docRef = doc(db, coll, orderId);
@@ -606,10 +626,11 @@ const OrdersService = {
           const newHistoryEntry = {
             status: toStage,
             note: reverseNotes[toStage],
-            timestamp: new Date()
+            timestamp: new Date(),
+            ...(handledBy ? { handledBy } : {}),
           };
 
-          await updateDoc(docRef, { 
+          await updateDoc(docRef, {
             fulfillmentStage: toStage,
             statusHistory: [...currentHistory, newHistoryEntry]
           });

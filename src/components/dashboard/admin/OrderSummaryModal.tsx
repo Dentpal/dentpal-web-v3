@@ -53,17 +53,20 @@ const sellerFees = (o: Order): Record<string, unknown> | undefined => {
 
 const resolveSubtotal   = (o: Order) => Number(o.summary?.subtotal)  || o.total || 0;
 const resolvePaymentFee = (o: Order) => Number(o.feesBreakdown?.paymentProcessingFee) || 0;
-const resolveShipping   = (o: Order) => Number(o.summary?.sellerShippingCharge) || 0;
+const resolveShipping   = (o: Order) =>
+  Number(sellerFees(o)?.shippingCost) || Number(o.summary?.sellerShippingCharge) || 0;
 const resolveShippingVat = (o: Order) =>
   Number(sellerFees(o)?.shippingVat) || 0;
 const resolvePlatformFee= (o: Order) =>
   Number(sellerFees(o)?.platformFee) || Number(o.feesBreakdown?.platformFee) || 0;
-const resolveNet = (o: Order) => {
-  const sf = sellerFees(o);
-  const wired = sf?.netPayoutToSeller ?? o.payout?.netPayoutToSeller;
-  if (wired != null && wired !== '') return Number(wired) || 0;
-  return resolveSubtotal(o) - resolvePaymentFee(o) - resolveShipping(o) - resolvePlatformFee(o);
-};
+const resolveNet = (o: Order) =>
+  resolveSubtotal(o)
+  - resolveShipping(o)
+  - resolveShippingVat(o)
+  - resolvePaymentFee(o)
+  - resolvePlatformFee(o);
+
+const netClass = (n: number) => (n < 0 ? 'text-red-600' : 'text-green-700');
 
 const formatPaymentMethod = (o: Order) => {
   const raw = (o.feesBreakdown?.paymentMethod || o.paymentType || '').toString().trim();
@@ -153,7 +156,8 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
     const pf  = successful.reduce((s, o) => s + resolvePaymentFee(o), 0);
     const sf  = successful.reduce((s, o) => s + resolveShipping(o), 0);
     const plf = successful.reduce((s, o) => s + resolvePlatformFee(o), 0);
-    return { sub, pf, sf, plf, net: sub - pf - sf - plf, successfulCount: successful.length };
+    const sv  = successful.reduce((s, o) => s + resolveShippingVat(o), 0);
+    return { sub, pf, sf, plf, sv, net: sub - sf - sv - pf - plf, successfulCount: successful.length };
   }, [filtered]);
 
   /* ── exports ── */
@@ -217,9 +221,8 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
     });
 
     // Totals
-    const totalShippingVat = filtered.reduce((s, o) => s + resolveShippingVat(o), 0);
     ws.addRow([]);
-    const tRow = ws.addRow(['', '', '', '', '', 'TOTAL', totals.sub, totals.pf, totals.plf, totalShippingVat, totals.net]);
+    const tRow = ws.addRow(['', '', '', '', '', 'TOTAL', totals.sub, totals.pf, totals.plf, totals.sv, totals.net]);
     tRow.font = { bold: true };
     [7, 8, 9, 10, 11].forEach(ci => { tRow.getCell(ci).numFmt = '#,##0.00'; });
 
@@ -294,7 +297,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
               {[
                 { icon: Package,    label: 'Total Orders',  value: filtered.length.toLocaleString() },
                 { icon: PhilippinePeso, label: 'Gross Revenue', value: formatCurrency(totals.sub) },
-                { icon: PhilippinePeso, label: 'Total Fees',    value: formatCurrency(totals.pf + totals.sf + totals.plf) },
+                { icon: PhilippinePeso, label: 'Shipping',      value: formatCurrency(totals.sf) },
                 { icon: PhilippinePeso, label: 'Net Payout',    value: formatCurrency(totals.net) },
               ].map((c, i) => (
                 <div key={i} className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
@@ -398,7 +401,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePaymentFee(o))}</td>
                         <td className="px-3 py-2.5 text-right text-red-600 whitespace-nowrap align-middle">{formatCurrency(resolvePlatformFee(o))}</td>
                         <td className="px-3 py-2.5 text-right text-amber-700 whitespace-nowrap align-middle">{formatCurrency(resolveShippingVat(o))}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-green-700 whitespace-nowrap align-middle">{formatCurrency(resolveNet(o))}</td>
+                        <td className={`px-3 py-2.5 text-right font-semibold whitespace-nowrap align-middle ${netClass(resolveNet(o))}`}>{formatCurrency(resolveNet(o))}</td>
                       </tr>
 
                       {/* ── Expanded detail row ── */}
@@ -444,11 +447,11 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                                 <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-1.5">
                                   <div className="font-semibold text-gray-700 mb-1">Financials</div>
                                   <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span>{formatCurrency(resolveSubtotal(o))}</span></div>
-                                  <div className="flex justify-between"><span className="text-gray-500">Shipping</span><span>{formatCurrency(resolveShipping(o))}</span></div>
+                                  <div className="flex justify-between"><span className="text-gray-500">Shipping</span><span>{formatCurrency(Number(sellerFees(o)?.shippingCost) || resolveShipping(o))}</span></div>
                                   <div className="flex justify-between text-amber-700"><span>Shipping VAT</span><span>{formatCurrency(resolveShippingVat(o))}</span></div>
                                   <div className="flex justify-between text-red-600"><span>Payment Fee</span><span>-{formatCurrency(resolvePaymentFee(o))}</span></div>
                                   <div className="flex justify-between text-red-600"><span>Platform Fee</span><span>-{formatCurrency(resolvePlatformFee(o))}</span></div>
-                                  <div className="flex justify-between pt-1.5 border-t font-semibold text-green-700"><span>Net Payout</span><span>{formatCurrency(resolveNet(o))}</span></div>
+                                  <div className={`flex justify-between pt-1.5 border-t font-semibold ${netClass(resolveNet(o))}`}><span>Net Payout</span><span>{formatCurrency(resolveNet(o))}</span></div>
                                 </div>
                                 {(() => {
                                   const isCod = formatPaymentMethod(o) === 'COD';
@@ -509,7 +512,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                     <td className="px-3 py-2.5 text-right text-[11px]">{formatCurrency(totals.sub)}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] text-red-600">{formatCurrency(totals.pf)}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] text-red-600">{formatCurrency(totals.plf)}</td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-green-700">{formatCurrency(totals.net)}</td>
+                    <td className={`px-3 py-2.5 text-right text-[11px] ${netClass(totals.net)}`}>{formatCurrency(totals.net)}</td>
                   </tr>
                 </tfoot>
               )}

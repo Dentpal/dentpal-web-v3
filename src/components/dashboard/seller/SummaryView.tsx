@@ -3,17 +3,28 @@
  * Displays financial summary table by date and revenue chart
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Order } from '@/types/order';
 import { formatCurrency, formatDateKey } from '@/utils/dashboard/formatters';
 import RevenueChart from '@/components/dashboard/RevenueChart';
 import { RevenueDataPoint } from '@/types/dashboard';
+import { DailyTransactionsModal } from './DailyTransactionsModal';
 
 interface SummaryViewProps {
   paidOrders: Order[];
   revenueByDate: RevenueDataPoint[];
   dateRangeDisplay: string;
 }
+
+const sellerFees = (o: Order): Record<string, unknown> | undefined => {
+  const raw = (o as unknown as { sellerFeeBreakdowns?: unknown }).sellerFeeBreakdowns;
+  if (Array.isArray(raw)) return raw[0] as Record<string, unknown> | undefined;
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
+  return undefined;
+};
+
+const resolvePlatformFee = (o: Order) =>
+  Number(sellerFees(o)?.platformFee) || Number(o.feesBreakdown?.platformFee) || 0;
 
 export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: SummaryViewProps) => {
   // Group orders by date and calculate metrics
@@ -52,14 +63,16 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
         return sum + (Number(o.summary?.sellerShippingCharge) || 0);
       }, 0);
 
-      const totalPlatformFee = dayOrders.reduce((sum, o) => {
-        return sum + (Number(o.feesBreakdown?.platformFee) || 0);
-      }, 0);
+      const totalPlatformFee = dayOrders.reduce(
+        (sum, o) => sum + resolvePlatformFee(o),
+        0,
+      );
 
       const netPayout = totalGross - totalPaymentFee - totalShippingFee - totalPlatformFee;
 
       return {
         date: dateKey,
+        orders: dayOrders,
         totalGross,
         refunds: 0, // TODO: Implement refunds tracking
         totalPaymentFee,
@@ -69,6 +82,8 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
       };
     });
   }, [paidOrders]);
+
+  const [selectedDay, setSelectedDay] = useState<{ date: string; orders: Order[] } | null>(null);
 
   // Calculate grand totals
   const grandTotals = useMemo(() => {
@@ -142,9 +157,14 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
               ) : (
                 <>
                   {financialByDate.map((day, idx) => (
-                    <tr key={idx} className="border-t hover:bg-gray-50">
+                    <tr
+                      key={idx}
+                      className="border-t hover:bg-blue-50 cursor-pointer transition-colors"
+                      onClick={() => setSelectedDay({ date: day.date, orders: day.orders })}
+                      title="Click to view transactions for this date"
+                    >
                       <td className="px-6 py-4 text-gray-700 font-medium text-xs">
-                        {day.date}
+                        <span className="text-blue-600 hover:underline">{day.date}</span>
                       </td>
                       <td className="px-6 py-4 text-gray-900 text-right font-medium">
                         {formatCurrency(day.totalGross)}
@@ -208,6 +228,14 @@ export const SummaryView = ({ paidOrders, revenueByDate, dateRangeDisplay }: Sum
           </div>
         </div>
       </div>
+
+      {selectedDay && (
+        <DailyTransactionsModal
+          dateLabel={selectedDay.date}
+          orders={selectedDay.orders}
+          onClose={() => setSelectedDay(null)}
+        />
+      )}
     </div>
   );
 };

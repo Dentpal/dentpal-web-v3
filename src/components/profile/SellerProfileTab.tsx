@@ -106,6 +106,28 @@ const SellerProfileTab: React.FC = () => {
 	const [editingBIR, setEditingBIR] = useState(false);
 	const [editingCompany, setEditingCompany] = useState(false);
 	const [editingContact, setEditingContact] = useState(false);
+	const [editingCheckout, setEditingCheckout] = useState(false);
+
+	type CheckoutOptions = {
+		delivery: { standard: boolean; express: boolean; pickup: boolean };
+		payment: { cod: boolean; card: boolean; gcash: boolean };
+	};
+	const EMPTY_CHECKOUT: CheckoutOptions = {
+		delivery: { standard: false, express: false, pickup: false },
+		payment: { cod: false, card: false, gcash: false },
+	};
+	const DELIVERY_OPTIONS = [
+		{ key: 'standard' as const, label: 'Standard' },
+		{ key: 'express' as const, label: 'Express' },
+		{ key: 'pickup' as const, label: 'Pickup' },
+	];
+	const PAYMENT_METHODS = [
+		{ key: 'cod' as const, label: 'COD' },
+		{ key: 'card' as const, label: 'Debit / Credit Card' },
+		{ key: 'gcash' as const, label: 'GCash' },
+	];
+	const [checkoutDraft, setCheckoutDraft] = useState<CheckoutOptions>(EMPTY_CHECKOUT);
+	const [originalCheckout, setOriginalCheckout] = useState<CheckoutOptions>(EMPTY_CHECKOUT);
 
 	// Only keep Vendor Enrollment state
 	// Use the same category set as Inventory/Add Product
@@ -159,7 +181,16 @@ const SellerProfileTab: React.FC = () => {
 				if (!uid) return;
 				const doc = await SellersService.get(uid);
 				if (!mounted) return;
-				
+
+				// Hydrate top-level Checkout Options independently of vendor profile state
+				const topLevelCheckout = (doc as any)?.checkoutOptions || {};
+				const loadedCheckoutTop: CheckoutOptions = {
+					delivery: { ...EMPTY_CHECKOUT.delivery, ...(topLevelCheckout.delivery || {}) },
+					payment: { ...EMPTY_CHECKOUT.payment, ...(topLevelCheckout.payment || {}) },
+				};
+				setCheckoutDraft(loadedCheckoutTop);
+				setOriginalCheckout(loadedCheckoutTop);
+
 				const v: any = (doc as any)?.vendor || null;
 				if (!v || Object.keys(v).length === 0) {
 					// No vendor data exists - enable editing mode for first-time setup
@@ -706,6 +737,123 @@ const SellerProfileTab: React.FC = () => {
 									<Upload className="w-4 h-4" />
 									Upload Cover Image
 								</button>
+							</div>
+						</div>
+					</div>
+
+					{/* Checkout Options */}
+					<div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+						<div className="flex items-center justify-between mb-5">
+							<div className="flex items-center gap-2">
+								<svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+								</svg>
+								<h3 className="text-base font-semibold text-gray-900">Checkout Options</h3>
+							</div>
+							{!editingCheckout ? (
+								<button
+									onClick={() => setEditingCheckout(true)}
+									className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+								>
+									<Pencil className="w-3.5 h-3.5" /> Edit
+								</button>
+							) : (
+								<div className="flex gap-2">
+									<button
+										onClick={() => {
+											setCheckoutDraft(originalCheckout);
+											setEditingCheckout(false);
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+									>
+										<X className="w-3.5 h-3.5" /> Cancel
+									</button>
+									<button
+										disabled={saving}
+										onClick={async () => {
+											if (!uid) return;
+											setSaving(true);
+											try {
+												await SellersService.saveSellerFields(uid, { checkoutOptions: checkoutDraft });
+												setOriginalCheckout(checkoutDraft);
+												setEditingCheckout(false);
+											} catch (error: any) {
+												alert('Failed to save: ' + (error.message || 'Unknown error'));
+											} finally {
+												setSaving(false);
+											}
+										}}
+										className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+									>
+										{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+									</button>
+								</div>
+							)}
+						</div>
+						<div className="grid md:grid-cols-2 gap-6">
+							<div className="bg-white rounded-lg p-5 shadow-sm border border-gray-200">
+								<div className="text-sm font-semibold text-gray-900 mb-3">Delivery Options</div>
+								{editingCheckout ? (
+									<div className="space-y-2">
+										{DELIVERY_OPTIONS.map(opt => (
+											<label key={opt.key} className="flex items-center gap-2 cursor-pointer">
+												<input
+													type="checkbox"
+													checked={checkoutDraft.delivery[opt.key]}
+													onChange={(e) => setCheckoutDraft(d => ({
+														...d,
+														delivery: { ...d.delivery, [opt.key]: e.target.checked },
+													}))}
+													className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+												/>
+												<span className="text-sm text-gray-800">{opt.label}</span>
+											</label>
+										))}
+									</div>
+								) : (
+									<div className="flex flex-wrap gap-1.5">
+										{DELIVERY_OPTIONS.filter(o => originalCheckout.delivery[o.key]).map(o => (
+											<span key={o.key} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+												{o.label}
+											</span>
+										))}
+										{!DELIVERY_OPTIONS.some(o => originalCheckout.delivery[o.key]) && (
+											<span className="text-sm text-gray-400">No delivery options set yet.</span>
+										)}
+									</div>
+								)}
+							</div>
+							<div className="bg-white rounded-lg p-5 shadow-sm border border-gray-200">
+								<div className="text-sm font-semibold text-gray-900 mb-3">Payment Methods</div>
+								{editingCheckout ? (
+									<div className="space-y-2">
+										{PAYMENT_METHODS.map(opt => (
+											<label key={opt.key} className="flex items-center gap-2 cursor-pointer">
+												<input
+													type="checkbox"
+													checked={checkoutDraft.payment[opt.key]}
+													onChange={(e) => setCheckoutDraft(d => ({
+														...d,
+														payment: { ...d.payment, [opt.key]: e.target.checked },
+													}))}
+													className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+												/>
+												<span className="text-sm text-gray-800">{opt.label}</span>
+											</label>
+										))}
+									</div>
+								) : (
+									<div className="flex flex-wrap gap-1.5">
+										{PAYMENT_METHODS.filter(o => originalCheckout.payment[o.key]).map(o => (
+											<span key={o.key} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+												{o.label}
+											</span>
+										))}
+										{!PAYMENT_METHODS.some(o => originalCheckout.payment[o.key]) && (
+											<span className="text-sm text-gray-400">No payment methods set yet.</span>
+										)}
+									</div>
+								)}
 							</div>
 						</div>
 					</div>

@@ -131,6 +131,7 @@ interface ImageAsset {
   path?: string; // storage path for delete/management
   duration?: { startTime: string; endTime: string };
   order?: number;
+  imageURL?: string; // original uploaded image URL (separate from target click URL)
 }
 
 interface ImagesTabProps {
@@ -168,6 +169,15 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
   const [uploadTags, setUploadTags] = useState<string>("");
   const [bannerName, setBannerName] = useState<string>("");
   const [bannerURL, setBannerURL] = useState<string>("");
+
+  // Edit modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editTargetId, setEditTargetId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>("");
+  const [editURL, setEditURL] = useState<string>("");
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
 
   // Only show Banners category
   const categories = [
@@ -302,6 +312,7 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
             path: value.storagePath || value.path || '',
             duration: value.duration || undefined,
             order: value.order !== undefined ? value.order : idx,
+            imageURL: value.imageURL || value.url || '',
           };
         });
 
@@ -458,6 +469,91 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
   const handleDeleteImage = async (imageId: string) => {
     setDeleteTargetId(imageId);
     setShowDeleteModal(true);
+  };
+
+  const handleEditImage = (imageId: string) => {
+    const img = images.find(i => i.id === imageId);
+    if (!img) return;
+    setEditTargetId(imageId);
+    setEditName(img.name || "");
+    // Show target URL only if it differs from the underlying image URL
+    setEditURL(img.url && img.imageURL && img.url !== img.imageURL ? img.url : "");
+    setEditFile(null);
+    setShowEditModal(true);
+  };
+
+  const confirmEditImage = async () => {
+    if (editLoading || !editTargetId) return;
+    const current = images.find(i => i.id === editTargetId);
+    if (!current) return;
+    if (!editName.trim()) {
+      setError?.("Please enter a banner name");
+      return;
+    }
+
+    setEditLoading(true);
+    setError?.(null);
+    try {
+      const updates: Record<string, any> = {
+        name: editName.trim(),
+        lastModified: new Date().toISOString(),
+      };
+
+      // If a replacement file was selected, re-upload it and refresh image fields
+      let nextImageURL = current.imageURL || current.url;
+      if (editFile) {
+        const processed = await compressImage(editFile, {
+          maxWidth: 1280,
+          maxHeight: 720,
+          quality: 0.6,
+          thresholdKB: 0,
+          targetSizeKB: 200,
+        });
+
+        let width = 0, height = 0;
+        if (processed.width && processed.height) {
+          width = processed.width; height = processed.height;
+        } else {
+          try { const dims = await getImageDimensions(editFile); width = dims.width; height = dims.height; } catch {}
+        }
+
+        const clean = safeFileName(processed.name);
+        const path = `BannerImages/${Date.now()}_${clean}`;
+        const sref = storageRef(storage, path);
+        await uploadBytes(sref, processed.blob, { contentType: processed.mime });
+        nextImageURL = await getDownloadURL(sref);
+
+        // Best-effort cleanup of the previous storage file
+        if (current.path) {
+          try { await deleteObject(storageRef(storage, current.path)); } catch {}
+        }
+
+        updates.imageURL = nextImageURL;
+        updates.thumbnail = nextImageURL;
+        updates.storagePath = path;
+        updates.format = processed.ext.toUpperCase();
+        updates.size = processed.blob.size;
+        updates.dimensions = { width, height };
+      }
+
+      // Target URL mirrors upload behaviour: fall back to the image URL when empty
+      const targetURL = editURL.trim();
+      updates.url = targetURL || nextImageURL;
+
+      const bannerRef = dbRef(database, `Banner/${editTargetId}`);
+      await update(bannerRef, updates);
+
+      setShowEditModal(false);
+      setEditTargetId(null);
+      setEditName("");
+      setEditURL("");
+      setEditFile(null);
+    } catch (e) {
+      console.error(e);
+      setError?.("Failed to update banner. Please try again.");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const confirmDeleteImage = async () => {
@@ -778,6 +874,14 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
               onClick={() => window.open(image.url, '_blank')}
             >
               <Eye className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="bg-white/90 text-teal-700 hover:bg-white"
+              onClick={() => handleEditImage(image.id)}
+            >
+              <Edit3 className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
@@ -1282,6 +1386,132 @@ const ImagesTab = ({ loading = false, error, setError, onTabChange }: ImagesTabP
           </div>
         </div>
       )}
+
+      {/* Edit Banner Modal */}
+      {showEditModal && (() => {
+        const current = images.find(i => i.id === editTargetId);
+        const previewURL = editFile ? URL.createObjectURL(editFile) : (current?.imageURL || current?.url || '');
+        return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-semibold">Edit Banner</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditTargetId(null);
+                  setEditName("");
+                  setEditURL("");
+                  setEditFile(null);
+                }}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Banner Name <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  placeholder="Enter banner name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Target URL (optional)
+                </label>
+                <Input
+                  placeholder="https://example.com"
+                  value={editURL}
+                  onChange={(e) => setEditURL(e.target.value)}
+                />
+                <p className="text-xs text-gray-500 mt-1">URL to navigate when banner is clicked</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Banner Image</label>
+                {previewURL && (
+                  <div className="mb-3 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                    <img src={previewURL} alt={editName || 'banner'} className="w-full max-h-64 object-contain" />
+                  </div>
+                )}
+                {!editFile ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => editFileInputRef.current?.click()}
+                    className="w-full"
+                  >
+                    <Upload className="w-4 h-4 mr-2" /> Replace Image
+                  </Button>
+                ) : (
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <FileImage className="w-5 h-5 text-gray-400" />
+                      <span className="text-sm">{editFile.name}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {formatFileSize(editFile.size)}
+                      </Badge>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setEditFile(null)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+                <input
+                  ref={editFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setEditFile(f);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+                <p className="text-xs text-gray-500 mt-1">Leave empty to keep the current image.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <div className="text-sm text-gray-700">Banners</div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end mt-8 pt-6 border-t border-gray-200 space-x-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditTargetId(null);
+                  setEditName("");
+                  setEditURL("");
+                  setEditFile(null);
+                }}
+                disabled={editLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmEditImage}
+                disabled={editLoading || !editName.trim()}
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+              >
+                {editLoading ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* Activate Duration Modal */}
       {showActiveModal && (
