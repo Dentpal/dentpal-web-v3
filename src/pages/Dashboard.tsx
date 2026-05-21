@@ -16,6 +16,7 @@ import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import RevenueChart from "@/components/dashboard/RevenueChart";
 import { OrderSummaryModal } from "@/components/dashboard/admin/OrderSummaryModal";
 import { DailyTransactionsModal } from "@/components/dashboard/seller/DailyTransactionsModal";
+import { CustomersTab } from "@/components/customers/CustomersTab";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import Booking from "@/pages/Booking";
 import ConfirmationTab from "@/components/confirmation/ConfirmationTab";
@@ -4046,13 +4047,16 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         );
       case "sub-accounts":
         return (
-          <AccessTab 
+          <AccessTab
             loading={loading}
             error={error}
             setError={setError}
             onTabChange={handleTabChange}
           />
         );
+      case "customers":
+        if (!isAllowed("customers")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
+        return <CustomersTab />;
       case "images":
         if (!isAllowed("images")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return (
@@ -4132,6 +4136,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
       case 'reports': return 'Reports'; 
       case 'product-qc': return 'Pending QC';
       case "sub-accounts": return "Sub Account";
+      case "customers": return "Buyers";
       case "images": return "Images";
       case "users": return "Users";
       case 'warranty': return 'Warranty';
@@ -4182,6 +4187,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         return "Control user access and system permissions";
       case "sub-accounts":
         return "Create and manage seller sub-accounts";
+      case "customers":
+        return "Your buyers — view activity and ban bogus or serial cancellers";
       case "images":
         return "Manage banners and promotional images";
       case "users":

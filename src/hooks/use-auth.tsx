@@ -34,6 +34,8 @@ export const PERMISSIONS_BY_ROLE: Record<WebUserRole, WebUserPermissions> = {
     notifications: true,
     // Vouchers: admin doesn't use this
     vouchers: false,
+    // Customers tab is seller-only
+    customers: false,
   },
   seller: {
     dashboard: true,
@@ -60,6 +62,8 @@ export const PERMISSIONS_BY_ROLE: Record<WebUserRole, WebUserPermissions> = {
     notifications: true,
     // NEW: vouchers enabled by default for sellers
     vouchers: true,
+    // NEW: Customers tab — sellers see it by default
+    customers: true,
   }
 };
 

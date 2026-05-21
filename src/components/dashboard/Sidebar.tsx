@@ -73,6 +73,7 @@ const menuItems: MenuItem[] = [
   { id: "withdrawal", label: "Withdrawal", icon: CreditCard },
   { id: "vouchers", label: "Vouchers", icon: Ticket },
   { id: "sub-accounts", label: "Sub Account", icon: Users },
+  { id: "customers", label: "Buyers", icon: Users },
   { id: "access", label: "Access", icon: Key },
   { id: "images", label: "Images", icon: Images },
   { id: "users", label: "Users", icon: Users },
@@ -137,6 +138,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
     vouchers: 'vouchers',
     policies: "policies",
     chats: 'chats',
+    customers: 'customers',
   };
 
   // Map child tabs to their parent menu items
@@ -179,7 +181,8 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
           if (item.id === 'chats' && isAdmin) return false; // Hide chats for admin
           if (item.id === 'confirmation' && isAdmin) return false; // Hide confirmation for admin
           if (item.id === 'reports' && isAdmin) return false; // Hide reports for admin
-          if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts','vouchers'].includes(item.id)) return false;
+          if (item.id === 'customers' && isAdmin) return false; // Hide customers for admin
+          if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts','vouchers','customers'].includes(item.id)) return false;
           const key = permissionByMenuId[item.id];
 
           if (isSubAccount) {
@@ -194,7 +197,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         if (isSubAccount) {
           permitted = permitted.filter((i) => i.id !== 'access' && i.id !== 'sub-accounts' && i.id !== 'profile');
           // Apply same ordering as sellers for sub-accounts
-          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'withdrawal', 'vouchers'];
+          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'withdrawal', 'vouchers', 'customers'];
           const map = new Map(permitted.map((i) => [i.id, i] as const));
           const ordered = subAccountOrder.map((id) => map.get(id)).filter(Boolean) as typeof permitted;
           return ordered;
@@ -205,7 +208,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         }
 
         if (isSeller && !isAdmin) {
-          const sellerOrder = ['dashboard', 'seller-orders', 'reports', 'withdrawal', 'vouchers', 'inventory', 'inventory-control', 'items', 'chats', 'sub-accounts', 'profile'];
+          const sellerOrder = ['dashboard', 'seller-orders', 'reports', 'withdrawal', 'vouchers', 'inventory', 'inventory-control', 'items', 'chats', 'customers', 'sub-accounts', 'profile'];
           const map = new Map(permitted.map((i) => [i.id, i] as const));
           const ordered = sellerOrder.map((id) => map.get(id)).filter(Boolean) as typeof permitted;
           return ordered;

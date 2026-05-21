@@ -20,6 +20,7 @@ export type WebUserPermissions = {
   chats: boolean; // NEW: Chat/messaging feature
   notifications: boolean; // NEW: Notifications feature
   vouchers: boolean; // NEW: Vouchers tab
+  customers: boolean; // NEW: Customers tab (seller's buyer list + ban management)
 };
 
 export interface WebUserProfile {

@@ -86,6 +86,7 @@ function normalizeTimestamp(value: any): number | null {
     policies: role === 'admin',
     chats: role === 'admin' || role === 'seller',
     vouchers: role === 'seller',
+    customers: role === 'seller',
   });
 
   // Normalize any loaded permissions to include all keys for the role
@@ -109,7 +110,8 @@ function normalizeTimestamp(value: any): number | null {
       'add-product': 'Items',
       'policies': 'Policies',
       'chats': 'Chat',
-      'vouchers': 'Vouchers'
+      'vouchers': 'Vouchers',
+      'customers': 'Buyers'
     };
     return labelMap[key] || key.replace('-', ' ');
   };
@@ -136,6 +138,7 @@ interface User {
     policies: boolean;
     chats: boolean;
     vouchers: boolean;
+    customers: boolean;
   };
   Platform_fee_percentage?: number; // Platform fee percentage (default 8.88%)
   lastLogin?: string;
@@ -176,6 +179,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         policies: true,
         chats: true,
         vouchers: false,
+        customers: false,
       },
       lastLogin: "2024-09-09T10:30:00Z",
       createdAt: "2024-01-15T00:00:00Z"
@@ -201,6 +205,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         policies: false,
         chats: true,
         vouchers: true,
+        customers: true,
       },
       lastLogin: "2024-09-09T09:15:00Z",
       createdAt: "2024-02-20T00:00:00Z"
@@ -226,6 +231,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
         policies: false,
         chats: true,
         vouchers: true,
+        customers: true,
       },
       createdAt: "2024-09-08T00:00:00Z"
     }
@@ -329,6 +335,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       policies: false,
       chats: false,
       vouchers: false,
+      customers: false,
     },
     ops: {
       dashboard: true,
@@ -345,6 +352,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       policies: false,
       chats: false,
       vouchers: true,
+      customers: true,
     },
     custom: {
       dashboard: true,
@@ -361,6 +369,7 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
       policies: false,
       chats: false,
       vouchers: false,
+      customers: false,
     }
   };
 

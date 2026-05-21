@@ -1,4 +1,4 @@
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, serverTimestamp, orderBy } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, serverTimestamp, orderBy, onSnapshot, type Timestamp } from 'firebase/firestore';
 import app, { storage, auth } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -184,7 +184,71 @@ const SellersService = {
   async updatePlatformFee(sellerId: string, platformFeePercentage: number): Promise<void> {
     const refDoc = doc(db, SELLER_COL, sellerId);
     await updateDoc(refDoc, { Platform_fee_percentage: platformFeePercentage });
-  }
+  },
+
+  /* ─── Banned buyers ─────────────────────────────────────────── */
+
+  // Ban a buyer from placing further orders with this seller.
+  async banBuyer(
+    sellerId: string,
+    buyerId: string,
+    opts: { handledBy: BanHandler; buyerName?: string; reason?: string; cancelCount?: number },
+  ): Promise<void> {
+    const refDoc = doc(db, SELLER_COL, sellerId, BANNED_BUYERS_SUB, buyerId);
+    await setDoc(refDoc, {
+      buyerId,
+      ...(opts.buyerName ? { buyerName: opts.buyerName } : {}),
+      bannedAt: serverTimestamp(),
+      bannedBy: { id: opts.handledBy.id },
+      ...(opts.reason ? { reason: opts.reason } : {}),
+      ...(typeof opts.cancelCount === 'number' ? { cancelCount: opts.cancelCount } : {}),
+    });
+  },
+
+  async unbanBuyer(sellerId: string, buyerId: string): Promise<void> {
+    await deleteDoc(doc(db, SELLER_COL, sellerId, BANNED_BUYERS_SUB, buyerId));
+  },
+
+  async isBuyerBanned(sellerId: string, buyerId: string): Promise<boolean> {
+    const snap = await getDoc(doc(db, SELLER_COL, sellerId, BANNED_BUYERS_SUB, buyerId));
+    return snap.exists();
+  },
+
+  async listBannedBuyers(sellerId: string): Promise<BannedBuyerRecord[]> {
+    const snap = await getDocs(collection(db, SELLER_COL, sellerId, BANNED_BUYERS_SUB));
+    return snap.docs.map(d => ({ buyerId: d.id, ...(d.data() as Omit<BannedBuyerRecord, 'buyerId'>) }));
+  },
+
+  // Live listener — used by the seller's Customers tab so the Blocked filter
+  // updates instantly after a ban/unban from anywhere.
+  listenBannedBuyers(
+    sellerId: string,
+    cb: (records: BannedBuyerRecord[]) => void,
+    onError?: (err: unknown) => void,
+  ): () => void {
+    return onSnapshot(
+      collection(db, SELLER_COL, sellerId, BANNED_BUYERS_SUB),
+      (snap) => cb(snap.docs.map(d => ({ buyerId: d.id, ...(d.data() as Omit<BannedBuyerRecord, 'buyerId'>) }))),
+      (err) => onError?.(err),
+    );
+  },
 };
+
+/* ─── Ban-list types ───────────────────────────────────────── */
+
+const BANNED_BUYERS_SUB = 'bannedBuyers';
+
+export type BanHandler = {
+  id: string;
+};
+
+export interface BannedBuyerRecord {
+  buyerId: string;
+  buyerName?: string;
+  bannedAt?: Timestamp;
+  bannedBy?: BanHandler;
+  reason?: string;
+  cancelCount?: number;
+}
 
 export default SellersService;
