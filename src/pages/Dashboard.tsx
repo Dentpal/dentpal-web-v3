@@ -83,6 +83,10 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [selectedSummaryDay, setSelectedSummaryDay] = useState<{ date: string; orders: Order[] } | null>(null);
   const [receiptsPage, setReceiptsPage] = useState(1);
   const RECEIPTS_PAGE_SIZE = 10;
+  const [summaryPage, setSummaryPage] = useState(1);
+  const SUMMARY_PAGE_SIZE = 31;
+  const [categoryPage, setCategoryPage] = useState(1);
+  const CATEGORY_PAGE_SIZE = 10;
   const { hasPermission, loading: authLoading, role, permissions } = useAuth();
   const { isAdmin } = useAuth();
   const { uid, isSubAccount, parentId } = useAuth();
@@ -354,6 +358,18 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
 
   const paidOrders = useMemo(() => filteredOrders.filter(o => isPaidStatus(o.status)), [filteredOrders]);
   useEffect(() => { setReceiptsPage(1); }, [paidOrders.length]);
+
+  // Unique date count for Financial Summary pagination (matches the date key used in the table)
+  const summaryDateCount = useMemo(() => {
+    const keys = new Set<string>();
+    paidOrders.forEach(o => {
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      keys.add(d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }));
+    });
+    return keys.size;
+  }, [paidOrders]);
+  useEffect(() => { setSummaryPage(1); }, [summaryDateCount]);
+  useEffect(() => { setCategoryPage(1); }, [paidOrders.length]);
 
   // Resolve real category names via productId → Product.categoryID → Category.name
   const { productCategoryMap, categoryNameMap } = useCategoryResolution(filteredOrders);
@@ -1368,42 +1384,45 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                             let grandTotalPlatformFee = 0;
                             let grandTotalNetPayout = 0;
 
-                            const rows = sortedDates.map(dateKey => {
+                            // First pass: compute per-day metrics for ALL dates + grand totals
+                            const dayData = sortedDates.map(dateKey => {
                               const dayOrders = ordersByDate.get(dateKey)!;
                               const dayMetrics = dayOrders.reduce((acc, o) => {
                                 const summary = o.summary || {};
                                 const feesData = o.feesBreakdown || {};
-                                
+
                                 const gross = Number(summary.subtotal || 0);
-                                const refunds = 0; // Currently no refunds tracked
+                                const refunds = 0;
                                 const paymentFee = Number(feesData.paymentProcessingFee || 0);
                                 const shippingFee = Number(summary.sellerShippingCharge || 0);
                                 const platformFee = resolvePlatformFee(o);
-                                // Calculate Net Payout: Gross - Refunds - Payment Fee - Shipping Fee - Platform Fee
                                 const netPayout = gross - refunds - paymentFee - shippingFee - platformFee;
-                                
+
                                 return {
                                   totalGross: acc.totalGross + gross,
                                   totalPaymentFee: acc.totalPaymentFee + paymentFee,
                                   totalShippingFee: acc.totalShippingFee + shippingFee,
                                   totalPlatformFee: acc.totalPlatformFee + platformFee,
-                                  totalNetPayout: acc.totalNetPayout + netPayout
+                                  totalNetPayout: acc.totalNetPayout + netPayout,
                                 };
-                              }, {
-                                totalGross: 0,
-                                totalPaymentFee: 0,
-                                totalShippingFee: 0,
-                                totalPlatformFee: 0,
-                                totalNetPayout: 0
-                              });
+                              }, { totalGross: 0, totalPaymentFee: 0, totalShippingFee: 0, totalPlatformFee: 0, totalNetPayout: 0 });
 
-                              // Add to grand totals
                               grandTotalGross += dayMetrics.totalGross;
                               grandTotalPaymentFee += dayMetrics.totalPaymentFee;
                               grandTotalShippingFee += dayMetrics.totalShippingFee;
                               grandTotalPlatformFee += dayMetrics.totalPlatformFee;
                               grandTotalNetPayout += dayMetrics.totalNetPayout;
 
+                              return { dateKey, dayOrders, dayMetrics };
+                            });
+
+                            // Slice to current page (TOTAL row below stays as full-data totals)
+                            const pagedDayData = dayData.slice(
+                              (summaryPage - 1) * SUMMARY_PAGE_SIZE,
+                              summaryPage * SUMMARY_PAGE_SIZE,
+                            );
+
+                            const rows = pagedDayData.map(({ dateKey, dayOrders, dayMetrics }) => {
                               return (
                                 <tr
                                   key={dateKey}
@@ -1469,21 +1488,61 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                       </table>
                     </div>
                     <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
-                      <div className="flex items-center justify-between text-xs text-gray-600">
+                      <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-3">
                         <div className="flex items-center gap-2">
                           <span className="inline-flex items-center gap-1">
                             <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                             Net Payout = Gross Sales - (Payment Fee + Shipping Fee + Platform Fee)
                           </span>
                         </div>
-                        <div className="text-gray-500">
+                        <div className="flex items-center gap-3">
+                          <div className="text-gray-500">
+                            {(() => {
+                              if (sellerRange.start) {
+                                return `${toISO(sellerRange.start)} → ${toISO(sellerRange.end || sellerRange.start)}`;
+                              } else {
+                                return sellerFilters.dateRange.replace('last-', 'Last ') + ' days';
+                              }
+                            })()} • {paidOrders.length} paid {paidOrders.length === 1 ? 'order' : 'orders'}
+                          </div>
                           {(() => {
-                            if (sellerRange.start) {
-                              return `${toISO(sellerRange.start)} → ${toISO(sellerRange.end || sellerRange.start)}`;
-                            } else {
-                              return sellerFilters.dateRange.replace('last-', 'Last ') + ' days';
-                            }
-                          })()} • {paidOrders.length} paid {paidOrders.length === 1 ? 'order' : 'orders'}
+                            const totalPages = Math.max(1, Math.ceil(summaryDateCount / SUMMARY_PAGE_SIZE));
+                            if (totalPages <= 1) return null;
+                            const start = summaryDateCount === 0 ? 0 : (summaryPage - 1) * SUMMARY_PAGE_SIZE + 1;
+                            const end = Math.min(summaryPage * SUMMARY_PAGE_SIZE, summaryDateCount);
+                            return (
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500">{start}–{end} of {summaryDateCount} days</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => setSummaryPage(p => Math.max(1, p - 1))}
+                                    disabled={summaryPage <= 1}
+                                    className="p-1 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                    aria-label="Previous page"
+                                  >
+                                    <ChevronLeft className="w-3.5 h-3.5 text-gray-600" />
+                                  </button>
+                                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
+                                    <button
+                                      key={n}
+                                      onClick={() => setSummaryPage(n)}
+                                      className={`min-w-[24px] h-6 px-1.5 text-[11px] rounded border ${n === summaryPage ? 'bg-teal-600 text-white border-teal-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                                    >
+                                      {n}
+                                    </button>
+                                  ))}
+                                  <button
+                                    onClick={() => setSummaryPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={summaryPage >= totalPages}
+                                    className="p-1 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                    aria-label="Next page"
+                                  >
+                                    <ChevronRight className="w-3.5 h-3.5 text-gray-600" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -2157,7 +2216,12 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                               );
                             }
 
-                            return allCategories.map((category, idx) => (
+                            const pagedCategories = allCategories.slice(
+                              (categoryPage - 1) * CATEGORY_PAGE_SIZE,
+                              categoryPage * CATEGORY_PAGE_SIZE,
+                            );
+
+                            return pagedCategories.map((category, idx) => (
                               <tr key={idx} className="border-t hover:bg-gray-50">
                                 <td className="px-6 py-4 text-gray-900 font-medium">{category.name}</td>
                                 <td className="px-6 py-4 text-gray-700 text-right">{category.sold.toLocaleString()}</td>
@@ -2175,15 +2239,58 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                       </table>
                     </div>
                     <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
-                      <div className="flex items-center justify-between text-xs text-gray-600">
+                      <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-3">
                         <div className="flex items-center gap-2">
                           <span className="inline-flex items-center gap-1">
                             <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                             Net Payout = Gross Sales - (Payment Fee + Shipping Fee + Platform Fee)
                           </span>
                         </div>
-                        <div className="text-gray-500">
-                          Based on {paidOrders.length} paid {paidOrders.length === 1 ? 'order' : 'orders'}
+                        <div className="flex items-center gap-3">
+                          <div className="text-gray-500">
+                            Based on {paidOrders.length} paid {paidOrders.length === 1 ? 'order' : 'orders'}
+                          </div>
+                          {(() => {
+                            const names = new Set<string>();
+                            paidOrders.forEach(o => (o.items || []).forEach((it: any) => names.add(resolveCategoryName(it))));
+                            const totalCategories = names.size;
+                            const totalPages = Math.max(1, Math.ceil(totalCategories / CATEGORY_PAGE_SIZE));
+                            if (totalPages <= 1) return null;
+                            const start = totalCategories === 0 ? 0 : (categoryPage - 1) * CATEGORY_PAGE_SIZE + 1;
+                            const end = Math.min(categoryPage * CATEGORY_PAGE_SIZE, totalCategories);
+                            return (
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500">{start}–{end} of {totalCategories}</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => setCategoryPage(p => Math.max(1, p - 1))}
+                                    disabled={categoryPage <= 1}
+                                    className="p-1 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                    aria-label="Previous page"
+                                  >
+                                    <ChevronLeft className="w-3.5 h-3.5 text-gray-600" />
+                                  </button>
+                                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
+                                    <button
+                                      key={n}
+                                      onClick={() => setCategoryPage(n)}
+                                      className={`min-w-[24px] h-6 px-1.5 text-[11px] rounded border ${n === categoryPage ? 'bg-teal-600 text-white border-teal-600' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                                    >
+                                      {n}
+                                    </button>
+                                  ))}
+                                  <button
+                                    onClick={() => setCategoryPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={categoryPage >= totalPages}
+                                    className="p-1 rounded border border-gray-200 bg-white disabled:opacity-40 hover:bg-gray-50"
+                                    aria-label="Next page"
+                                  >
+                                    <ChevronRight className="w-3.5 h-3.5 text-gray-600" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

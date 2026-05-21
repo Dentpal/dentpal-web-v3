@@ -10,6 +10,7 @@ import {
   X, Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   ArrowUpDown, Package, PhilippinePeso, Printer, FileText, FileSpreadsheet,
 } from 'lucide-react';
+import { useCategoryResolution } from '@/hooks/dashboard/useCategoryResolution';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ExcelJS from 'exceljs';
@@ -108,6 +109,16 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
   const [sortDir, setSortDir]       = useState<SortDir>('desc');
   const [page, setPage]             = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const { productCategoryMap, categoryNameMap } = useCategoryResolution(seller.orders);
+  const resolveItemCategory = (item: any): string => {
+    const categoryId =
+      item?.categoryId ||
+      (item?.productId ? productCategoryMap.get(item.productId) : undefined);
+    return (categoryId ? categoryNameMap.get(categoryId) : undefined)
+      || item?.category
+      || '—';
+  };
 
   /* ── filter + sort ── */
   const filtered = useMemo(() => {
@@ -430,7 +441,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
                                           <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-blue-50/40'}>
                                             <td className="px-3 py-1.5 text-gray-500">{idx + 1}</td>
                                             <td className="px-3 py-1.5 text-gray-900 font-medium">{it.name || 'Unknown'}</td>
-                                            <td className="px-3 py-1.5 text-gray-600">{it.category || '—'}</td>
+                                            <td className="px-3 py-1.5 text-gray-600">{resolveItemCategory(it)}</td>
                                             <td className="px-3 py-1.5 text-right">{formatCurrency(it.price || 0)}</td>
                                             <td className="px-3 py-1.5 text-center">{it.quantity || 1}</td>
                                             <td className="px-3 py-1.5 text-right font-medium">{formatCurrency((it.price || 0) * (it.quantity || 1))}</td>

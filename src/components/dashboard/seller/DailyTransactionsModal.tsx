@@ -12,8 +12,12 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  ArrowUpDown, Package, PhilippinePeso,
+  ArrowUpDown, Package, PhilippinePeso, Printer, FileText, FileSpreadsheet,
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 interface DailyTransactionsModalProps {
   dateLabel: string;
@@ -133,6 +137,7 @@ export const DailyTransactionsModal = ({ dateLabel, orders, onClose }: DailyTran
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
 
   // Resolve buyer names from Firestore User collection
   useEffect(() => {
@@ -208,6 +213,101 @@ export const DailyTransactionsModal = ({ dateLabel, orders, onClose }: DailyTran
     return { sub, pf, sf, sv, plf, net: sub - sf - sv - pf - plf, successfulCount: successful.length };
   }, [orders]);
 
+  /* ── exports ── */
+  const exportHeaders = ['Order ID', 'Customer', 'Time', 'Status', 'Items', 'Payment', 'Gross Sales', 'Payment Fee', 'Shipping Fee', 'Shipping VAT', 'Platform Fee', 'Net Payout'];
+
+  const buildExportRows = () => sorted.map(o => [
+    resolveOrderId(o),
+    customerOf(o),
+    resolveTime(o),
+    getStatus((o.status || '').toLowerCase()).label,
+    o.items?.map(it => `${it.name} x${it.quantity || 1}`).join('; ') || '—',
+    resolvePaymentMethod(o),
+    resolveSubtotal(o),
+    resolvePaymentFee(o),
+    resolveShipping(o),
+    resolveShippingVat(o),
+    resolvePlatformFee(o),
+    resolveNet(o),
+  ]);
+
+  const fileStem = `transactions-${dateLabel.replace(/[^a-z0-9]/gi, '-')}`;
+
+  const handleExportPdf = () => {
+    // jsPDF's default Helvetica doesn't carry U+20B1 (₱) — substitute ASCII "PHP" prefix.
+    const formatPdfAmount = (n: number) =>
+      'PHP ' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text(`Daily Transactions — ${dateLabel}`, 14, 15);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text(`${orders.length} ${orders.length === 1 ? 'order' : 'orders'}  |  Generated: ${new Date().toLocaleString('en-US')}`, 14, 21);
+    doc.text(`Gross: ${formatPdfAmount(totals.sub)}   Shipping: ${formatPdfAmount(totals.sf)}   Net Payout: ${formatPdfAmount(totals.net)}`, 14, 26);
+
+    const rows = buildExportRows().map(r => [
+      ...r.slice(0, 6),
+      formatPdfAmount(r[6] as number),
+      formatPdfAmount(r[7] as number),
+      formatPdfAmount(r[8] as number),
+      formatPdfAmount(r[9] as number),
+      formatPdfAmount(r[10] as number),
+      formatPdfAmount(r[11] as number),
+    ]);
+
+    autoTable(doc, {
+      startY: 30,
+      head: [exportHeaders],
+      body: rows,
+      headStyles: { fillColor: [13, 148, 136], fontSize: 7, cellPadding: 2 },
+      bodyStyles: { fontSize: 7, cellPadding: 2 },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      columnStyles: { 0: { cellWidth: 28 }, 4: { cellWidth: 50 } },
+    });
+
+    doc.save(`${fileStem}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    setPrintMenuOpen(false);
+  };
+
+  const handleExportExcel = async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Transactions');
+
+    ws.addRow([`Daily Transactions — ${dateLabel}`]);
+    ws.addRow([`${orders.length} orders`, `Generated: ${new Date().toLocaleString('en-US')}`]);
+    ws.addRow([]);
+
+    const hRow = ws.addRow(exportHeaders);
+    hRow.eachCell(c => {
+      c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } };
+    });
+
+    buildExportRows().forEach(r => {
+      const row = ws.addRow(r);
+      [7, 8, 9, 10, 11, 12].forEach(ci => { row.getCell(ci).numFmt = '#,##0.00'; });
+    });
+
+    ws.addRow([]);
+    const tRow = ws.addRow(['', '', '', '', '', 'TOTAL', totals.sub, totals.pf, totals.sf, totals.sv, totals.plf, totals.net]);
+    tRow.font = { bold: true };
+    [7, 8, 9, 10, 11, 12].forEach(ci => { tRow.getCell(ci).numFmt = '#,##0.00'; });
+
+    ws.columns.forEach(col => {
+      let max = 10;
+      col.eachCell?.({ includeEmpty: false }, cell => { const l = String(cell.value || '').length; if (l > max) max = l; });
+      col.width = Math.min(max + 2, 40);
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `${fileStem}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
+    setPrintMenuOpen(false);
+  };
+
   /* ── sortable header cell ── */
   const Th = ({ k, children, align }: { k: SortKey; children: React.ReactNode; align?: string }) => (
     <th
@@ -237,9 +337,47 @@ export const DailyTransactionsModal = ({ dateLabel, orders, onClose }: DailyTran
                 <h3 className="text-xl font-bold">Transactions</h3>
                 <p className="text-sm text-teal-100 mt-1">{dateLabel} &bull; {orders.length} {orders.length === 1 ? 'order' : 'orders'}</p>
               </div>
-              <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setPrintMenuOpen(o => !o)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-full bg-white/20 hover:bg-white/30 text-white transition"
+                    aria-haspopup="menu"
+                    aria-expanded={printMenuOpen}
+                  >
+                    <Printer className="w-4 h-4" />
+                    Print
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {printMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setPrintMenuOpen(false)} />
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-full mt-1 w-44 bg-white rounded-md shadow-lg border border-gray-200 z-20 overflow-hidden"
+                      >
+                        <button
+                          onClick={handleExportPdf}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition text-left"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-rose-600" />
+                          Print as PDF
+                        </button>
+                        <button
+                          onClick={handleExportExcel}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition text-left border-t border-gray-100"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                          Print as Excel
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Summary Cards */}
