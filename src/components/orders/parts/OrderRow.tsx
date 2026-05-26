@@ -1,6 +1,6 @@
 import React from 'react';
 import { Order } from '@/types/order';
-import { ChevronDown, ChevronUp, Printer, FileText, Download, Eye, Loader2, Package } from 'lucide-react';
+import { ChevronDown, ChevronUp, Printer, FileText, Download, Eye, Loader2, Package, CheckCircle, RotateCcw } from 'lucide-react';
 import QRCode from 'qrcode';
 import dentpalLogo from '@/assets/dentpal_logo.png';
 
@@ -21,6 +21,10 @@ interface OrderRowProps {
   isSelectable?: boolean; // Whether this order can be selected with checkbox
   isSelected?: boolean; // Whether this order is currently selected
   onToggleSelect?: (order: Order) => void; // Callback when checkbox is toggled
+  // Per-tab custom actions for the Actions dropdown
+  onConfirmDelivery?: (order: Order) => void; // Shipping tab → moves order to Delivered
+  onInitiateReturn?: (order: Order) => void; // Delivered tab → moves order to Return/Refund
+  onMarkAsCompleted?: (order: Order) => void; // Delivered tab → moves order to Completed
 }
 
 const buildInvoiceHTML = async (order: Order) => {
@@ -248,7 +252,10 @@ const OrderRow: React.FC<OrderRowProps> = ({
   isCancelLoading = false,
   isSelectable = false,
   isSelected = false,
-  onToggleSelect
+  onToggleSelect,
+  onConfirmDelivery,
+  onInitiateReturn,
+  onMarkAsCompleted,
 }) => {
   const [open, setOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -431,7 +438,22 @@ const OrderRow: React.FC<OrderRowProps> = ({
               Actions <ChevronDown className="w-3 h-3" />
             </button>
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-10">
+              <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-10">
+                {onConfirmDelivery && (
+                  <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 text-emerald-700 flex items-center gap-2 border-b border-gray-100" onClick={() => { setMenuOpen(false); onConfirmDelivery(order); }}>
+                    <CheckCircle className="w-4 h-4" /> Confirm Delivery
+                  </button>
+                )}
+                {onMarkAsCompleted && (
+                  <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 text-emerald-700 flex items-center gap-2 border-b border-gray-100" onClick={() => { setMenuOpen(false); onMarkAsCompleted(order); }}>
+                    <CheckCircle className="w-4 h-4" /> Mark as Completed
+                  </button>
+                )}
+                {onInitiateReturn && (
+                  <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 text-violet-700 flex items-center gap-2 border-b border-gray-100" onClick={() => { setMenuOpen(false); onInitiateReturn(order); }}>
+                    <RotateCcw className="w-4 h-4" /> Initiate Return/Refund
+                  </button>
+                )}
                 <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2" onClick={() => { setMenuOpen(false); printInvoice(order); }}>
                   <Printer className="w-4 h-4" /> Print invoice
                 </button>

@@ -520,7 +520,7 @@ const OrdersService = {
   // Update high-level order status with statusHistory (e.g., move to Shipping)
   updateOrderStatus: async (
     orderId: string,
-    status: 'pending' | 'confirmed' | 'to_ship' | 'processing' | 'shipping' | 'completed' | 'cancelled' | 'returned' | 'refunded' | 'return_refund' | 'failed-delivery',
+    status: 'pending' | 'confirmed' | 'to_ship' | 'processing' | 'shipping' | 'shipped' | 'completed' | 'cancelled' | 'returned' | 'refunded' | 'return_requested' | 'return_refund' | 'failed-delivery',
     handledBy?: OrderHandler,
   ): Promise<void> => {
     try {
@@ -530,7 +530,7 @@ const OrdersService = {
         if (docSnap.exists()) {
           const currentData = docSnap.data();
           const currentHistory = Array.isArray(currentData.statusHistory) ? currentData.statusHistory : [];
-          
+
           // Create status history entry
           const statusNotes = {
             'pending': 'Order pending payment',
@@ -538,10 +538,12 @@ const OrdersService = {
             'to_ship': 'Order confirmed and ready to be processed',
             'processing': 'Order is being shipped',
             'shipping': 'Order is currently shipping',
-            'completed': 'Order delivered successfully', 
+            'shipped': 'Delivery confirmed by seller — awaiting buyer confirmation',
+            'completed': 'Order delivered successfully',
             'cancelled': 'Order cancelled',
             'returned': 'Order returned',
             'refunded': 'Order refunded',
+            'return_requested': 'Return/refund initiated by seller',
             'return_refund': 'Order return/refund processed',
             'failed-delivery': 'Delivery failed'
           };
