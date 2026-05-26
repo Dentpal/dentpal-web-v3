@@ -8,6 +8,7 @@ import AllOrdersView from './views/AllOrdersView';
 // import ConfirmedOrdersView from './views/ConfirmedOrdersView';
 import ToShipOrdersView from './views/ToShipOrdersView';
 import ShippingOrdersView from './views/ShippingOrdersView';
+import PickUpOrdersView from './views/PickUpOrdersView';
 import DeliveredOrdersView from './views/DeliveredOrdersView';
 import CompletedOrdersView from './views/CompletedOrdersView';
 import UnfulfilledOrdersView from './views/UnfulfilledOrdersView';
@@ -42,6 +43,7 @@ const viewMap: Record<LifecycleStage, React.FC<{ orders: Order[]; onSelectOrder?
   'confirmed': AllOrdersView,  // Fallback to AllOrdersView (should not be accessed)
   'to-ship': ToShipOrdersView,
   'shipping': ShippingOrdersView,
+  'pick-up': PickUpOrdersView,
   'delivered': DeliveredOrdersView,
   'completed': CompletedOrdersView,
   'unfulfilled': UnfulfilledOrdersView,
@@ -234,9 +236,10 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       'all': 0, 
       'unpaid': 0, 
       'confirmed': 0, 
-      'to-ship': 0, 
-      'shipping': 0, 
-      'delivered': 0, 
+      'to-ship': 0,
+      'shipping': 0,
+      'pick-up': 0,
+      'delivered': 0,
       'completed': 0,
       'unfulfilled': 0,
       'return-refund': 0 
@@ -1068,6 +1071,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       case 'confirmed': return 'bg-green-100 text-green-800 border-green-200';
       case 'to_ship': return 'bg-sky-100 text-sky-800 border-sky-200';
       case 'processing': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+      case 'pickup': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
       case 'completed': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
       case 'cancelled': return 'bg-rose-100 text-rose-800 border-rose-200';
       case 'failed-delivery': return 'bg-orange-100 text-orange-800 border-orange-200';
