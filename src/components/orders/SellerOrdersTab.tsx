@@ -1040,6 +1040,57 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
+  // Confirm Delivery: Shipping tab → Delivered tab (status 'shipped')
+  const handleConfirmDelivery = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Confirm delivery for order #${order.id}?\n\nThe order will be moved to the Delivered tab.`
+    );
+    if (!confirmed) return;
+    try {
+      await OrdersService.updateOrderStatus(order.id, 'shipped', handler ?? undefined);
+      setActiveSubTab('delivered');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to confirm delivery:', error);
+      alert('Failed to confirm delivery. Please try again.');
+    }
+  };
+
+  // Initiate Return/Refund: Delivered tab → Return/Refund tab
+  const handleInitiateReturn = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Initiate return/refund for order #${order.id}?\n\nThe order will be moved to the Return or Refund tab.`
+    );
+    if (!confirmed) return;
+    try {
+      await OrdersService.updateOrderStatus(order.id, 'return_requested', handler ?? undefined);
+      setActiveSubTab('return-refund');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to initiate return/refund:', error);
+      alert('Failed to initiate return/refund. Please try again.');
+    }
+  };
+
+  // Mark as Completed: Delivered tab → Completed tab
+  const handleMarkAsCompleted = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Mark order #${order.id} as completed?\n\nThe order will be moved to the Completed tab.`
+    );
+    if (!confirmed) return;
+    try {
+      await OrdersService.updateOrderStatus(order.id, 'completed', handler ?? undefined);
+      setActiveSubTab('completed');
+      setPage(1);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Failed to mark as completed:', error);
+      alert('Failed to mark order as completed. Please try again.');
+    }
+  };
+
   // Handle confirming handover -> move to Shipping (processing) - deprecated, use handleMoveToShipping instead
   const handleConfirmHandover = async (order: Order) => {
     try {
@@ -1648,6 +1699,21 @@ export const OrderTab: React.FC<OrderTabProps> = ({
               <p className="text-lg font-medium text-gray-900 mb-2">No orders found</p>
               <p className="text-gray-500">Try adjusting filters or date range to see orders here</p>
             </div>
+          )
+          : activeSubTab === 'shipping' ? (
+            <ShippingOrdersView
+              orders={pagedOrders}
+              onSelectOrder={handleSelectOrder}
+              onConfirmDelivery={handleConfirmDelivery}
+            />
+          )
+          : activeSubTab === 'delivered' ? (
+            <DeliveredOrdersView
+              orders={pagedOrders}
+              onSelectOrder={handleSelectOrder}
+              onInitiateReturn={handleInitiateReturn}
+              onMarkAsCompleted={handleMarkAsCompleted}
+            />
           )
           : (
             <ActiveView orders={pagedOrders} onSelectOrder={handleSelectOrder} />
