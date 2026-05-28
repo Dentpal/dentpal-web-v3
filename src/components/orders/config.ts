@@ -34,6 +34,25 @@ export const mapOrderToStage = (o: Order): LifecycleStage => {
   }
 };
 
+const PICKUP_TERMINAL_STATUSES = new Set<Order['status']>([
+  'completed',
+  'cancelled',
+  'failed-delivery',
+  'return_requested',
+  'return_approved',
+  'return_rejected',
+  'returned',
+  'refunded',
+  'return_refund',
+]);
+
+export const isPickupOrder = (o: Order): boolean => {
+  if (PICKUP_TERMINAL_STATUSES.has(o.status)) return false;
+  const breakdowns = (o as unknown as { sellerFeeBreakdowns?: Array<{ shippingMode?: string }> }).sellerFeeBreakdowns;
+  if (Array.isArray(breakdowns) && breakdowns.some(b => b?.shippingMode === 'pickup')) return true;
+  return o.status === 'pickup';
+};
+
 export const SUB_TABS: SubTabConfig[] = [
   { id: 'all', label: 'All', predicate: () => true },
   // Hidden tabs: unpaid and confirmed - orders go directly to to-ship after payment
@@ -41,7 +60,7 @@ export const SUB_TABS: SubTabConfig[] = [
   // { id: 'confirmed', label: 'Confirmed', predicate: (o) => mapOrderToStage(o) === 'confirmed' },
   { id: 'to-ship', label: 'To Ship', predicate: (o) => mapOrderToStage(o) === 'to-ship' },
   { id: 'shipping', label: 'Shipping', predicate: (o) => mapOrderToStage(o) === 'shipping' },
-  { id: 'pick-up', label: 'Pick-Up', predicate: (o) => mapOrderToStage(o) === 'pick-up' },
+  { id: 'pick-up', label: 'Pick-Up', predicate: isPickupOrder },
   { id: 'delivered', label: 'Delivered', predicate: (o) => o.status === 'shipped' }, // Shipped orders awaiting customer confirmation
   { id: 'completed', label: 'Completed', predicate: (o) => o.status === 'completed' },
   { id: 'return-refund', label: 'Return or Refund', predicate: (o) => ['return_requested', 'return_approved', 'return_rejected', 'returned', 'refunded', 'return_refund'].includes(o.status) },

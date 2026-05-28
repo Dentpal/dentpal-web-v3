@@ -160,7 +160,7 @@ export const OrderSummaryModal = ({ seller, onClose }: OrderSummaryModalProps) =
   };
 
   /* ── totals row ── */
-  const EXCLUDED_STATUSES = new Set(['cancelled', 'expired', 'processing']);
+  const EXCLUDED_STATUSES = new Set(['cancelled', 'expired']);
   const totals = useMemo(() => {
     const successful = filtered.filter(o => !EXCLUDED_STATUSES.has((o.status || '').toLowerCase()));
     const sub = successful.reduce((s, o) => s + resolveSubtotal(o), 0);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Plus, Edit3, Search, Ticket, Copy, Check, CopyPlus,
   StopCircle, Trash2, CalendarPlus, ChevronUp, ChevronDown,
@@ -17,6 +17,7 @@ import {
   generateVoucherTerms,
 } from '@/services/voucher';
 import type { Voucher, CreateVoucherInput, DiscountType, VoucherScope, ShippingOption } from '@/types/voucher';
+import { ProductService } from '@/services/product';
 import {
   Dialog,
   DialogContent,
@@ -125,6 +126,10 @@ const VoucherTab = () => {
   const [formEndDate, setFormEndDate] = useState('');
   const [formScope, setFormScope] = useState<VoucherScope>('all');
   const [formShippingOption, setFormShippingOption] = useState<ShippingOption[]>([]);
+  const [formBrand, setFormBrand] = useState<string[]>([]);
+  const [sellerBrands, setSellerBrands] = useState<string[]>([]);
+  const [brandDropdownOpen, setBrandDropdownOpen] = useState(false);
+  const brandDropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchVouchers = useCallback(async () => {
     if (!sellerId) return;
@@ -142,6 +147,34 @@ const VoucherTab = () => {
   useEffect(() => {
     fetchVouchers();
   }, [fetchVouchers]);
+
+  // Subscribe to seller's products to derive unique brand list
+  useEffect(() => {
+    if (!sellerId) { setSellerBrands([]); return; }
+    const unsub = ProductService.listenBySeller(sellerId, (products) => {
+      const brands = Array.from(
+        new Set(
+          products
+            .map((p) => (typeof p.brand === 'string' ? p.brand.trim() : ''))
+            .filter((b): b is string => !!b),
+        ),
+      ).sort((a: string, b: string) => a.localeCompare(b));
+      setSellerBrands(brands);
+    });
+    return () => { unsub?.(); };
+  }, [sellerId]);
+
+  // Close brand dropdown on outside click
+  useEffect(() => {
+    if (!brandDropdownOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (brandDropdownRef.current && !brandDropdownRef.current.contains(e.target as Node)) {
+        setBrandDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [brandDropdownOpen]);
 
   // Tab counts
   const tabCounts = useMemo(() => {
@@ -240,6 +273,8 @@ const VoucherTab = () => {
     setFormEndDate('');
     setFormScope('all');
     setFormShippingOption([]);
+    setFormBrand([]);
+    setBrandDropdownOpen(false);
     setError(null);
   };
 
@@ -262,6 +297,8 @@ const VoucherTab = () => {
     setFormEndDate(v.endDate.slice(0, 10));
     setFormScope(v.scope);
     setFormShippingOption(v.shippingOption ?? []);
+    setFormBrand(v.brand ?? []);
+    setBrandDropdownOpen(false);
     setError(null);
     setShowModal(true);
   };
@@ -298,6 +335,8 @@ const VoucherTab = () => {
     const minimumOrderAmount = parseFloat(formMinOrder) || 0;
     const maxUses = parseInt(formMaxUses) || 0;
 
+    if (formBrand.length === 0) { setError('Select at least one brand'); return; }
+
     if (!formStartDate || !formEndDate) { setError('Start and end dates are required'); return; }
     if (new Date(formEndDate) <= new Date(formStartDate)) { setError('End date must be after start date'); return; }
 
@@ -316,6 +355,7 @@ const VoucherTab = () => {
       ...(formDiscountType === 'free_delivery' && formShippingOption.length > 0
         ? { shippingOption: formShippingOption }
         : {}),
+      brand: formBrand,
     };
 
     let result;
@@ -749,6 +789,64 @@ const VoucherTab = () => {
                 maxLength={20}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono uppercase"
               />
+            </div>
+
+            {/* Brand (multi-select) */}
+            <div ref={brandDropdownRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Brand <span className="text-red-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setBrandDropdownOpen((o) => !o)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-green-500 flex items-center justify-between"
+              >
+                <span className="truncate">
+                  {formBrand.length === 0
+                    ? <span className="text-gray-400">Select one or more brands</span>
+                    : `${formBrand.length} selected`}
+                </span>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </button>
+              {formBrand.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {formBrand.map((b) => (
+                    <span key={b} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-md border border-green-200">
+                      {b}
+                      <button
+                        type="button"
+                        onClick={() => setFormBrand((prev) => prev.filter((x) => x !== b))}
+                        className="hover:text-green-900"
+                        aria-label={`Remove ${b}`}
+                      >×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {brandDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-auto">
+                  {sellerBrands.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500">No brands found for this store</div>
+                  ) : sellerBrands.map((b) => {
+                    const checked = formBrand.includes(b);
+                    return (
+                      <label key={b} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setFormBrand((prev) =>
+                              e.target.checked ? [...prev, b] : prev.filter((x) => x !== b),
+                            )
+                          }
+                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        />
+                        <span>{b}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Discount Type & Value */}

@@ -20,6 +20,7 @@ export interface Voucher {
   scope: VoucherScope;
   productIds?: string[];       // only when scope === 'specific'
   shippingOption?: ShippingOption[]; // only for free_delivery
+  brand?: string[];
   createdAt: string;
   updatedAt: string;
   createdBy?: string;        // email of the user who created the voucher
@@ -40,6 +41,7 @@ export interface CreateVoucherInput {
   scope: VoucherScope;
   productIds?: string[];
   shippingOption?: ShippingOption[];
+  brand: string[];
 }
 
 export interface UpdateVoucherInput extends Partial<CreateVoucherInput> {

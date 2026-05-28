@@ -119,6 +119,10 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
   const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>([]);
   const [subcategoryOptions, setSubcategoryOptions] = useState<Array<{ id: string; name: string; isEquipment?: boolean }>>([]);
+  const [sellerBrands, setSellerBrands] = useState<string[]>([]);
+  const brandImageByName = useRef<Map<string, string>>(new Map());
+  const [brandDropdownOpen, setBrandDropdownOpen] = useState(false);
+  const brandFieldRef = useRef<HTMLDivElement>(null);
 
   const { uid, isSeller, isSubAccount, parentId } = useAuth();
   const { toast } = useToast();
@@ -142,6 +146,39 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     });
     return () => unsub();
   }, []);
+
+  // Load the seller's existing brands (for the Brand combobox)
+  useEffect(() => {
+    if (!effectiveSellerId) { setSellerBrands([]); return; }
+    const unsub = ProductService.listenBySeller(effectiveSellerId, (rows) => {
+      const imgMap = new Map<string, string>();
+      const names = new Map<string, string>();
+      rows.forEach((r) => {
+        const brand = typeof r.brand === 'string' ? r.brand.trim() : '';
+        if (!brand) return;
+        const key = brand.toLowerCase();
+        if (!names.has(key)) names.set(key, brand);
+        if (!imgMap.has(key) && typeof r.brandImage === 'string' && r.brandImage) {
+          imgMap.set(key, r.brandImage);
+        }
+      });
+      brandImageByName.current = imgMap;
+      setSellerBrands(Array.from(names.values()).sort((a, b) => a.localeCompare(b)));
+    });
+    return () => unsub();
+  }, [effectiveSellerId]);
+
+  // Close brand dropdown on outside click
+  useEffect(() => {
+    if (!brandDropdownOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (brandFieldRef.current && !brandFieldRef.current.contains(e.target as Node)) {
+        setBrandDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [brandDropdownOpen]);
 
   // Load subcategories when category changes
   useEffect(() => {
@@ -512,15 +549,46 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
+              <div className="md:col-span-2" ref={brandFieldRef}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Brand <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={form.brand}
-                  onChange={(e) => setForm({...form, brand: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                  placeholder="Enter your brand name"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={form.brand}
+                    onChange={(e) => { setForm({...form, brand: e.target.value}); setBrandDropdownOpen(true); }}
+                    onFocus={() => setBrandDropdownOpen(true)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="Enter your brand name"
+                    autoComplete="off"
+                  />
+                  {brandDropdownOpen && (() => {
+                    const q = form.brand.trim().toLowerCase();
+                    const matches = sellerBrands.filter((b) => !q || b.toLowerCase().includes(q));
+                    if (matches.length === 0) return null;
+                    return (
+                      <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-auto">
+                        {matches.map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => {
+                              const img = brandImageByName.current.get(b.toLowerCase());
+                              setForm((f) => ({
+                                ...f,
+                                brand: b,
+                                ...(img ? { brandImageURL: img, brandImageFile: null, brandImagePreview: null } : {}),
+                              }));
+                              setBrandDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
+                          >
+                            {b}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Brand Image <span className="text-red-500">*</span></label>

@@ -301,7 +301,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     ).sort((a, b) => a.localeCompare(b));
   }, [confirmationOrders]);
 
-  const isPaidStatus = (s: Order['status']) => ['to_ship','completed','shipping'].includes(s);
+  const isPaidStatus = (s: Order['status']) => ['to_ship','processing','completed','shipping'].includes(s);
   const isWithdrawableStatus = (s: Order['status']) => s === 'completed'; // Only completed orders are eligible for withdrawal
   const getAmount = (o: Order) => typeof o.total === 'number' ? o.total : ((o.items || []).reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0) || 0);
 

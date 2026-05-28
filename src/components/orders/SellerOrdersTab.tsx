@@ -96,6 +96,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     pickupDate: '',
     pickupTime: '09:00',
   });
+  const [completeOrderDialog, setCompleteOrderDialog] = useState<{ open: boolean; order: Order | null; submitting: boolean }>({ open: false, order: null, submitting: false });
   const { user } = useAuth();
 
   // Resolve current handler (main seller vs sub-account) once for use in
@@ -244,7 +245,12 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       'unfulfilled': 0,
       'return-refund': 0 
     };
-    dateFilteredOrders.forEach(o => { const stage = mapOrderToStage(o); base[stage] += 1; base.all += 1; });
+    dateFilteredOrders.forEach(o => {
+      base.all += 1;
+      SUB_TABS.forEach(tab => {
+        if (tab.id !== 'all' && tab.predicate(o)) base[tab.id] += 1;
+      });
+    });
     return base;
   }, [dateFilteredOrders]);
 
@@ -1077,19 +1083,24 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   };
 
-  // Mark as Completed: Delivered tab → Completed tab
-  const handleMarkAsCompleted = async (order: Order) => {
-    const confirmed = window.confirm(
-      `Mark order #${order.id} as completed?\n\nThe order will be moved to the Completed tab.`
-    );
-    if (!confirmed) return;
+  // Mark as Completed: Delivered/Pick-Up tab → Completed tab
+  const handleMarkAsCompleted = (order: Order) => {
+    setCompleteOrderDialog({ open: true, order, submitting: false });
+  };
+
+  const handleConfirmMarkAsCompleted = async () => {
+    const order = completeOrderDialog.order;
+    if (!order) return;
+    setCompleteOrderDialog(prev => ({ ...prev, submitting: true }));
     try {
       await OrdersService.updateOrderStatus(order.id, 'completed', handler ?? undefined);
+      setCompleteOrderDialog({ open: false, order: null, submitting: false });
       setActiveSubTab('completed');
       setPage(1);
       onRefresh?.();
     } catch (error) {
       console.error('Failed to mark as completed:', error);
+      setCompleteOrderDialog(prev => ({ ...prev, submitting: false }));
       alert('Failed to mark order as completed. Please try again.');
     }
   };
@@ -1383,8 +1394,15 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     <div class="divider"></div>
 
     <div class="party">
+      <div class="field-label">Merchant</div>
+      <div class="name">R&amp;R Newtech Dental Corporation</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="party">
       <div class="field-label">Seller</div>
-      <div class="name">${sellerName}</div>
+      <div class="addr">${sellerName}</div>
       <div class="addr">${sellerAddress}</div>
     </div>
 
@@ -1392,10 +1410,6 @@ export const OrderTab: React.FC<OrderTabProps> = ({
 
     <div class="footer">
       Thanks for your purchase. This is a system-generated waybill. For concerns, contact support.
-    </div>
-
-    <div class="actions">
-      <button onclick="window.print()">Print</button>
     </div>
   </div>
 </body>
@@ -1719,6 +1733,13 @@ export const OrderTab: React.FC<OrderTabProps> = ({
               onMarkAsCompleted={handleMarkAsCompleted}
             />
           )
+          : activeSubTab === 'pick-up' ? (
+            <PickUpOrdersView
+              orders={pagedOrders}
+              onSelectOrder={handleSelectOrder}
+              onMarkAsCompleted={handleMarkAsCompleted}
+            />
+          )
           : (
             <ActiveView orders={pagedOrders} onSelectOrder={handleSelectOrder} />
           )
@@ -1755,6 +1776,54 @@ export const OrderTab: React.FC<OrderTabProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Mark as Completed Confirmation Dialog */}
+      {completeOrderDialog.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+            onClick={() => !completeOrderDialog.submitting && setCompleteOrderDialog({ open: false, order: null, submitting: false })}
+          />
+          <div role="dialog" aria-modal="true" className="relative z-10 w-[95vw] max-w-md bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50">
+              <h3 className="text-lg font-semibold text-gray-900">Mark Order as Completed</h3>
+              <p className="text-sm text-gray-600 mt-1">The order will be moved to the Completed tab.</p>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <div className="font-medium text-gray-900">Order #{completeOrderDialog.order?.id}</div>
+                {completeOrderDialog.order?.customer?.name && (
+                  <div className="text-gray-600">{completeOrderDialog.order.customer.name}</div>
+                )}
+                {completeOrderDialog.order?.itemsBrief && (
+                  <div className="text-gray-600">{completeOrderDialog.order.itemsBrief}</div>
+                )}
+              </div>
+              <p className="text-sm text-gray-700">
+                Are you sure you want to mark this order as completed? This action cannot be undone.
+              </p>
+            </div>
+            <div className="px-5 pb-5 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setCompleteOrderDialog({ open: false, order: null, submitting: false })}
+                disabled={completeOrderDialog.submitting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMarkAsCompleted}
+                disabled={completeOrderDialog.submitting}
+                className="px-4 py-2 text-sm font-medium text-white bg-teal-600 border border-transparent rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {completeOrderDialog.submitting ? 'Marking…' : 'Mark as Completed'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pickup Schedule Dialog */}
       {pickupScheduleDialog.open && (

@@ -140,6 +140,7 @@ export async function createVoucher(
       ...(input.discountType === 'free_delivery' && input.shippingOption && input.shippingOption.length > 0
         ? { shippingOption: input.shippingOption }
         : {}),
+      brand: input.brand,
       createdAt: now,
       updatedAt: now,
       ...(auth.currentUser?.email ? { createdBy: auth.currentUser.email } : {}),
