@@ -1,4 +1,5 @@
-import { db } from '@/lib/firebase';
+import app, { db } from '@/lib/firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, query, where, DocumentData, QuerySnapshot, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, getDownloadURL } from 'firebase/storage';
 import type { Order } from '@/types/order';
@@ -774,6 +775,23 @@ const OrdersService = {
       console.error('Error fetching return requests for seller:', error);
       return [];
     }
+  },
+
+  /**
+   * Book a Lalamove Same Day Delivery rider for a seller's portion of an order.
+   * Called when the seller marks a same-day order ready-to-ship. The backend
+   * re-quotes, places the Lalamove order, stores the booking on the order doc,
+   * and advances the order status to 'shipping'.
+   */
+  bookLalamoveDelivery: async (
+    orderId: string,
+    sellerId: string,
+  ): Promise<{ success: boolean; reason?: string; lalamoveOrderId?: string; shareLink?: string; status?: string }> => {
+    // The callable is deployed to asia-southeast1; use a region-specific instance.
+    const regionFunctions = getFunctions(app, 'asia-southeast1');
+    const callable = httpsCallable(regionFunctions, 'bookLalamoveDelivery');
+    const res = await callable({ orderId, sellerId });
+    return res.data as { success: boolean; reason?: string; lalamoveOrderId?: string; shareLink?: string; status?: string };
   },
 };
 

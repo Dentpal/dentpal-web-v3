@@ -1,14 +1,16 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Order } from '@/types/order';
 import { Search, RefreshCcw, ShoppingCart, Printer } from 'lucide-react';
-import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage } from './config';
+import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage, SHIPPING_METHOD_SUB_TABS, ShippingMethod, orderUsesMethod } from './config';
 import AllOrdersView from './views/AllOrdersView';
 // Hidden views - orders go directly to to-ship after payment
 // import UnpaidOrdersView from './views/UnpaidOrdersView';
 // import ConfirmedOrdersView from './views/ConfirmedOrdersView';
 import ToShipOrdersView from './views/ToShipOrdersView';
 import ShippingOrdersView from './views/ShippingOrdersView';
+import InDeliveryOrdersView from './views/InDeliveryOrdersView';
 import PickUpOrdersView from './views/PickUpOrdersView';
+import SameDayOrdersView from './views/SameDayOrdersView';
 import DeliveredOrdersView from './views/DeliveredOrdersView';
 import CompletedOrdersView from './views/CompletedOrdersView';
 import UnfulfilledOrdersView from './views/UnfulfilledOrdersView';
@@ -44,6 +46,7 @@ const viewMap: Record<LifecycleStage, React.FC<{ orders: Order[]; onSelectOrder?
   'to-ship': ToShipOrdersView,
   'shipping': ShippingOrdersView,
   'pick-up': PickUpOrdersView,
+  'same-day': SameDayOrdersView,
   'delivered': DeliveredOrdersView,
   'completed': CompletedOrdersView,
   'unfulfilled': UnfulfilledOrdersView,
@@ -82,6 +85,8 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   const [copied, setCopied] = useState<null | 'id' | 'barcode'>(null);
   // New: to-ship sub-tab state
   const [toShipSubTab, setToShipSubTab] = useState<ToShipStage>('to-pack');
+  // Shipping-method sub-tab under the "Shipping" stage.
+  const [methodSubTab, setMethodSubTab] = useState<ShippingMethod>('all');
   // JRS shipping state
   const [shippingLoading, setShippingLoading] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState<string | null>(null);
@@ -218,6 +223,13 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     }
   }, [activeSubTab]);
 
+  // Reset the shipping-method sub-tab when leaving the Shipping stage.
+  useEffect(() => {
+    if (activeSubTab !== 'shipping') {
+      setMethodSubTab('all');
+    }
+  }, [activeSubTab]);
+
   // Date-filter orders once for reuse (reverted: no hour restriction, only date range)
   const dateFilteredOrders = useMemo(() => {
     const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
@@ -240,6 +252,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       'to-ship': 0,
       'shipping': 0,
       'pick-up': 0,
+      'same-day': 0,
       'delivered': 0,
       'completed': 0,
       'unfulfilled': 0,
@@ -282,9 +295,28 @@ export const OrderTab: React.FC<OrderTabProps> = ({
         const stage = o.fulfillmentStage || 'to-pack';
         if (stage !== toShipSubTab) return false;
       }
+      // shipping-method sub-tab filter (Shipping stage only)
+      if (activeSubTab === 'shipping' && methodSubTab !== 'all' && !orderUsesMethod(o, methodSubTab)) {
+        return false;
+      }
       return true;
     });
-  }, [dateFilteredOrders, activeSubTab, toShipSubTab, query]);
+  }, [dateFilteredOrders, activeSubTab, toShipSubTab, methodSubTab, query]);
+
+  // Counts for the shipping-method sub-tabs (over orders in the Shipping stage).
+  const countsByMethodSubTab = useMemo(() => {
+    const shippingOrders = dateFilteredOrders.filter(
+      o => SUB_TABS.find(t => t.id === 'shipping')?.predicate(o)
+    );
+    const base: Record<ShippingMethod, number> = { all: 0, standard: 0, express: 0, pickup: 0, sameday: 0 };
+    shippingOrders.forEach(o => {
+      base.all += 1;
+      (['standard', 'express', 'pickup', 'sameday'] as ShippingMethod[]).forEach(m => {
+        if (orderUsesMethod(o, m)) base[m] += 1;
+      });
+    });
+    return base;
+  }, [dateFilteredOrders]);
 
   // Compute pagination
   const total = filtered.length;
@@ -647,6 +679,42 @@ export const OrderTab: React.FC<OrderTabProps> = ({
     
     w.document.close();
     return w;
+  };
+
+  // Handle booking a Lalamove rider for a Same Day Delivery order. The backend
+  // re-quotes, places the Lalamove order, and advances the order to 'shipping'.
+  const handleBookSameDay = async (order: Order) => {
+    // The backend requires the caller's own uid to match the order's seller.
+    const sellerId = auth.currentUser?.uid;
+    if (!sellerId) {
+      alert('Unable to determine the seller for this order. Please sign in again.');
+      return;
+    }
+    const confirmed = window.confirm(
+      'Book a Same Day Delivery rider (Lalamove) for this order now? The buyer-paid fee will be used to dispatch a rider.'
+    );
+    if (!confirmed) return;
+
+    setShippingLoading(order.id);
+    try {
+      const res = await OrdersService.bookLalamoveDelivery(order.id, sellerId);
+      if (res.success) {
+        alert('Same Day rider booked! The order has moved to Shipping.');
+        setActiveSubTab('shipping');
+        setPage(1);
+        onRefresh?.();
+      } else {
+        const reason = res.reason === 'out_of_coverage'
+          ? 'This address is outside Metro Manila coverage.'
+          : 'Same Day Delivery is not serviceable for this order right now.';
+        alert(`Could not book rider: ${reason}`);
+      }
+    } catch (error) {
+      console.error('Failed to book Lalamove delivery:', error);
+      alert('Failed to book the Same Day rider. Please try again.');
+    } finally {
+      setShippingLoading(null);
+    }
   };
 
   // Handle moving order to hand over - Now called from To Hand Over tab to complete handover and move to Shipping
@@ -1687,6 +1755,32 @@ export const OrderTab: React.FC<OrderTabProps> = ({
         </div>
       )}
 
+      {activeSubTab === 'shipping' && (
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 shadow-sm mt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {SHIPPING_METHOD_SUB_TABS.map(sub => {
+              const isActive = sub.id === methodSubTab;
+              return (
+                <button
+                  key={sub.id}
+                  onClick={() => setMethodSubTab(sub.id)}
+                  className={`relative px-3 py-1.5 rounded-lg text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/60
+                    ${isActive ? 'bg-teal-600 text-white shadow-sm' : 'bg-white text-teal-700 hover:bg-teal-100 border border-teal-300'}
+                  `}
+                >
+                  <span>{sub.label}</span>
+                  <span className={`ml-2 inline-flex items-center justify-center text-[11px] font-semibold rounded-full px-1.5 min-w-[1.25rem]
+                    ${isActive ? 'bg-white/20 text-white' : 'bg-teal-200 text-teal-800'}`}>{countsByMethodSubTab[sub.id]}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-xs text-teal-600">
+            Filter shipping orders by delivery method (Standard/Express via JRS, in-store Pickup, or Same Day via Lalamove).
+          </div>
+        </div>
+      )}
+
       {activeSubTab === 'to-ship'
         ? (
           <ToShipOrdersView
@@ -1698,6 +1792,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             onMoveToPack={handleMoveToPack}
             onMoveToShipping={handleMoveToShipping}
             onCancelShipment={handleCancelShipment}
+            onBookSameDay={handleBookSameDay}
             shippingLoading={shippingLoading}
             cancelLoading={cancelLoading}
             selectedOrderIds={selectedOrderIds}
@@ -1719,10 +1814,15 @@ export const OrderTab: React.FC<OrderTabProps> = ({
             </div>
           )
           : activeSubTab === 'shipping' ? (
-            <ShippingOrdersView
+            // Shipping stage: in-transit + pickup + same-day (not delivered).
+            // Handlers are gated per-order inside the view by status/method.
+            <InDeliveryOrdersView
               orders={pagedOrders}
               onSelectOrder={handleSelectOrder}
               onConfirmDelivery={handleConfirmDelivery}
+              onMarkAsCompleted={handleMarkAsCompleted}
+              onBookSameDay={handleBookSameDay}
+              shippingLoading={shippingLoading}
             />
           )
           : activeSubTab === 'delivered' ? (
@@ -1730,13 +1830,6 @@ export const OrderTab: React.FC<OrderTabProps> = ({
               orders={pagedOrders}
               onSelectOrder={handleSelectOrder}
               onInitiateReturn={handleInitiateReturn}
-              onMarkAsCompleted={handleMarkAsCompleted}
-            />
-          )
-          : activeSubTab === 'pick-up' ? (
-            <PickUpOrdersView
-              orders={pagedOrders}
-              onSelectOrder={handleSelectOrder}
               onMarkAsCompleted={handleMarkAsCompleted}
             />
           )

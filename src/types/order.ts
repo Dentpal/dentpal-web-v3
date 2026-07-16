@@ -139,6 +139,9 @@ export interface Order {
     country?: string;
     phoneNumber?: string;
     packagingSize?: string;
+    notes?: string;
+    // Per-seller chosen shipping mode: 'standard' | 'express' | 'pickup' | 'sameDay'.
+    sellerShippingModes?: Record<string, string>;
     jrs?: {
       trackingId?: string;
       trackingNumber?: string;
@@ -148,6 +151,28 @@ export interface Order {
       courier?: string;
     };
   };
+  // Per-seller fee breakdown (carries shippingMode used for tab membership).
+  sellerFeeBreakdowns?: Array<{
+    sellerId?: string;
+    shippingMode?: string;
+    [key: string]: unknown;
+  }>;
+  // Lalamove (Same Day Delivery) booking records, keyed by sellerId.
+  lalamove?: Record<string, {
+    orderId?: string;
+    quotationId?: string;
+    status?: string;
+    shareLink?: string | null;
+    driverId?: string | null;
+    driver?: {
+      driverId?: string | null;
+      name?: string | null;
+      phone?: string | null;
+      plateNumber?: string | null;
+      photo?: string | null;
+    } | null;
+    priceBreakdown?: { total?: string; currency?: string } | null;
+  }>;
   // NEW: PayMongo payment information
   paymongo?: {
     paymentStatus?: string; // e.g., "paid", "pending", "failed"

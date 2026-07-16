@@ -11,6 +11,7 @@ interface ViewProps {
   onMoveToPack?: (order: Order) => void; // Move back from arrangement to pack
   onMoveToShipping?: (order: Order) => void; // Move from hand-over to shipping
   onCancelShipment?: (order: Order) => void; // Cancel JRS shipping and roll back to arrangement
+  onBookSameDay?: (order: Order) => void; // Same Day Delivery → book a Lalamove rider
   shippingLoading?: string | null; // Order ID currently being processed for shipping
   cancelLoading?: string | null; // Order ID currently being processed for cancellation
   selectedOrderIds?: Set<string>; // IDs of selected orders in To Hand Over tab
@@ -30,6 +31,7 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
   onMoveToPack,
   onMoveToShipping,
   onCancelShipment,
+  onBookSameDay,
   shippingLoading,
   cancelLoading,
   selectedOrderIds,
@@ -72,6 +74,7 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
           onMoveToPack={onMoveToPack}
           onMoveToShipping={onMoveToShipping}
           onCancelShipment={onCancelShipment}
+          onBookSameDay={onBookSameDay}
           isShippingLoading={shippingLoading === o.id}
           isCancelLoading={cancelLoading === o.id}
           isSelectable={isHandOverSelectable || isArrangementSelectable || isPackSelectable}

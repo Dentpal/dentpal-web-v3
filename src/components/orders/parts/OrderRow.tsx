@@ -15,6 +15,7 @@ interface OrderRowProps {
   onMoveToPack?: (order: Order) => void; // Move back from arrangement to pack
   onMoveToShipping?: (order: Order) => void; // Move from hand-over to shipping
   onCancelShipment?: (order: Order) => void; // Cancel JRS shipping and move back to arrangement
+  onBookSameDay?: (order: Order) => void; // Same Day Delivery → book a Lalamove rider
   isShippingLoading?: boolean; // Loading state for shipping requests
   isCancelLoading?: boolean; // Loading state for cancel shipment
   // Checkbox selection support
@@ -248,6 +249,7 @@ const OrderRow: React.FC<OrderRowProps> = ({
   onMoveToPack,
   onMoveToShipping,
   onCancelShipment,
+  onBookSameDay,
   isShippingLoading = false,
   isCancelLoading = false,
   isSelectable = false,
@@ -262,6 +264,33 @@ const OrderRow: React.FC<OrderRowProps> = ({
   const [itemsOpen, setItemsOpen] = React.useState(false);
 
   const hasMultiItems = Array.isArray(order.items) && order.items.length >= 2;
+
+  // Same Day Delivery (Lalamove): detect from per-seller shipping mode and
+  // surface the booking record (status / driver / tracking link) if present.
+  const norm = (m?: string) => String(m || '').toLowerCase();
+  const isSameDayOrder = (() => {
+    const breakdowns = Array.isArray(order.sellerFeeBreakdowns) ? order.sellerFeeBreakdowns : [];
+    if (breakdowns.some(b => norm(b?.shippingMode) === 'sameday')) return true;
+    const modes = order.shippingInfo?.sellerShippingModes || {};
+    return Object.values(modes).some(m => norm(m) === 'sameday');
+  })();
+  const lalamoveRecord = order.lalamove
+    ? Object.values(order.lalamove).find(v => v && v.orderId)
+    : undefined;
+  const lalamoveBooked = !!lalamoveRecord;
+
+  const prettyLalamoveStatus = (raw?: string): string => {
+    switch (String(raw || '').toUpperCase()) {
+      case 'ASSIGNING_DRIVER': return 'Finding a rider';
+      case 'ON_GOING': return 'Rider on the way';
+      case 'PICKED_UP': return 'Picked up';
+      case 'COMPLETED': return 'Delivered';
+      case 'CANCELED': return 'Canceled';
+      case 'REJECTED': return 'Rejected';
+      case 'EXPIRED': return 'Expired';
+      default: return raw || 'Booked';
+    }
+  };
 
   const handleDetails = () => {
     if (onDetails) return onDetails();
@@ -354,6 +383,14 @@ const OrderRow: React.FC<OrderRowProps> = ({
                   {order.summary?.packagingSize || order.shippingInfo?.packagingSize}
                 </span>
               )}
+              {isSameDayOrder && (
+                <span
+                  className="text-[11px] px-2 py-0.5 border border-indigo-200 rounded-md bg-indigo-50 text-indigo-700 font-medium"
+                  title="Same Day Delivery (Lalamove)"
+                >
+                  Same Day
+                </span>
+              )}
             </div>
             {/* Expanded items inline with animation */}
             {itemsOpen && Array.isArray(order.items) && order.items.length >= 1 && (
@@ -385,8 +422,45 @@ const OrderRow: React.FC<OrderRowProps> = ({
           {/* Status */}
           <div className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{formatStatus(order.status)}</div>
         </div>
-        {/* Conditional rendering based on isToShip and fulfillmentStage */}
-        {isToShip ? (
+        {/* Same Day Delivery (Lalamove): handled independently of the JRS
+            arrangement/handover flow so it works from any tab. */}
+        {isSameDayOrder ? (
+          <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {lalamoveBooked ? (
+              <>
+                <span className="text-xs px-3 py-1 rounded-md font-medium bg-teal-50 text-teal-700 border border-teal-200">
+                  {prettyLalamoveStatus(lalamoveRecord?.status)}
+                </span>
+                {lalamoveRecord?.driver?.name && (
+                  <span className="text-[11px] text-gray-500">
+                    {lalamoveRecord.driver.name}
+                    {lalamoveRecord.driver.plateNumber ? ` • ${lalamoveRecord.driver.plateNumber}` : ''}
+                  </span>
+                )}
+                {lalamoveRecord?.shareLink && (
+                  <a
+                    href={lalamoveRecord.shareLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-teal-700 underline hover:text-teal-800"
+                  >
+                    Track rider →
+                  </a>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="text-xs px-3 py-1 border border-teal-600 text-teal-700 rounded-md font-medium hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                onClick={() => onBookSameDay?.(order)}
+                disabled={isShippingLoading}
+              >
+                {isShippingLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                Book Same Day Rider →
+              </button>
+            )}
+          </div>
+        ) : isToShip ? (
           order.fulfillmentStage === 'to-arrangement' ? (
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               <button

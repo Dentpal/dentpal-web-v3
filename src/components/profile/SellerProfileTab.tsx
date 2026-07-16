@@ -109,17 +109,19 @@ const SellerProfileTab: React.FC = () => {
 	const [editingCheckout, setEditingCheckout] = useState(false);
 
 	type CheckoutOptions = {
-		delivery: { standard: boolean; express: boolean; pickup: boolean };
+		delivery: { standard: boolean; express: boolean; pickup: boolean; sameDay: boolean };
 		payment: { cod: boolean; card: boolean; gcash: boolean };
 	};
 	const EMPTY_CHECKOUT: CheckoutOptions = {
-		delivery: { standard: false, express: false, pickup: false },
+		delivery: { standard: false, express: false, pickup: false, sameDay: false },
 		payment: { cod: false, card: false, gcash: false },
 	};
 	const DELIVERY_OPTIONS = [
 		{ key: 'standard' as const, label: 'Standard' },
 		{ key: 'express' as const, label: 'Express' },
 		{ key: 'pickup' as const, label: 'Pickup' },
+		// Lalamove on-demand delivery (Metro Manila only).
+		{ key: 'sameDay' as const, label: 'Same Day Delivery' },
 	];
 	const PAYMENT_METHODS = [
 		{ key: 'cod' as const, label: 'COD' },
@@ -809,6 +811,11 @@ const SellerProfileTab: React.FC = () => {
 												<span className="text-sm text-gray-800">{opt.label}</span>
 											</label>
 										))}
+										{checkoutDraft.delivery.sameDay && (
+											<div className="mt-1 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md p-2">
+												Same Day Delivery is <strong>Metro Manila only</strong>. Your store address is used as the rider pickup point — keep it complete and accurate.
+											</div>
+										)}
 									</div>
 								) : (
 									<div className="flex flex-wrap gap-1.5">
@@ -1400,6 +1407,8 @@ const SellerProfileTab: React.FC = () => {
 					onClose={() => setCoverUploadOpen(false)}
 					onUpload={handleCoverImageUpload}
 					title="Upload Cover Image"
+					aspectRatio={8 / 3}
+					aspectRatioLabel="8:3"
 				/>
 			</div>
 		</div>
