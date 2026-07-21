@@ -331,6 +331,47 @@ const OrderRow: React.FC<OrderRowProps> = ({
     return () => document.removeEventListener('click', onDocClick);
   }, [menuOpen, itemsOpen]);
 
+  // Same Day Delivery action UI: show live Lalamove tracking once booked, or a
+  // "Book Same Day Rider" (create Lalamove order) button. Reused by the To Ship
+  // "To Arrangement" stage and the Shipping tab.
+  const sameDayActionUI = (
+    <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
+      {lalamoveBooked ? (
+        <>
+          <span className="text-xs px-3 py-1 rounded-md font-medium bg-teal-50 text-teal-700 border border-teal-200">
+            {prettyLalamoveStatus(lalamoveRecord?.status)}
+          </span>
+          {lalamoveRecord?.driver?.name && (
+            <span className="text-[11px] text-gray-500">
+              {lalamoveRecord.driver.name}
+              {lalamoveRecord.driver.plateNumber ? ` • ${lalamoveRecord.driver.plateNumber}` : ''}
+            </span>
+          )}
+          {lalamoveRecord?.shareLink && (
+            <a
+              href={lalamoveRecord.shareLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-teal-700 underline hover:text-teal-800"
+            >
+              Track rider →
+            </a>
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          className="text-xs px-3 py-1 border border-teal-600 text-teal-700 rounded-md font-medium hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          onClick={() => onBookSameDay?.(order)}
+          disabled={isShippingLoading}
+        >
+          {isShippingLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+          Book Same Day Rider →
+        </button>
+      )}
+    </div>
+  );
+
     return (
     <div 
       className="w-full bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
@@ -422,44 +463,21 @@ const OrderRow: React.FC<OrderRowProps> = ({
           {/* Status */}
           <div className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{formatStatus(order.status)}</div>
         </div>
-        {/* Same Day Delivery (Lalamove): handled independently of the JRS
-            arrangement/handover flow so it works from any tab. */}
-        {isSameDayOrder ? (
-          <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-            {lalamoveBooked ? (
-              <>
-                <span className="text-xs px-3 py-1 rounded-md font-medium bg-teal-50 text-teal-700 border border-teal-200">
-                  {prettyLalamoveStatus(lalamoveRecord?.status)}
-                </span>
-                {lalamoveRecord?.driver?.name && (
-                  <span className="text-[11px] text-gray-500">
-                    {lalamoveRecord.driver.name}
-                    {lalamoveRecord.driver.plateNumber ? ` • ${lalamoveRecord.driver.plateNumber}` : ''}
-                  </span>
-                )}
-                {lalamoveRecord?.shareLink && (
-                  <a
-                    href={lalamoveRecord.shareLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-teal-700 underline hover:text-teal-800"
-                  >
-                    Track rider →
-                  </a>
-                )}
-              </>
-            ) : (
-              <button
-                type="button"
-                className="text-xs px-3 py-1 border border-teal-600 text-teal-700 rounded-md font-medium hover:bg-teal-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                onClick={() => onBookSameDay?.(order)}
-                disabled={isShippingLoading}
-              >
-                {isShippingLoading && <Loader2 className="w-3 h-3 animate-spin" />}
-                Book Same Day Rider →
-              </button>
-            )}
-          </div>
+        {/* Same Day Delivery (Lalamove) follows the SAME staged flow as JRS in
+            the To Ship tab: To Pack (bulk print pack list → arrangement) →
+            To Arrangement (Book Same Day Rider → shipping). Booking replaces the
+            JRS "Create JRS Shipping" step. Outside To Ship (e.g. Shipping tab)
+            the same-day action is shown standalone. */}
+        {isToShip && isSameDayOrder ? (
+          (!order.fulfillmentStage || order.fulfillmentStage === 'to-pack') ? (
+            // To Pack: no per-order button — moved via bulk "Print Pack List".
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()} />
+          ) : (
+            // To Arrangement (or later): create the Lalamove order / track it.
+            sameDayActionUI
+          )
+        ) : isSameDayOrder ? (
+          sameDayActionUI
         ) : isToShip ? (
           order.fulfillmentStage === 'to-arrangement' ? (
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -627,10 +645,25 @@ const OrderRow: React.FC<OrderRowProps> = ({
             <div className="mt-4 flex justify-end gap-3">
               <button className="text-sm px-3 py-2 rounded border border-gray-200 hover:bg-gray-50" onClick={() => setOpen(false)}>Close</button>
               {isToShip ? (
-                order.fulfillmentStage === 'to-arrangement' ? (
+                isSameDayOrder ? (
+                  (!order.fulfillmentStage || order.fulfillmentStage === 'to-pack') ? (
+                    <span className="text-sm text-gray-500 px-3 py-2">Use “Print Pack List” to move this order to Arrangement.</span>
+                  ) : lalamoveBooked ? (
+                    <span className="text-sm px-3 py-2 rounded bg-teal-50 text-teal-700 border border-teal-200 font-medium">{prettyLalamoveStatus(lalamoveRecord?.status)}</span>
+                  ) : (
+                    <button
+                      className="text-sm px-3 py-2 rounded bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={() => { onBookSameDay?.(order); setOpen(false); }}
+                      disabled={isShippingLoading}
+                    >
+                      {isShippingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                      Book Same Day Rider →
+                    </button>
+                  )
+                ) : order.fulfillmentStage === 'to-arrangement' ? (
                   <>
-                    <button 
-                      className="text-sm px-3 py-2 rounded bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" 
+                    <button
+                      className="text-sm px-3 py-2 rounded bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       onClick={() => { onMoveToShipping?.(order); setOpen(false); }}
                       disabled={isShippingLoading}
                     >

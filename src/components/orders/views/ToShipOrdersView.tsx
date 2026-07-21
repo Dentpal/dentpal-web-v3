@@ -1,6 +1,7 @@
 import React from 'react';
 import { Order } from '@/types/order';
 import OrderRow from '../parts/OrderRow';
+import { isSameDayOrder } from '../config';
 
 interface ViewProps {
   orders: Order[];
@@ -43,9 +44,13 @@ const ToShipOrdersView: React.FC<ViewProps> = ({
 }) => (
   <div className="space-y-4">
     {orders.map(o => {
+      // Same Day (Lalamove) orders are booked per-order from To Arrangement and
+      // never go through JRS bulk shipping / handover, so they aren't selectable
+      // there. They ARE selectable in To Pack for the bulk "Print Pack List".
+      const sameDay = isSameDayOrder(o);
       // Enable selection for To Pack, To Arrangement, or To Hand Over stages
-      const isHandOverSelectable = o.fulfillmentStage === 'to-hand-over';
-      const isArrangementSelectable = o.fulfillmentStage === 'to-arrangement';
+      const isHandOverSelectable = o.fulfillmentStage === 'to-hand-over' && !sameDay;
+      const isArrangementSelectable = o.fulfillmentStage === 'to-arrangement' && !sameDay;
       const isPackSelectable = !o.fulfillmentStage || o.fulfillmentStage === 'to-pack';
       const isSelected = isHandOverSelectable
         ? (selectedOrderIds?.has(o.id) ?? false)

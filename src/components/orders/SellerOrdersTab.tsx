@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Order } from '@/types/order';
 import { Search, RefreshCcw, ShoppingCart, Printer } from 'lucide-react';
-import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage, SHIPPING_METHOD_SUB_TABS, ShippingMethod, orderUsesMethod } from './config';
+import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage, SHIPPING_METHOD_SUB_TABS, ShippingMethod, orderUsesMethod, isSameDayOrder } from './config';
 import AllOrdersView from './views/AllOrdersView';
 // Hidden views - orders go directly to to-ship after payment
 // import UnpaidOrdersView from './views/UnpaidOrdersView';
@@ -279,7 +279,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   }, [dateFilteredOrders]);
 
   const filtered = useMemo(() => {
-    return dateFilteredOrders.filter(o => {
+    const result = dateFilteredOrders.filter(o => {
       // text query filter
       const q = (query || '').trim().toLowerCase();
       if (q) {
@@ -301,6 +301,13 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       }
       return true;
     });
+    // Prioritize Same Day (Lalamove) orders at the top of the To Ship sub-tabs
+    // (To Pack / To Arrangement / To Hand Over). Array.sort is stable, so the
+    // relative order within each group is preserved.
+    if (activeSubTab === 'to-ship') {
+      result.sort((a, b) => (isSameDayOrder(b) ? 1 : 0) - (isSameDayOrder(a) ? 1 : 0));
+    }
+    return result;
   }, [dateFilteredOrders, activeSubTab, toShipSubTab, methodSubTab, query]);
 
   // Counts for the shipping-method sub-tabs (over orders in the Shipping stage).
@@ -838,10 +845,13 @@ export const OrderTab: React.FC<OrderTabProps> = ({
 
       const firebaseFunctionUrl = 'https://asia-southeast1-dentpal-161e5.cloudfunctions.net/createJRSShipping';
       
-      // Process each order sequentially to avoid overwhelming the API
+      // Process each order sequentially to avoid overwhelming the API.
+      // Same Day (Lalamove) orders are never shipped via JRS — book them per-order.
       let successCount = 0;
       let failCount = 0;
-      const selectedOrders = pagedOrders.filter(o => selectedArrangementOrderIds.has(o.id));
+      const selectedOrders = pagedOrders.filter(
+        o => selectedArrangementOrderIds.has(o.id) && !isSameDayOrder(o)
+      );
       
       for (const order of selectedOrders) {
         try {
