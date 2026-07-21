@@ -433,7 +433,6 @@ const SellerProfileTab: React.FC = () => {
 		return !!(
 			vendor.companyName &&
 			vendor.storeName &&
-			vendor.contactPerson &&
 			location &&
 			vendor.address.street &&
 			vendor.address.barangay &&
@@ -447,6 +446,7 @@ const SellerProfileTab: React.FC = () => {
 	const step2Valid = useMemo(() => {
 		// Step 2: Contacts, Banking, and Additional Documents
 		return !!(
+			vendor.contactPerson &&
 			vendor.mobile &&
 			!errors.mobile &&
 			vendor.email &&
@@ -508,7 +508,6 @@ const SellerProfileTab: React.FC = () => {
 			case 1:
 				if (!vendor.companyName) missing.push('Company Name');
 				if (!vendor.storeName) missing.push('Store Name');
-				if (!vendor.contactPerson) missing.push('Customer Service Contact Person');
 				if (!location) missing.push('Location');
 				if (!vendor.address.province) missing.push('Province');
 				if (!vendor.address.municipality) missing.push('Municipality/City');
@@ -517,6 +516,7 @@ const SellerProfileTab: React.FC = () => {
 				if (!vendor.address.zip || errors.zip) missing.push('Valid ZIP Code');
 				break;
 			case 2:
+				if (!vendor.contactPerson) missing.push('Customer Service Contact Person');
 				if (!vendor.mobile || errors.mobile) missing.push('Valid Mobile Number');
 				if (!vendor.email || errors.email) missing.push('Valid Email Address');
 				if (!vendor.bankName) missing.push('Bank Name');
@@ -2468,7 +2468,7 @@ const SellerProfileTab: React.FC = () => {
 									<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 <div>
     <label className="block text-xs font-medium text-gray-600 mb-1">Customer Service Contact Person <span className="text-red-500">*</span></label>
-    <input disabled={!isEditing} value={vendor.contactPerson} onChange={(e)=> setField('contactPerson', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
+    <input ref={contactPersonRef} disabled={!isEditing} value={vendor.contactPerson} onChange={(e)=> setField('contactPerson', e.target.value)} className="w-full text-sm p-2 border border-gray-200 rounded-lg disabled:bg-gray-50" />
 </div>
 										<div>
 											<label className="block text-xs font-medium text-gray-600 mb-1">
@@ -2655,7 +2655,7 @@ const SellerProfileTab: React.FC = () => {
 										<div className="text-xs text-gray-500">Contact Person</div>
 										<div className="flex items-center justify-between gap-2">
 											<div className="text-sm font-medium text-gray-900">{vendor.contactPerson || '—'}</div>
-											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(1, contactPersonRef as any)}>Edit</button>
+											<button className="text-xs text-teal-700 hover:underline" onClick={() => jumpAndFocus(2, contactPersonRef as any)}>Edit</button>
 										</div>
 									</div>
 									<div className="p-3 border border-gray-200 rounded-lg">
