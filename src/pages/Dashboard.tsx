@@ -23,6 +23,7 @@ import ConfirmationTab from "@/components/confirmation/ConfirmationTab";
 import WithdrawalTab from "@/components/withdrawal/WithdrawalTab";
 import SellerWithdrawalTab from "@/components/withdrawal/SellerWithdrawalTab";
 import AccessTab from "@/components/access/AccessTab";
+import SellerPerformanceTab from "@/components/seller-performance/SellerPerformanceTab";
 import ImagesTab from "@/components/images/ImagesTab";
 import UsersTab from "@/components/users/UsersTab";
 import OrderTab from '@/components/orders/SellerOrdersTab';
@@ -563,6 +564,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     confirmation: "confirmation",
     withdrawal: "withdrawal",
     access: "access",
+    'seller-performance': 'dashboard',
     'sub-accounts': 'dashboard',
     images: "images",
     users: "users",
@@ -4057,6 +4059,9 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
       case "customers":
         if (!isAllowed("customers")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return <CustomersTab />;
+      case "seller-performance":
+        if (!isAdmin) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
+        return <SellerPerformanceTab />;
       case "images":
         if (!isAllowed("images")) return <div className="p-6 bg-white rounded-xl border">Access denied</div>;
         return (
@@ -4132,6 +4137,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
       case "withdrawal": return "Withdrawal";
       case "vouchers": return "Vouchers";
       case "access": return "Access";
+      case "seller-performance": return "Seller Performance";
       case 'seller-orders': return 'Orders';
       case 'reports': return 'Reports'; 
       case 'product-qc': return 'Pending QC';
@@ -4185,6 +4191,8 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
         return "Create and manage discount vouchers for your products";
       case "access":
         return "Control user access and system permissions";
+      case "seller-performance":
+        return "Reputation scoring across fulfillment, service, product health, satisfaction, and governance";
       case "sub-accounts":
         return "Create and manage seller sub-accounts";
       case "customers":

@@ -366,6 +366,7 @@ export const ProductService = {
       inStock: number;
       status: 'active' | 'inactive' | 'draft' | 'pending_qc' | 'violation' | 'deleted' | 'archive';
       updatedAt: number;
+      createdAt: number;
       sku?: string;
       category?: string;
       categoryID?: string;
@@ -422,6 +423,7 @@ export const ProductService = {
           inStock: Number(totalStock || 0),
           status: s,
           updatedAt: pd.updatedAt?.toMillis?.() ? Number(pd.updatedAt.toMillis()) : Date.now(),
+          createdAt: pd.createdAt?.toMillis?.() ? Number(pd.createdAt.toMillis()) : (typeof pd.createdAt === 'number' ? pd.createdAt : 0),
           sku: undefined as string | undefined,
           category: typeof pd.categoryID === 'string' ? pd.categoryID : undefined,
           categoryID: typeof pd.categoryID === 'string' ? pd.categoryID : undefined,

@@ -26,7 +26,8 @@ import {
   Edit,
   Plus,
   List,
-  Ticket
+  Ticket,
+  Trophy
 } from "lucide-react";
 import dentalLogo from "@/assets/dentpal_logo.png";
 import { useAuth } from "@/hooks/use-auth";
@@ -75,6 +76,7 @@ const menuItems: MenuItem[] = [
   { id: "sub-accounts", label: "Sub Account", icon: Users },
   { id: "customers", label: "Buyers", icon: Users },
   { id: "access", label: "Access", icon: Key },
+  { id: "seller-performance", label: "Seller Performance", icon: Trophy },
   { id: "images", label: "Images", icon: Images },
   { id: "users", label: "Users", icon: Users },
   { id: "policies", label: "Terms & Policies", icon: ShieldCheck },
@@ -182,6 +184,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
           if (item.id === 'confirmation' && isAdmin) return false; // Hide confirmation for admin
           if (item.id === 'reports' && isAdmin) return false; // Hide reports for admin
           if (item.id === 'customers' && isAdmin) return false; // Hide customers for admin
+          if (item.id === 'seller-performance' && !isAdmin) return false; // Admin-only reputation hub
           if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts','vouchers','customers'].includes(item.id)) return false;
           const key = permissionByMenuId[item.id];
 

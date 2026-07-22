@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Lock,
   Unlock,
+  Trophy,
   FileText,
   FileSpreadsheet,
   File,
@@ -1958,14 +1959,23 @@ const AccessTab = ({ loading = false, error, setError, onTabChange, onEditUser }
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-1">
                         {/* Edit platform fee button */}
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleOpenPlatformFeeModal(seller)} 
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenPlatformFeeModal(seller)}
                           className="text-blue-600 hover:text-blue-800"
                           title="Edit Platform Fee"
                         >
                           <Edit3 className="w-4 h-4"/>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onTabChange?.('seller-performance')}
+                          className="text-amber-600 hover:text-amber-800"
+                          title="View Seller Performance"
+                        >
+                          <Trophy className="w-4 h-4"/>
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => handleToggleActive(seller)} className={seller.status==='active'? 'text-amber-600 hover:text-amber-800':'text-green-600 hover:text-green-800'}>{seller.status==='active'? <Lock className="w-4 h-4"/>:<Unlock className="w-4 h-4"/>}</Button>
                         <Button variant="ghost" size="sm" onClick={() => handleResendInvite(seller)} className="text-gray-600 hover:text-gray-800"><Key className="w-4 h-4"/></Button>

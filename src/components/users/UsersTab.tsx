@@ -126,8 +126,24 @@ export default function UsersTab() {
     }
   };
 
+  const formatCreatedAt = (createdAt: any): string => {
+    if (!createdAt) return '';
+    let date: Date | null = null;
+    if (typeof createdAt?.toDate === 'function') {
+      date = createdAt.toDate(); // Firestore Timestamp
+    } else if (typeof createdAt?.seconds === 'number') {
+      date = new Date(createdAt.seconds * 1000);
+    } else if (typeof createdAt === 'number' || typeof createdAt === 'string') {
+      date = new Date(createdAt);
+    } else if (createdAt instanceof Date) {
+      date = createdAt;
+    }
+    if (!date || isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+
   const exportToCSV = () => {
-    const usersToExport = selected.length > 0 
+    const usersToExport = selected.length > 0
       ? filtered.filter(u => selected.includes(u.id))
       : filtered;
 
@@ -140,11 +156,9 @@ export default function UsersTab() {
       'Account ID': u.accountId || '',
       'Name': `${u.firstName || ''} ${u.lastName || ''}`.trim(),
       'Email': u.email || '',
-      'Status': u.status === 'active' ? 'Active' : u.status === 'inactive' ? 'Inactive' : (u.status || ''),
-      'Reward Points': u.rewardPoints || 0,
-      'Total Spent': `₱${(u.totalSpent || 0).toFixed(2)}`,
-      'Total Orders': u.totalTransactions || 0,
       'Specialty': Array.isArray(u.specialty) ? u.specialty.join(', ') : (u.specialty || 'N/A'),
+      'Contact Number': u.contactNumber || '',
+      'Created At': formatCreatedAt(u.createdAt),
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
@@ -186,17 +200,16 @@ export default function UsersTab() {
     }
 
     const tableData = usersToExport.map(u => [
+      u.accountId || '',
       `${u.firstName || ''} ${u.lastName || ''}`.trim(),
       u.email || '',
-      u.status === 'active' ? 'Active' : u.status === 'inactive' ? 'Inactive' : (u.status || ''),
-      u.rewardPoints || 0,
-      `₱${(u.totalSpent || 0).toFixed(2)}`,
-      u.totalTransactions || 0,
       Array.isArray(u.specialty) ? u.specialty.join(', ') : (u.specialty || 'N/A'),
+      u.contactNumber || '',
+      formatCreatedAt(u.createdAt),
     ]);
 
     autoTable(doc, {
-      head: [['Name', 'Email', 'Status', 'Points', 'Total Spent', 'Orders', 'Specialty']],
+      head: [['Account ID', 'Name', 'Email', 'Specialty', 'Contact Number', 'Created At']],
       body: tableData,
       startY: selected.length > 0 ? 40 : 34,
       styles: { fontSize: 8 },
