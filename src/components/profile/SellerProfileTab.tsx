@@ -108,13 +108,41 @@ const SellerProfileTab: React.FC = () => {
 	const [editingContact, setEditingContact] = useState(false);
 	const [editingCheckout, setEditingCheckout] = useState(false);
 
+	type SameDayDayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+	// When buyers may place Same Day Delivery orders from this seller: which days
+	// of the week, and the daily start/end time (24h 'HH:MM').
+	type SameDaySchedule = {
+		days: Record<SameDayDayKey, boolean>;
+		startTime: string;
+		endTime: string;
+	};
 	type CheckoutOptions = {
 		delivery: { standard: boolean; express: boolean; pickup: boolean; sameDay: boolean };
 		payment: { cod: boolean; card: boolean; gcash: boolean };
+		sameDaySchedule: SameDaySchedule;
+	};
+	// Same Day ordering-window bounds (inclusive): earliest 7:00 AM, latest 5:00 PM.
+	const SAME_DAY_MIN_TIME = '07:00';
+	const SAME_DAY_MAX_TIME = '17:00';
+	const SAME_DAY_DAYS: { key: SameDayDayKey; label: string }[] = [
+		{ key: 'mon', label: 'Mon' },
+		{ key: 'tue', label: 'Tue' },
+		{ key: 'wed', label: 'Wed' },
+		{ key: 'thu', label: 'Thu' },
+		{ key: 'fri', label: 'Fri' },
+		{ key: 'sat', label: 'Sat' },
+		{ key: 'sun', label: 'Sun' },
+	];
+	// Default: Monday–Friday, 10:00 AM – 3:00 PM.
+	const DEFAULT_SAME_DAY_SCHEDULE: SameDaySchedule = {
+		days: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false, sun: false },
+		startTime: '10:00',
+		endTime: '15:00',
 	};
 	const EMPTY_CHECKOUT: CheckoutOptions = {
 		delivery: { standard: false, express: false, pickup: false, sameDay: false },
 		payment: { cod: false, card: false, gcash: false },
+		sameDaySchedule: DEFAULT_SAME_DAY_SCHEDULE,
 	};
 	const DELIVERY_OPTIONS = [
 		{ key: 'standard' as const, label: 'Standard' },
@@ -123,6 +151,43 @@ const SellerProfileTab: React.FC = () => {
 		// Lalamove on-demand delivery (Metro Manila only).
 		{ key: 'sameDay' as const, label: 'Same Day Delivery' },
 	];
+	// Clamp a typed time into the allowed 7:00 AM–5:00 PM window (empty → fallback).
+	const clampSameDayTime = (value: string, fallback: string): string => {
+		if (!value) return fallback;
+		if (value < SAME_DAY_MIN_TIME) return SAME_DAY_MIN_TIME;
+		if (value > SAME_DAY_MAX_TIME) return SAME_DAY_MAX_TIME;
+		return value;
+	};
+	// Returns an error message if the schedule is invalid, else null.
+	const validateSameDaySchedule = (s: SameDaySchedule): string | null => {
+		if (!SAME_DAY_DAYS.some(d => s.days[d.key])) {
+			return 'Select at least one day for Same Day Delivery ordering.';
+		}
+		if (s.startTime < SAME_DAY_MIN_TIME || s.endTime > SAME_DAY_MAX_TIME) {
+			return 'Same Day ordering time must be between 7:00 AM and 5:00 PM.';
+		}
+		if (s.startTime >= s.endTime) {
+			return 'Same Day ordering start time must be earlier than the end time.';
+		}
+		return null;
+	};
+	// '15:00' → '3:00 PM' for read-only display.
+	const formatTime12h = (hhmm: string): string => {
+		const [hStr, mStr] = (hhmm || '').split(':');
+		let h = parseInt(hStr, 10);
+		const m = mStr ?? '00';
+		if (Number.isNaN(h)) return hhmm;
+		const period = h >= 12 ? 'PM' : 'AM';
+		h = h % 12;
+		if (h === 0) h = 12;
+		return `${h}:${m} ${period}`;
+	};
+	const formatSameDayDays = (days: Record<SameDayDayKey, boolean>): string => {
+		const active = SAME_DAY_DAYS.filter(d => days[d.key]);
+		if (active.length === 0) return 'No days set';
+		if (active.length === 7) return 'Every day';
+		return active.map(d => d.label).join(', ');
+	};
 	const PAYMENT_METHODS = [
 		{ key: 'cod' as const, label: 'COD' },
 		{ key: 'card' as const, label: 'Debit / Credit Card' },
@@ -186,9 +251,15 @@ const SellerProfileTab: React.FC = () => {
 
 				// Hydrate top-level Checkout Options independently of vendor profile state
 				const topLevelCheckout = (doc as any)?.checkoutOptions || {};
+				const loadedSchedule = topLevelCheckout.sameDaySchedule || {};
 				const loadedCheckoutTop: CheckoutOptions = {
 					delivery: { ...EMPTY_CHECKOUT.delivery, ...(topLevelCheckout.delivery || {}) },
 					payment: { ...EMPTY_CHECKOUT.payment, ...(topLevelCheckout.payment || {}) },
+					sameDaySchedule: {
+						days: { ...DEFAULT_SAME_DAY_SCHEDULE.days, ...(loadedSchedule.days || {}) },
+						startTime: loadedSchedule.startTime || DEFAULT_SAME_DAY_SCHEDULE.startTime,
+						endTime: loadedSchedule.endTime || DEFAULT_SAME_DAY_SCHEDULE.endTime,
+					},
 				};
 				setCheckoutDraft(loadedCheckoutTop);
 				setOriginalCheckout(loadedCheckoutTop);
@@ -774,6 +845,11 @@ const SellerProfileTab: React.FC = () => {
 										disabled={saving}
 										onClick={async () => {
 											if (!uid) return;
+											// Same Day ordering window must be valid when the option is on.
+											if (checkoutDraft.delivery.sameDay) {
+												const scheduleError = validateSameDaySchedule(checkoutDraft.sameDaySchedule);
+												if (scheduleError) { alert(scheduleError); return; }
+											}
 											setSaving(true);
 											try {
 												await SellersService.saveSellerFields(uid, { checkoutOptions: checkoutDraft });
@@ -812,8 +888,67 @@ const SellerProfileTab: React.FC = () => {
 											</label>
 										))}
 										{checkoutDraft.delivery.sameDay && (
-											<div className="mt-1 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md p-2">
-												Same Day Delivery is <strong>Metro Manila only</strong>. Your store address is used as the rider pickup point — keep it complete and accurate.
+											<div className="mt-2 space-y-3 text-xs bg-indigo-50 border border-indigo-200 rounded-md p-3">
+												<div className="text-indigo-700">
+													Same Day Delivery is <strong>Metro Manila only</strong>. Your store address is used as the rider pickup point — keep it complete and accurate.
+												</div>
+												<div>
+													<div className="font-semibold text-gray-800 mb-1.5">Ordering days</div>
+													<div className="flex flex-wrap gap-1.5">
+														{SAME_DAY_DAYS.map(d => {
+															const active = checkoutDraft.sameDaySchedule.days[d.key];
+															return (
+																<button
+																	key={d.key}
+																	type="button"
+																	onClick={() => setCheckoutDraft(prev => ({
+																		...prev,
+																		sameDaySchedule: {
+																			...prev.sameDaySchedule,
+																			days: { ...prev.sameDaySchedule.days, [d.key]: !active },
+																		},
+																	}))}
+																	className={`px-2.5 py-1 rounded-md border text-xs font-medium transition ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+																>
+																	{d.label}
+																</button>
+															);
+														})}
+													</div>
+												</div>
+												<div className="flex flex-wrap items-end gap-3">
+													<label className="flex flex-col gap-1">
+														<span className="font-semibold text-gray-800">Start time</span>
+														<input
+															type="time"
+															value={checkoutDraft.sameDaySchedule.startTime}
+															min={SAME_DAY_MIN_TIME}
+															max={SAME_DAY_MAX_TIME}
+															step={900}
+															onChange={(e) => setCheckoutDraft(prev => ({
+																...prev,
+																sameDaySchedule: { ...prev.sameDaySchedule, startTime: clampSameDayTime(e.target.value, prev.sameDaySchedule.startTime) },
+															}))}
+															className="px-2 py-1 rounded-md border border-gray-300 text-sm text-gray-800 focus:ring-blue-500 focus:border-blue-500"
+														/>
+													</label>
+													<label className="flex flex-col gap-1">
+														<span className="font-semibold text-gray-800">End time</span>
+														<input
+															type="time"
+															value={checkoutDraft.sameDaySchedule.endTime}
+															min={SAME_DAY_MIN_TIME}
+															max={SAME_DAY_MAX_TIME}
+															step={900}
+															onChange={(e) => setCheckoutDraft(prev => ({
+																...prev,
+																sameDaySchedule: { ...prev.sameDaySchedule, endTime: clampSameDayTime(e.target.value, prev.sameDaySchedule.endTime) },
+															}))}
+															className="px-2 py-1 rounded-md border border-gray-300 text-sm text-gray-800 focus:ring-blue-500 focus:border-blue-500"
+														/>
+													</label>
+												</div>
+												<div className="text-gray-500">Buyers can place Same Day orders only on the selected days between these times. Allowed range: 7:00 AM–5:00 PM.</div>
 											</div>
 										)}
 									</div>
@@ -826,6 +961,12 @@ const SellerProfileTab: React.FC = () => {
 										))}
 										{!DELIVERY_OPTIONS.some(o => originalCheckout.delivery[o.key]) && (
 											<span className="text-sm text-gray-400">No delivery options set yet.</span>
+										)}
+										{originalCheckout.delivery.sameDay && (
+											<div className="mt-1 w-full text-xs text-gray-600">
+												<span className="font-medium text-gray-700">Same Day window:</span>{' '}
+												{formatSameDayDays(originalCheckout.sameDaySchedule.days)} · {formatTime12h(originalCheckout.sameDaySchedule.startTime)}–{formatTime12h(originalCheckout.sameDaySchedule.endTime)}
+											</div>
 										)}
 									</div>
 								)}
