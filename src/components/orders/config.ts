@@ -56,6 +56,17 @@ export const isPickupOrder = (o: Order): boolean => {
 /** Same Day Delivery (Lalamove) orders — mirrors isPickupOrder. */
 export const isSameDayOrder = (o: Order): boolean => {
   if (PICKUP_TERMINAL_STATUSES.has(o.status)) return false;
+  return isSameDayShipping(o);
+};
+
+/**
+ * Status-independent Same Day (Lalamove) detection, based purely on the order's
+ * shipping mode — mirrors the "Same Day" badge in OrderRow. Unlike isSameDayOrder
+ * (which excludes terminal statuses for the active Shipping/Same Day tab
+ * predicates), this stays true for completed/returned/cancelled Same Day orders,
+ * so list ordering can keep floating them to the top regardless of status.
+ */
+export const isSameDayShipping = (o: Order): boolean => {
   const norm = (m?: string) => String(m || '').toLowerCase();
   if (Array.isArray(o.sellerFeeBreakdowns) && o.sellerFeeBreakdowns.some(b => norm(b?.shippingMode) === 'sameday')) {
     return true;

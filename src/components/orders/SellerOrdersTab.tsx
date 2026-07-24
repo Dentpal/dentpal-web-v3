@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Order } from '@/types/order';
 import { Search, RefreshCcw, ShoppingCart, Printer } from 'lucide-react';
-import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage, SHIPPING_METHOD_SUB_TABS, ShippingMethod, orderUsesMethod, isSameDayOrder } from './config';
+import { SUB_TABS, mapOrderToStage, LifecycleStage, TO_SHIP_SUB_TABS, ToShipStage, SHIPPING_METHOD_SUB_TABS, ShippingMethod, orderUsesMethod, isSameDayOrder, isSameDayShipping } from './config';
 import AllOrdersView from './views/AllOrdersView';
 // Hidden views - orders go directly to to-ship after payment
 // import UnpaidOrdersView from './views/UnpaidOrdersView';
@@ -65,6 +65,10 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   const [paymentType, setPaymentType] = useState<string>('');
   const [status, setStatus] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<LifecycleStage>('all');
+  // Order-by direction for the list. 'lifo' = newest first (default),
+  // 'fifo' = oldest first. Same Day (Lalamove) orders are always floated to
+  // the top regardless, then ordered within their group by this direction.
+  const [sortOrder, setSortOrder] = useState<'fifo' | 'lifo'>('lifo');
   
   // Date picker states (similar to Sales Summary)
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -214,7 +218,7 @@ export const OrderTab: React.FC<OrderTabProps> = ({
   };
 
   // Reset to first page when filters or tab change
-  useEffect(() => { setPage(1); }, [activeSubTab, dateFrom, dateTo]);
+  useEffect(() => { setPage(1); }, [activeSubTab, dateFrom, dateTo, sortOrder]);
 
   // Reset to-ship sub-tab when switching to to-ship
   useEffect(() => {
@@ -301,14 +305,22 @@ export const OrderTab: React.FC<OrderTabProps> = ({
       }
       return true;
     });
-    // Prioritize Same Day (Lalamove) orders at the top of the To Ship sub-tabs
-    // (To Pack / To Arrangement / To Hand Over). Array.sort is stable, so the
-    // relative order within each group is preserved.
-    if (activeSubTab === 'to-ship') {
-      result.sort((a, b) => (isSameDayOrder(b) ? 1 : 0) - (isSameDayOrder(a) ? 1 : 0));
-    }
+    // Ordering rules (applied to every tab):
+    //  1. Same Day (Lalamove) orders are always floated to the top — regardless
+    //     of status, so completed/returned/cancelled Same Day orders still lead.
+    //     (Uses isSameDayShipping, not the status-aware isSameDayOrder.)
+    //  2. Within each group (same-day and the rest) orders follow the seller's
+    //     chosen direction: FIFO = oldest first, LIFO = newest first — based on
+    //     order creation time.
+    const ts = (o: Order) => new Date(o.createdAt || o.timestamp).getTime();
+    result.sort((a, b) => {
+      const sameA = isSameDayShipping(a);
+      const sameB = isSameDayShipping(b);
+      if (sameA !== sameB) return sameA ? -1 : 1; // Same Day always on top
+      return sortOrder === 'fifo' ? ts(a) - ts(b) : ts(b) - ts(a);
+    });
     return result;
-  }, [dateFilteredOrders, activeSubTab, toShipSubTab, methodSubTab, query]);
+  }, [dateFilteredOrders, activeSubTab, toShipSubTab, methodSubTab, query, sortOrder]);
 
   // Counts for the shipping-method sub-tabs (over orders in the Shipping stage).
   const countsByMethodSubTab = useMemo(() => {
@@ -1577,9 +1589,9 @@ export const OrderTab: React.FC<OrderTabProps> = ({
         </div>
       </div>
 
-      {/* Date Filter Section with Calendar Picker */}
+      {/* Filters Section (date range + order-by) with Calendar Picker */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-        <div className="text-sm font-semibold text-gray-900 mb-3">Date Filter</div>
+        <div className="text-sm font-semibold text-gray-900 mb-3">Filters</div>
         <div className="flex flex-col lg:flex-row lg:items-end lg:space-x-4 gap-4">
           <div className="flex-1 min-w-[160px]">
             <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -1663,15 +1675,44 @@ export const OrderTab: React.FC<OrderTabProps> = ({
               )}
             </div>
           </div>
+          <div className="min-w-[220px]">
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Order by
+            </label>
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setSortOrder('lifo')}
+                aria-pressed={sortOrder === 'lifo'}
+                title="Newest orders first"
+                className={`px-3 py-2 text-xs font-medium transition ${sortOrder === 'lifo' ? 'bg-teal-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              >
+                Newest first
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOrder('fifo')}
+                aria-pressed={sortOrder === 'fifo'}
+                title="Oldest orders first"
+                className={`px-3 py-2 text-xs font-medium transition border-l border-gray-200 ${sortOrder === 'fifo' ? 'bg-teal-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              >
+                Oldest first
+              </button>
+            </div>
+          </div>
           <div className="flex items-end gap-2 pt-2">
             <button
               type="button"
-              onClick={clearDateFilter}
+              onClick={() => { clearDateFilter(); setSortOrder('lifo'); }}
               className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition"
             >
               Reset
             </button>
           </div>
+        </div>
+        {/* Same Day (Lalamove) orders are always shown on top, then ordered by the selection above. */}
+        <div className="mt-2 text-[11px] text-gray-500">
+          Same Day (Lalamove) orders always appear on top, ordered by your selection.
         </div>
       </div>
 
