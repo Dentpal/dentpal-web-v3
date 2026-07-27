@@ -7,6 +7,7 @@ export type CreateProductInput = {
   name: string;
   description?: string;
   imageURL?: string;
+  thumbnailURL?: string | null;
   images?: string[];
   imageVersion?: string | null;
   categoryID?: string | null;
@@ -150,6 +151,7 @@ export const ProductService = {
       name: input.name,
       description: input.description ?? '',
       imageURL: input.imageURL ?? '',
+      thumbnailURL: input.thumbnailURL ?? null,
       images: Array.isArray(input.images) ? input.images : (input.imageURL ? [input.imageURL] : []),
       imageVersion: input.imageVersion ?? null,
       categoryID: input.categoryID ?? null,
@@ -200,6 +202,7 @@ export const ProductService = {
     dimensionsUnit?: string;
     dimensions?: { length?: number; width?: number; height?: number } | null;
     imageURL?: string | null;
+    thumbnailURL?: string | null;
     name?: string;
     pcsPerBox?: number | null;
     isFragile?: boolean;
@@ -228,6 +231,7 @@ export const ProductService = {
         // Keep legacy `dimensions` for backward compatibility
         dimensions: dim ?? null,
         imageURL: v.imageURL ?? null,
+        thumbnailURL: v.thumbnailURL ?? null,
         name: v.name ?? null,
         pcsPerBox: v.pcsPerBox ?? null,
         isFragile: v.isFragile ?? false,
@@ -513,6 +517,7 @@ export const ProductService = {
     dimensions?: { length?: number; width?: number; height?: number };
     dimensionsUnit?: string;
     imageURL?: string;
+    thumbnailURL?: string;
     isFragile?: boolean;
     pcsPerBox?: number;
   }) {
@@ -532,6 +537,7 @@ export const ProductService = {
     if (updates.weightUnit !== undefined) updateData.weightUnit = updates.weightUnit;
     if (updates.dimensionsUnit !== undefined) updateData.dimensionsUnit = updates.dimensionsUnit;
     if (updates.imageURL !== undefined) updateData.imageURL = updates.imageURL;
+    if (updates.thumbnailURL !== undefined) updateData.thumbnailURL = updates.thumbnailURL;
     if (updates.isFragile !== undefined) updateData.isFragile = updates.isFragile;
     if (updates.pcsPerBox !== undefined) updateData.pcsPerBox = Number(updates.pcsPerBox);
     
@@ -575,6 +581,7 @@ export const ProductService = {
     brand: string;
     description: string;
     imageURL: string;
+    thumbnailURL: string | null;
     images: string[];
     brandImage: string | null;
     categoryID: string | null;
@@ -597,6 +604,7 @@ export const ProductService = {
       ...(updates.brand !== undefined ? { brand: updates.brand } : {}),
       ...(updates.description !== undefined ? { description: updates.description } : {}),
       ...(updates.imageURL !== undefined ? { imageURL: updates.imageURL } : {}),
+      ...(updates.thumbnailURL !== undefined ? { thumbnailURL: updates.thumbnailURL } : {}),
       ...(updates.images !== undefined ? { images: Array.isArray(updates.images) ? updates.images : [] } : {}),
       ...(updates.brandImage !== undefined ? { brandImage: updates.brandImage } : {}),
       ...(updates.categoryID !== undefined ? { categoryID: updates.categoryID } : {}),

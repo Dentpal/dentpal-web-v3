@@ -14,6 +14,7 @@ import { ProductService } from '@/services/product';
 import CategoryService from '@/services/category';
 import { storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import imageCompression from 'browser-image-compression';
 
 /* ─── Constants ──────────────────────────────────────────────────── */
 
@@ -215,6 +216,26 @@ const uploadIfFile = async (file: File | null, path: string): Promise<string> =>
   return getDownloadURL(r);
 };
 
+// Generate + upload a small WebP thumbnail (stored as `thumbnailURL`), used by
+// the buyer app's product grids/lists. Returns '' if unavailable.
+const uploadThumbnailIfFile = async (file: File | null, sellerId: string): Promise<string> => {
+  if (!file) return '';
+  try {
+    const thumb = (await imageCompression(file, {
+      maxSizeMB: 0.08,
+      maxWidthOrHeight: 400,
+      fileType: 'image/webp',
+      useWebWorker: true,
+    })) as Blob;
+    const r = storageRef(storage, `products/${sellerId}/thumb/${Date.now()}.webp`);
+    await uploadBytes(r, thumb, { contentType: 'image/webp' });
+    return await getDownloadURL(r);
+  } catch (e) {
+    console.warn('Bulk thumbnail generation failed:', e);
+    return '';
+  }
+};
+
 /* ─── Shared cell styles ─────────────────────────────────────────── */
 
 const cellBase = 'border border-gray-300 text-[11px]';
@@ -330,11 +351,12 @@ const BulkAddItems: React.FC = () => {
         const now = Date.now();
         const brandImageURL   = await uploadIfFile(p.brandImgFile, `products/${sellerId}/brand/${now}_${p.brandImgFile?.name || 'brand'}`);
         const productImageURL = await uploadIfFile(p.prodImgFile,  `products/${sellerId}/${now}_${p.prodImgFile?.name || 'product'}`);
+        const productThumbnailURL = await uploadThumbnailIfFile(p.prodImgFile, sellerId);
         const { id: productId } = await ProductService.createProduct({
           sellerId, brand: p.brand, brandImage: brandImageURL || null,
           name: p.name, description: p.description,
           categoryID: p.categoryID, subCategoryID: p.subCategoryID || '',
-          imageURL: productImageURL || '', status: 'pending_qc' as const,
+          imageURL: productImageURL || '', thumbnailURL: productThumbnailURL || null, status: 'pending_qc' as const,
           dangerousGoods: (p.dangerousGoods && p.dangerousGoods !== 'none') ? 'dangerous' : 'none',
           warrantyType: p.warrantyType || null,
           warrantyDuration: p.warrantyDuration ? `${p.warrantyDuration} month` : null,
@@ -343,8 +365,9 @@ const BulkAddItems: React.FC = () => {
         } as any);
         const vars = await Promise.all(p.variations.map(async v => {
           const varImgURL = await uploadIfFile(v.imgFile, `products/${sellerId}/variations/${Date.now()}_${v.imgFile?.name || 'var'}`);
+          const varThumbURL = await uploadThumbnailIfFile(v.imgFile, sellerId);
           return {
-            name: v.name, sku: v.sku, price: Number(v.price) || 0, imageURL: varImgURL || null,
+            name: v.name, sku: v.sku, price: Number(v.price) || 0, imageURL: varImgURL || null, thumbnailURL: varThumbURL || null,
             weight: v.weight ? Number(v.weight) : null, weightUnit: 'g',
             dimensions: { length: v.length ? Number(v.length) : null, width: v.width ? Number(v.width) : null, height: v.height ? Number(v.height) : null },
             dimensionsUnit: 'cm', pcsPerBox: v.pcsPerBox ? Number(v.pcsPerBox) : null,

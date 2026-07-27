@@ -106,12 +106,16 @@ const ProfileUpload: React.FC<ProfileUploadProps> = ({
       if (!(await validateAspectRatio(selectedFile))) {
         return;
       }
-      // Compress the image before upload
-      const compressedFile = await imageCompression(selectedFile, {
+      // Compress + convert to WebP before upload (smaller payload for the
+      // store cover/logo shown in the buyer app).
+      const compressedBlob = await imageCompression(selectedFile, {
         maxSizeMB: 0.5, // target max size in MB
         maxWidthOrHeight: 1024, // optional: resize
+        fileType: 'image/webp',
         useWebWorker: true,
       });
+      const webpName = selectedFile.name.replace(/\.[^.]+$/, '') + '.webp';
+      const compressedFile = new File([compressedBlob], webpName, { type: 'image/webp' });
       // Upload to Firebase Storage
       const uploadResult = await SellersService.uploadImage(uid, compressedFile, 'SellerImages');
       // Save to Firestore Seller.vendor.profileImage or coverImage

@@ -33,6 +33,42 @@ const compressForUpload = async (file: File): Promise<File> => {
     return file;
   }
 };
+
+// Small WebP thumbnail for product grids/lists/carts in the buyer app. Stored
+// alongside the full image as `thumbnailURL`; the buyer app reads that field and
+// never regenerates. Returns null if encoding fails (caller falls back to the
+// full image URL).
+const makeThumbnail = async (file: File): Promise<File | null> => {
+  try {
+    const thumb = (await imageCompression(file, {
+      maxSizeMB: 0.08,
+      maxWidthOrHeight: 400,
+      fileType: 'image/webp',
+      useWebWorker: true,
+    })) as Blob;
+    const name = file.name.replace(/\.[^.]+$/, '') + '.webp';
+    if (thumb instanceof File && thumb.type === 'image/webp') return thumb;
+    return new File([thumb], name, { type: 'image/webp' });
+  } catch (err) {
+    console.warn('Thumbnail generation failed:', err);
+    return null;
+  }
+};
+
+// Generate + upload a WebP thumbnail from the primary image slot, returning its
+// download URL (or '' when unavailable — e.g. an unchanged, previously-uploaded
+// image where we only have a URL and no File to downscale).
+const uploadThumbnail = async (
+  file: File | undefined,
+  sellerId: string,
+): Promise<string> => {
+  if (!file) return '';
+  const thumb = await makeThumbnail(file);
+  if (!thumb) return '';
+  const thumbRef = storageRef(storage, `products/${sellerId}/thumb/${Date.now()}.webp`);
+  await uploadBytes(thumbRef, thumb);
+  return await getDownloadURL(thumbRef);
+};
 type ThumbnailSlot = { file: File | null; preview: string | null; url: string };
 
 // Helper: convert weight to grams
@@ -296,6 +332,10 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         }
       }
       const imageURL = uploadedImages[0] || '';
+      const thumbnailURL = await uploadThumbnail(
+        form.thumbnails.find((s) => s.file)?.file,
+        effectiveSellerId,
+      );
 
       // Upload brand image if provided
       let brandImageURL = form.brandImageURL;
@@ -315,6 +355,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         categoryID: form.categoryID,
         subCategoryID: form.subCategoryID || '',
         imageURL: imageURL,
+        thumbnailURL: thumbnailURL || null,
         images: uploadedImages,
         status: 'pending_qc' as const, // Always pending QC first
         price: form.price || 0,
@@ -339,10 +380,17 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
             if (!variation.name || !variation.SKU) return null;
 
             let varImageURL = variation.imageURL;
+            let varThumbnailURL: string | null = null;
             if (variation.imageFile) {
               const varImgRef = storageRef(storage, `products/${effectiveSellerId}/variations/${Date.now()}_${variation.imageFile.name}`);
               await uploadBytes(varImgRef, variation.imageFile);
               varImageURL = await getDownloadURL(varImgRef);
+              const varThumb = await makeThumbnail(variation.imageFile);
+              if (varThumb) {
+                const varThumbRef = storageRef(storage, `products/${effectiveSellerId}/variations/thumb/${Date.now()}.webp`);
+                await uploadBytes(varThumbRef, varThumb);
+                varThumbnailURL = await getDownloadURL(varThumbRef);
+              }
             }
 
             // Convert weight and dimensions to base units
@@ -356,6 +404,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               sku: variation.SKU,
               price: variation.price !== undefined ? Number(variation.price) : 0,
               imageURL: varImageURL,
+              thumbnailURL: varThumbnailURL,
               weight: weightInGrams,
               weightUnit: 'g',
               dimensions: {
@@ -418,6 +467,10 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         }
       }
       const imageURL = uploadedImages[0] || '';
+      const thumbnailURL = await uploadThumbnail(
+        form.thumbnails.find((s) => s.file)?.file,
+        effectiveSellerId,
+      );
 
       // Upload brand image if provided
       let brandImageURLDraft = form.brandImageURL;
@@ -437,6 +490,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         categoryID: form.categoryID || '',
         subCategoryID: form.subCategoryID || '',
         imageURL: imageURL || '',
+        thumbnailURL: thumbnailURL || null,
         images: uploadedImages,
         status: 'draft' as const,
         price: form.price || 0,
@@ -459,10 +513,17 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
         const variationsData = await Promise.all(
           form.variations.map(async (variation) => {
             let varImageURL = variation.imageURL;
+            let varThumbnailURL: string | null = null;
             if (variation.imageFile) {
               const varImgRef = storageRef(storage, `products/${effectiveSellerId}/variations/${Date.now()}_${variation.imageFile.name}`);
               await uploadBytes(varImgRef, variation.imageFile);
               varImageURL = await getDownloadURL(varImgRef);
+              const varThumb = await makeThumbnail(variation.imageFile);
+              if (varThumb) {
+                const varThumbRef = storageRef(storage, `products/${effectiveSellerId}/variations/thumb/${Date.now()}.webp`);
+                await uploadBytes(varThumbRef, varThumb);
+                varThumbnailURL = await getDownloadURL(varThumbRef);
+              }
             }
 
             const weightInGrams = toGrams(variation.weight, variation.weightUnit);
@@ -475,6 +536,7 @@ const AddItem: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
               sku: variation.SKU || '',
               price: variation.price !== undefined ? Number(variation.price) : 0,
               imageURL: varImageURL,
+              thumbnailURL: varThumbnailURL,
               weight: weightInGrams,
               weightUnit: 'g',
               dimensions: {
