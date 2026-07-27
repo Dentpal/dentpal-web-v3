@@ -587,6 +587,10 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
 
   const isAllowed = (itemId: string) => {
     if (itemId === 'profile' && isAdmin) return false;
+    if (itemId === 'withdrawal') {
+      if (isSubAccount) return false;        // sub-accounts never see withdrawal
+      if (isSeller && !isAdmin) return true; // always allow the primary seller
+    }
     return hasPermission((permissionByMenuId[itemId] || 'dashboard') as any);
   };
 

@@ -186,6 +186,8 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
           if (item.id === 'customers' && isAdmin) return false; // Hide customers for admin
           if (item.id === 'seller-performance' && !isAdmin) return false; // Admin-only reputation hub
           if (isAdmin && ['seller-orders','inventory','inventory-control','stock-adjustment','items','sub-accounts','vouchers','customers'].includes(item.id)) return false;
+          if (item.id === 'withdrawal' && isSubAccount) return false; // Withdrawal is parent-seller only
+          if (item.id === 'withdrawal' && isSeller && !isAdmin && !isSubAccount) return true; // Always show for the primary seller, regardless of stored permission
           const key = permissionByMenuId[item.id];
 
           if (isSubAccount) {
@@ -200,7 +202,7 @@ const Sidebar = ({ activeItem, onItemClick, onLogout }: SidebarProps) => {
         if (isSubAccount) {
           permitted = permitted.filter((i) => i.id !== 'access' && i.id !== 'sub-accounts' && i.id !== 'profile');
           // Apply same ordering as sellers for sub-accounts
-          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'withdrawal', 'vouchers', 'customers'];
+          const subAccountOrder = ['dashboard', 'seller-orders', 'inventory', 'items', 'chats', 'vouchers', 'customers'];
           const map = new Map(permitted.map((i) => [i.id, i] as const));
           const ordered = subAccountOrder.map((id) => map.get(id)).filter(Boolean) as typeof permitted;
           return ordered;
