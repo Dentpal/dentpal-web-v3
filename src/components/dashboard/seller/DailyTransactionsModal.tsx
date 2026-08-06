@@ -69,6 +69,12 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   'debit/credit': 'Debit/Credit',
   debit_credit: 'Debit/Credit',
   card: 'Debit/Credit',
+  grab_pay: 'Grab Pay',
+  grabpay: 'Grab Pay',
+  paymaya: 'Maya',
+  maya: 'Maya',
+  shopee_pay: 'Shopee Pay',
+  shopeepay: 'Shopee Pay',
 };
 
 const resolvePaymentMethod = (o: Order): string => {

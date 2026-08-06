@@ -69,11 +69,25 @@ const resolveNet = (o: Order) =>
 
 const netClass = (n: number) => (n < 0 ? 'text-red-600' : 'text-green-700');
 
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash_on_delivery: 'COD',
+  cod: 'COD',
+  gcash: 'G-Cash',
+  'debit/credit': 'Debit/Credit',
+  debit_credit: 'Debit/Credit',
+  card: 'Debit/Credit',
+  grab_pay: 'Grab Pay',
+  grabpay: 'Grab Pay',
+  paymaya: 'Maya',
+  maya: 'Maya',
+  shopee_pay: 'Shopee Pay',
+  shopeepay: 'Shopee Pay',
+};
+
 const formatPaymentMethod = (o: Order) => {
   const raw = (o.feesBreakdown?.paymentMethod || o.paymentType || '').toString().trim();
   if (!raw) return '—';
-  if (raw.toLowerCase() === 'cash_on_delivery') return 'COD';
-  return raw;
+  return PAYMENT_METHOD_LABELS[raw.toLowerCase()] || raw;
 };
 
 const statusConfig: Record<string, { bg: string; text: string; label: string }> = {

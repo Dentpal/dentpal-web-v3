@@ -118,7 +118,16 @@ const SellerProfileTab: React.FC = () => {
 	};
 	type CheckoutOptions = {
 		delivery: { standard: boolean; express: boolean; pickup: boolean; sameDay: boolean };
-		payment: { cod: boolean; card: boolean; gcash: boolean };
+		// Keys match PayMongo's payment_method_types so the seller config, the
+		// checkout-session payload and the stored order paymentMethod all agree.
+		payment: {
+			cod: boolean;
+			card: boolean;
+			gcash: boolean;
+			grab_pay: boolean;
+			paymaya: boolean;
+			shopee_pay: boolean;
+		};
 		sameDaySchedule: SameDaySchedule;
 	};
 	// Same Day ordering-window bounds (inclusive): earliest 7:00 AM, latest 5:00 PM.
@@ -141,7 +150,7 @@ const SellerProfileTab: React.FC = () => {
 	};
 	const EMPTY_CHECKOUT: CheckoutOptions = {
 		delivery: { standard: false, express: false, pickup: false, sameDay: false },
-		payment: { cod: false, card: false, gcash: false },
+		payment: { cod: false, card: false, gcash: false, grab_pay: false, paymaya: false, shopee_pay: false },
 		sameDaySchedule: DEFAULT_SAME_DAY_SCHEDULE,
 	};
 	const DELIVERY_OPTIONS = [
@@ -192,6 +201,9 @@ const SellerProfileTab: React.FC = () => {
 		{ key: 'cod' as const, label: 'COD' },
 		{ key: 'card' as const, label: 'Debit / Credit Card' },
 		{ key: 'gcash' as const, label: 'GCash' },
+		{ key: 'grab_pay' as const, label: 'Grab Pay' },
+		{ key: 'paymaya' as const, label: 'Maya' },
+		{ key: 'shopee_pay' as const, label: 'Shopee Pay' },
 	];
 	const [checkoutDraft, setCheckoutDraft] = useState<CheckoutOptions>(EMPTY_CHECKOUT);
 	const [originalCheckout, setOriginalCheckout] = useState<CheckoutOptions>(EMPTY_CHECKOUT);
