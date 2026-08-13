@@ -14,6 +14,7 @@ import type { Order } from '@/types/order';
 import { formatCurrency } from '@/utils/dashboard/formatters';
 import { useCategoryResolution } from '@/hooks/dashboard/useCategoryResolution';
 import type { SellerCustomer } from '@/hooks/useSellerCustomers';
+import maskName from '@/utils/maskName';
 
 interface CustomerDetailModalProps {
   customer: SellerCustomer;
@@ -170,7 +171,7 @@ export const CustomerDetailModal = ({ customer, orders, onClose, onBlock, onUnbl
                 <Initials name={customer.name} />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-lg font-bold truncate">{customer.name || '—'}</h3>
+                    <h3 className="text-lg font-bold truncate">{maskName(customer.name) || '—'}</h3>
                     {customer.blocked ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-700">
                         <ShieldOff className="w-3 h-3" /> Banned

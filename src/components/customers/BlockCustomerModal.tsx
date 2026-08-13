@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 import type { SellerCustomer } from '@/hooks/useSellerCustomers';
+import maskName from '@/utils/maskName';
 
 interface BlockCustomerModalProps {
   customer: SellerCustomer;
@@ -53,7 +54,7 @@ export const BlockCustomerModal = ({ customer, mode, onConfirm, onClose }: Block
 
           <div className="px-6 py-4 space-y-4">
             <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-sm">
-              <div className="font-semibold text-gray-900">{customer.name || '—'}</div>
+              <div className="font-semibold text-gray-900">{maskName(customer.name) || '—'}</div>
               {customer.email && <div className="text-xs text-gray-500">{customer.email}</div>}
               <div className="text-xs text-gray-600 mt-1.5">
                 {customer.totalOrders} order{customer.totalOrders === 1 ? '' : 's'} ·{' '}

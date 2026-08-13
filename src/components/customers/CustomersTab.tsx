@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth';
 import OrdersService from '@/services/orders';
 import SellersService, { type BanHandler } from '@/services/sellers';
 import useSellerCustomers, { type SellerCustomer } from '@/hooks/useSellerCustomers';
+import maskName from '@/utils/maskName';
 import type { Order } from '@/types/order';
 import BlockCustomerModal from './BlockCustomerModal';
 import CustomerDetailModal from './CustomerDetailModal';
@@ -215,7 +216,7 @@ export const CustomersTab = () => {
                       <div className="flex items-center gap-3">
                         <Initials name={c.name} />
                         <div>
-                          <div className="font-medium text-gray-900 text-sm">{c.name || '—'}</div>
+                          <div className="font-medium text-gray-900 text-sm">{maskName(c.name) || '—'}</div>
                           {c.email && <div className="text-xs text-gray-500">{c.email}</div>}
                         </div>
                       </div>
